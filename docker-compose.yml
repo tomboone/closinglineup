@@ -31,7 +31,7 @@ services:
       PYTHONPYCACHEPREFIX: /tmp/pycache
     volumes:
       # The source is bind-mounted and installed editable, so every `exec` runs the code on
-      # disk with no rebuild. The API ticket swaps the idle command for `closinglineup api`.
+      # disk with no rebuild. NEU-1852 swaps the idle command for the reloading API server.
       - ./backend:/app
       # Shadows the host's macOS `.venv` with the container's Linux one.
       - app-venv:/app/.venv
