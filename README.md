@@ -6,7 +6,7 @@ It runs entirely on a home server and is reached over a private tailnet. Nothing
 
 ## Status
 
-Planning complete; implementation has not started. See:
+Implementation is under way, starting with the backend scaffold. See:
 
 - `docs/specs/closinglineup-v1-rotation-and-value-dashboard-project-spec.md` — the project-wide spec every ticket is built from
 - `CONTEXT.md` — the glossary
@@ -19,6 +19,15 @@ Planning complete; implementation has not started. See:
 backend/    Python 3.13, FastAPI, SQLAlchemy, Alembic, APScheduler
 frontend/   React, Vite, TypeScript, ECharts
 deploy/     compose file and runbook for the home server
+```
+
+## Backend development
+
+```bash
+cd backend
+uv sync
+uv run closinglineup --help
+uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
 ```
 
 ## License
