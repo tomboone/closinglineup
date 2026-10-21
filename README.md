@@ -36,10 +36,22 @@ docker compose exec -T app uv run ruff check . && docker compose exec -T app uv 
 
 New migrations: `docker compose exec -T app uv run alembic revision --autogenerate -m "…"`.
 
-Pre-commit hooks (ruff, pyright) also run inside the container, so `app` must be up to commit:
+Pre-commit hooks (ruff, pyright, oxlint) also run inside the containers, so `app` and `frontend`
+must be up to commit:
 
 ```bash
 pre-commit install
+```
+
+## Frontend development
+
+The `frontend` container runs the Vite dev server on http://localhost:5173 with `frontend/`
+bind-mounted, and proxies `/api` to `app`.
+
+```bash
+docker compose exec -T frontend pnpm lint && docker compose exec -T frontend pnpm tsc -b \
+  && docker compose exec -T frontend pnpm test
+docker compose exec -T frontend pnpm build   # → frontend/dist/
 ```
 
 ## License
