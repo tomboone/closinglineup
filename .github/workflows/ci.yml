@@ -38,9 +38,25 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # The migration and `health` tests need a real Postgres; without one they skip.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: closinglineup
+          POSTGRES_PASSWORD: closinglineup
+          POSTGRES_DB: closinglineup
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U closinglineup -d closinglineup"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
     env:
       # Keep `uv run` from re-locking; every step uses uv.lock as committed.
       UV_FROZEN: "1"
+      DATABASE_URL: postgresql+psycopg://closinglineup:closinglineup@localhost:5432/closinglineup
     steps:
       - name: Checkout
         uses: actions/checkout@v7

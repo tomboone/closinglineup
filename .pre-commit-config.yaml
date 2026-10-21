@@ -1,0 +1,35 @@
+# Every hook runs inside the `app` dev container, never on the host, so a commit is checked
+# against the exact ruff and pyright that `backend/uv.lock` pins (spec §2). `-T` disables TTY
+# allocation, which pre-commit needs. `docker compose up -d` must be running for a commit.
+#
+# pre-commit passes paths relative to the repo root while the container's working directory is
+# `backend/`, so the hooks check the whole backend rather than the staged files.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (container)
+        entry: docker compose exec -T app uv run ruff check --fix .
+        language: system
+        files: ^backend/
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff-format (container)
+        entry: docker compose exec -T app uv run ruff format .
+        language: system
+        files: ^backend/
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+
+      - id: pyright
+        name: pyright (container)
+        entry: docker compose exec -T app uv run pyright
+        language: system
+        files: ^backend/
+        types: [python]
+        pass_filenames: false
+        require_serial: true
