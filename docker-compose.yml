@@ -1,5 +1,6 @@
 # Local development only; kumadrome runs deploy/docker-compose.yml (spec §12). Every tool runs
-# inside `app`, never on the host: `docker compose exec -T app uv run <tool>`.
+# inside a container, never on the host: `docker compose exec -T app uv run <tool>` for the
+# backend, `docker compose exec -T frontend pnpm <script>` for the frontend.
 name: closinglineup
 
 services:
@@ -44,7 +45,30 @@ services:
       postgres:
         condition: service_healthy
 
+  frontend:
+    image: node:22
+    working_dir: /app
+    environment:
+      # `/api` goes to the backend service; nothing listens there until NEU-1852.
+      API_PROXY_TARGET: http://app:8000
+      # corepack fetches the pnpm that `packageManager` pins without asking first.
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      # pnpm's store on the cache volume; it copies rather than hardlinks into node_modules.
+      npm_config_store_dir: /root/.cache/pnpm-store
+    volumes:
+      - ./frontend:/app
+      # Shadows any host `node_modules` with the container's Linux one.
+      - frontend-node-modules:/app/node_modules
+      # corepack's pnpm download and the pnpm store, kept across container recreation.
+      - frontend-cache:/root/.cache
+    ports:
+      - "5173:5173"
+    command: ["sh", "-c", "corepack enable && pnpm install --frozen-lockfile && exec pnpm dev"]
+    init: true
+
 volumes:
   postgres-data:
   app-venv:
   cache:
+  frontend-node-modules:
+  frontend-cache:
