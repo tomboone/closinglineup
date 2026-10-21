@@ -1,6 +1,8 @@
 import re
+from typing import Any
 
 import pytest
+import uvicorn
 from typer.testing import CliRunner
 
 from closinglineup.cli import COMMANDS, app
@@ -9,7 +11,7 @@ runner = CliRunner()
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 EXPECTED = ["fetch", "parse", "load", "derive", "overlays", "api", "worker", "health", "reparse"]
-STUBS = [command for command in EXPECTED if command != "health"]
+STUBS = [command for command in EXPECTED if command not in {"health", "api"}]
 
 
 def test_help_lists_the_nine_commands() -> None:
@@ -50,3 +52,21 @@ def test_health_exits_1_when_the_database_is_down(monkeypatch: pytest.MonkeyPatc
     assert result.exit_code == 1
     assert "health: database unreachable" in result.output
     assert "secret" not in result.output
+
+
+def test_api_serves_the_app_factory_with_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def fake_run(*args: Any, **kwargs: Any) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+
+    result = runner.invoke(app, ["api", "--port", "8123"])
+
+    assert result.exit_code == 0, result.output
+    [(args, kwargs)] = calls
+    assert args == ("closinglineup.api.app:asgi",)
+    assert kwargs["factory"] is True
+    assert (kwargs["host"], kwargs["port"], kwargs["reload"]) == ("0.0.0.0", 8123, False)
+    assert kwargs["reload_dirs"] is None

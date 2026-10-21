@@ -10,6 +10,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# The frontend bundle, copied in by the image build only
+/backend/src/closinglineup/api/static/
+
 # Local data volume (raw cache, parquet, pbpstats)
 /data/
 /backend/data/
