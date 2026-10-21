@@ -1,7 +1,7 @@
 # Every hook runs inside a dev container, never on the host, so a commit is checked against the
 # exact ruff and pyright that `backend/uv.lock` pins and the oxlint `frontend/pnpm-lock.yaml`
-# pins (spec §2). `-T` disables TTY
-# allocation, which pre-commit needs. `docker compose up -d` must be running for a commit.
+# pins (spec §2). `-T` disables TTY allocation, which pre-commit needs. `docker compose up -d`
+# must be running for a commit.
 #
 # pre-commit passes paths relative to the repo root while each container's working directory is
 # its own package, so the hooks check the whole package rather than the staged files.
