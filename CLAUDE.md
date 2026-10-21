@@ -9,6 +9,10 @@ Private, single-user NBA rotation & value dashboard: per-player rotation state (
 - linear_repo: closinglineup
 - Project: P-NEU-101 "closinglineup v1: rotation & value dashboard"
 
+## Toolchain
+
+Backend (`backend/`): uv, ruff, pyright strict, pytest, Python 3.13. From `backend/`, `uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest` before opening a PR; CI runs the same.
+
 ## Docs
 
 - specs_dir: docs

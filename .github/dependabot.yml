@@ -1,0 +1,56 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "09:00"
+      timezone: "America/New_York"
+    target-branch: "updates/dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      python:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # The npm ecosystem reads pnpm-lock.yaml.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "09:00"
+      timezone: "America/New_York"
+    target-branch: "updates/dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      frontend:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "09:00"
+      timezone: "America/New_York"
+    target-branch: "updates/dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"

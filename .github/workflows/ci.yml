@@ -1,0 +1,126 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Job-level path filters rather than workflow-level `paths:`, so a skipped job still reports a
+  # status and can be a required check (spec §3.1).
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v4.0.3
+        with:
+          filters: |
+            backend:
+              - "backend/**"
+              - ".github/workflows/ci.yml"
+            frontend:
+              - "frontend/**"
+              - ".github/workflows/ci.yml"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    # The migration and `health` tests need a real Postgres; without one they skip.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: closinglineup
+          POSTGRES_PASSWORD: closinglineup
+          POSTGRES_DB: closinglineup
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U closinglineup -d closinglineup"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      # Keep `uv run` from re-locking; every step uses uv.lock as committed.
+      UV_FROZEN: "1"
+      DATABASE_URL: postgresql+psycopg://closinglineup:closinglineup@localhost:5432/closinglineup
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: Pytest
+        run: uv run pytest
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Reads the version from `packageManager` in frontend/package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Oxlint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm tsc -b
+
+      - name: Vitest
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

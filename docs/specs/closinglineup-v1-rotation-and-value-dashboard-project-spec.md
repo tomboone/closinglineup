@@ -322,7 +322,7 @@ The Linear project (P-NEU-101) is the authoritative list. Stories NEU-1841..1847
 
 | Milestone | Story | Tickets |
 |---|---|---|
-| M1 Foundation | NEU-1841 | NEU-1848..1852 |
+| M1 Foundation | NEU-1841 | NEU-1848..1852, NEU-1894 (GitHub hardening) |
 | M2 Fetcher proves out on kumadrome | NEU-1842 | NEU-1853..1859 |
 | M3 Schema and backfill | NEU-1843 | NEU-1860..1865 |
 | M4 Overlays | NEU-1844 | NEU-1866..1873 |

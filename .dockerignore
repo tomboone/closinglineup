@@ -1,0 +1,24 @@
+# Local secrets, caches, and editor state that have no place in the build context.
+.git
+.env
+.idea
+.vscode
+.DS_Store
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+
+# Host-built dependencies and outputs; each stage installs and builds its own.
+backend/.venv
+backend/src/closinglineup/api/static
+frontend/node_modules
+frontend/dist
+
+# Docs, CI config, tests, and the local data volume; none of it is read by the build.
+.claude
+.github
+backend/tests
+backend/data
+data/
+deploy/
+docs/
