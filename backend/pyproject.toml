@@ -6,12 +6,14 @@ license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.20.0",
+    "fastapi>=0.159.1",
     "httpx>=0.28.1",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
     "sqlalchemy>=2.1.6",
     "typer>=0.27.3",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
@@ -43,6 +45,8 @@ addopts = "-ra"
 
 [dependency-groups]
 dev = [
+    # Starlette's TestClient is typed against httpx2, and prefers it at runtime over httpx.
+    "httpx2>=2.16.0",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "respx>=0.23.1",

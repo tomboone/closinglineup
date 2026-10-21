@@ -1,6 +1,10 @@
 """Command-line entry point: every job is a command (spec §3.1)."""
 
+from pathlib import Path
+from typing import Annotated
+
 import typer
+import uvicorn
 from sqlalchemy.exc import OperationalError
 
 from closinglineup.db.session import make_engine, ping
@@ -32,6 +36,25 @@ def health() -> None:
     finally:
         engine.dispose()
     typer.echo("health: ok")
+
+
+@app.command("api", help=COMMANDS["api"])
+def api(
+    # All interfaces, since it runs in a container; kumadrome publishes it on 127.0.0.1 only.
+    host: Annotated[str, typer.Option(help="Interface to bind.")] = "0.0.0.0",
+    port: Annotated[int, typer.Option(help="Port to bind.")] = 8000,
+    reload: Annotated[bool, typer.Option(help="Restart on source changes (local dev).")] = False,
+) -> None:
+    uvicorn.run(
+        "closinglineup.api.app:asgi",
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+        reload_dirs=[str(Path(__file__).parent)] if reload else None,
+        # uvicorn's loggers propagate to the root JSON handler `asgi` installs.
+        log_config=None,
+    )
 
 
 def _stub(name: str, help_text: str) -> None:

@@ -24,7 +24,8 @@ deploy/     compose file and runbook for the home server
 ## Backend development
 
 Local development runs in Docker: `docker-compose.yml` starts Postgres 17 and an `app` container
-with `backend/` bind-mounted, and every tool runs inside `app`.
+with `backend/` bind-mounted, running the API server with reload on port 8000. Every tool runs
+inside `app`.
 
 ```bash
 docker compose up -d
@@ -53,6 +54,20 @@ docker compose exec -T frontend pnpm lint && docker compose exec -T frontend pnp
   && docker compose exec -T frontend pnpm test
 docker compose exec -T frontend pnpm build   # → frontend/dist/
 ```
+
+## Container image
+
+The root `Dockerfile` builds the frontend bundle and the backend into one image that runs as
+UID/GID 999. `closinglineup api` serves `/api` and the bundle on port 8000; the `HEALTHCHECK`
+runs `closinglineup health`.
+
+```bash
+docker build -t closinglineup .
+docker run --rm -p 127.0.0.1:8000:8000 -e DATABASE_URL=postgresql+psycopg://… closinglineup
+```
+
+Every push to `main` publishes `ghcr.io/tomboone/closinglineup:latest` and `:sha-<7>`
+(`.github/workflows/image.yml`).
 
 ## License
 

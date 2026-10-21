@@ -19,8 +19,9 @@ services:
       retries: 15
 
   app:
-    # The uv base image until the project Dockerfile lands; uv matches the `uv_build` pin. Not
-    # the slim variant: pyright's bundled node needs libatomic, which slim leaves out.
+    # The uv base image, not the project Dockerfile, whose runtime stage carries no dev tools; uv
+    # matches the `uv_build` pin. Not the slim variant: pyright's bundled node needs libatomic,
+    # which slim leaves out.
     image: ghcr.io/astral-sh/uv:0.13-python3.13-trixie
     working_dir: /app
     environment:
@@ -32,14 +33,14 @@ services:
       PYTHONPYCACHEPREFIX: /tmp/pycache
     volumes:
       # The source is bind-mounted and installed editable, so every `exec` runs the code on
-      # disk with no rebuild. NEU-1852 swaps the idle command for the reloading API server.
+      # disk with no rebuild, and the API server reloads on every source change.
       - ./backend:/app
       # Shadows the host's macOS `.venv` with the container's Linux one.
       - app-venv:/app/.venv
       # uv's package cache and pyright's node download, kept across container recreation.
       - cache:/root/.cache
       - ./data:/data
-    command: ["sh", "-c", "uv sync --frozen && exec sleep infinity"]
+    command: ["sh", "-c", "uv sync --frozen && exec uv run closinglineup api --reload"]
     init: true
     depends_on:
       postgres:
@@ -49,7 +50,7 @@ services:
     image: node:22
     working_dir: /app
     environment:
-      # `/api` goes to the backend service; nothing listens there until NEU-1852.
+      # `/api` goes to the backend service's API server.
       API_PROXY_TARGET: http://app:8000
       # corepack fetches the pnpm that `packageManager` pins without asking first.
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
