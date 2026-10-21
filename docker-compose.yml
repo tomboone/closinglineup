@@ -1,0 +1,50 @@
+# Local development only; kumadrome runs deploy/docker-compose.yml (spec §12). Every tool runs
+# inside `app`, never on the host: `docker compose exec -T app uv run <tool>`.
+name: closinglineup
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: closinglineup
+      POSTGRES_PASSWORD: closinglineup
+      POSTGRES_DB: closinglineup
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U closinglineup -d closinglineup"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  app:
+    # The uv base image until the project Dockerfile lands; uv matches the `uv_build` pin. Not
+    # the slim variant: pyright's bundled node needs libatomic, which slim leaves out.
+    image: ghcr.io/astral-sh/uv:0.13-python3.13-trixie
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql+psycopg://closinglineup:closinglineup@postgres:5432/closinglineup
+      DATA_DIR: /data
+      # The cache and the venv sit on different volumes, so uv cannot hardlink between them.
+      UV_LINK_MODE: copy
+      # Keeps the container's bytecode out of the bind-mounted `__pycache__` the host uses.
+      PYTHONPYCACHEPREFIX: /tmp/pycache
+    volumes:
+      # The source is bind-mounted and installed editable, so every `exec` runs the code on
+      # disk with no rebuild. NEU-1852 swaps the idle command for the reloading API server.
+      - ./backend:/app
+      # Shadows the host's macOS `.venv` with the container's Linux one.
+      - app-venv:/app/.venv
+      # uv's package cache and pyright's node download, kept across container recreation.
+      - cache:/root/.cache
+      - ./data:/data
+    command: ["sh", "-c", "uv sync --frozen && exec sleep infinity"]
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  app-venv:
+  cache:

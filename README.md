@@ -23,11 +23,23 @@ deploy/     compose file and runbook for the home server
 
 ## Backend development
 
+Local development runs in Docker: `docker-compose.yml` starts Postgres 17 and an `app` container
+with `backend/` bind-mounted, and every tool runs inside `app`.
+
 ```bash
-cd backend
-uv sync
-uv run closinglineup --help
-uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest
+docker compose up -d
+docker compose exec -T app uv run alembic upgrade head
+docker compose exec -T app uv run closinglineup health
+docker compose exec -T app uv run ruff check . && docker compose exec -T app uv run ruff format --check . \
+  && docker compose exec -T app uv run pyright && docker compose exec -T app uv run pytest
+```
+
+New migrations: `docker compose exec -T app uv run alembic revision --autogenerate -m "…"`.
+
+Pre-commit hooks (ruff, pyright) also run inside the container, so `app` must be up to commit:
+
+```bash
+pre-commit install
 ```
 
 ## License
