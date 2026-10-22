@@ -17,8 +17,8 @@ Commands below run on kumadrome (`ssh kumadrome`) unless they start with `ssh`. 
 written as `ssh -t kumadrome 'sudo …'` so it can prompt for the password.
 
 Not here yet: the Tailscale sidecar and the nightly `pg_dump` to B2 (M7). Until the sidecar lands, the UI
-is on kumadrome's loopback only; reach it through an SSH tunnel, `ssh -L 8000:127.0.0.1:8000 kumadrome`,
-then http://localhost:8000.
+is on kumadrome's loopback only; reach it through an SSH tunnel, `ssh -L 8010:127.0.0.1:8010 kumadrome`,
+then http://localhost:8010.
 
 ## 1. Make sure kumadrome can pull the image
 
