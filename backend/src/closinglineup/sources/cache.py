@@ -47,6 +47,14 @@ class RawCache:
         path = self.path(source, endpoint, key)
         return path.read_bytes() if path.is_file() else None
 
+    def meta(self, source: str, endpoint: str, key: str) -> CacheMeta | None:
+        """The sidecar of a cached response, or None if the key is not cached."""
+        path = self.path(source, endpoint, key)
+        if not path.is_file():
+            return None
+        meta: CacheMeta = json.loads(path.with_name(f"{key}{META_SUFFIX}").read_bytes())
+        return meta
+
     def put(
         self,
         source: str,

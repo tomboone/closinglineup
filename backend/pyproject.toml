@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pbpstats==1.3.11",
     "psycopg[binary]>=3.3.6",
+    "pyarrow>=26.0.0",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
     "sqlalchemy>=2.1.6",
@@ -50,6 +51,7 @@ addopts = "-ra"
 dev = [
     # Starlette's TestClient is typed against httpx2, and prefers it at runtime over httpx.
     "httpx2>=2.16.0",
+    "pyarrow-stubs>=20.0.0.20260819",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "respx>=0.23.1",

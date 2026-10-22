@@ -1,6 +1,9 @@
+import copy
+import json
 import re
 import signal
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from types import FrameType
 from typing import Any, cast
@@ -11,22 +14,27 @@ from apscheduler.schedulers.background import (  # pyright: ignore[reportMissing
     BackgroundScheduler,
 )
 from curl_cffi import requests
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
 from closinglineup import cli
 from closinglineup.cli import COMMANDS, app
 from closinglineup.clock import Clock
-from closinglineup.db.models import JobRun
+from closinglineup.db.models import JobRun, LoadLog, PlayerGame
+from closinglineup.load.parquet import ROW_MODELS, ParquetStore
 from closinglineup.scheduler import NIGHTLY, POLL_FINALS
 from closinglineup.settings import Settings
+from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import TEAMS
 from tests.fakes import RoutedGet, ScriptedGet, fake_response
+from tests.test_loader import clear_fixture_game
 from tests.test_nba_stats import ENDPOINTS, GAME_ID, fixture_body, season_fixture_body
-from tests.test_scheduler import FINAL_A, FINAL_B, SCHEDULE, nba_routes
+from tests.test_pipeline import DAY, GAME, UNCACHED, cache_fixture_game
+from tests.test_pipeline import SCHEDULE as FIXTURE_SCHEDULE
+from tests.test_scheduler import FINAL_A, FINAL_B, SCHEDULE, cdn_game_url, nba_routes
 
 runner = CliRunner()
 
@@ -43,7 +51,7 @@ EXPECTED = [
     "health",
     "reparse",
 ]
-IMPLEMENTED = {"fetch", "health", "api", "worker", "nightly"}
+IMPLEMENTED = {"fetch", "parse", "load", "health", "api", "worker", "nightly"}
 STUBS = [command for command in EXPECTED if command not in IMPLEMENTED]
 
 
@@ -233,7 +241,9 @@ def test_nightly_date_fetches_that_dates_final_games_and_records_the_run(
     result = runner.invoke(app, ["nightly", "--date", "2026-10-20"])
 
     assert result.exit_code == 0, result.output
-    assert result.output.splitlines()[-1] == "nightly 2026-10-20: 2 final games, 2 fetched"
+    assert result.output.splitlines()[-1] == (
+        "nightly 2026-10-20: 2 final games, 2 fetched, 0 parsed"
+    )
     with db() as session:
         [run] = session.scalars(select(JobRun))
     assert (run.job, run.status) == (NIGHTLY, "succeeded")
@@ -287,3 +297,149 @@ def test_worker_runs_the_scheduler_with_every_job_until_sigterm(
     assert result.exit_code == 0, result.output
     assert calls == [[NIGHTLY, POLL_FINALS], "shutdown"]
     assert set(handlers) == {signal.SIGTERM, signal.SIGINT}
+
+
+@pytest.fixture
+def data_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """`parse` and `load` pointed at a data directory under `tmp_path`, with no database."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused@127.0.0.1:1/x")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    return tmp_path
+
+
+def test_parse_date_writes_every_tables_file_for_the_date(data_env: Path) -> None:
+    cache_fixture_game(data_env)
+
+    result = runner.invoke(app, ["parse", "--date", "2025-10-23"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        f"parse 2025-10-23 {UNCACHED}: final, but no box score cached",
+        "parse 2025-10-23: 1 games parsed",
+    ]
+    store = ParquetStore(data_env)
+    assert all(store.path(table, DAY).is_file() for table in ROW_MODELS)
+
+
+def test_parse_from_to_parses_each_date_in_the_range(data_env: Path) -> None:
+    cache_fixture_game(data_env)
+
+    result = runner.invoke(app, ["parse", "--from", "2025-10-22", "--to", "2025-10-24"])
+
+    assert result.exit_code == 0, result.output
+    assert ParquetStore(data_env).dates() == [
+        date(2025, 10, 22),
+        date(2025, 10, 23),
+        date(2025, 10, 24),
+    ]
+
+
+def test_parse_game_id_parses_that_games_date(data_env: Path) -> None:
+    cache_fixture_game(data_env)
+
+    result = runner.invoke(app, ["parse", "--game-id", GAME])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[-1] == "parse 2025-10-23: 1 games parsed"
+
+
+def test_parse_exits_1_when_the_schedule_is_not_cached(data_env: Path) -> None:
+    result = runner.invoke(app, ["parse", "--date", "2025-10-23"])
+
+    assert result.exit_code == 1
+    assert result.output == "parse 2025-10-23: failed: no 2025-26 schedule in the raw cache\n"
+
+
+@pytest.mark.parametrize(
+    ("command", "args", "message"),
+    [
+        ("parse", [], "pass exactly one of"),
+        ("parse", ["--date", "2025-10-23", "--game-id", GAME], "pass exactly one of"),
+        ("parse", ["--date", "2025-10-23", "--from", "2025-10-22"], "not both"),
+        ("parse", ["--from", "2025-10-22"], "--from and --to go together"),
+        ("parse", ["--from", "2025-10-24", "--to", "2025-10-23"], "--from is after --to"),
+        ("load", [], "pass --date, --from/--to or --missing"),
+    ],
+)
+def test_parse_and_load_without_dates_are_usage_errors(
+    data_env: Path, command: str, args: list[str], message: str
+) -> None:
+    result = runner.invoke(app, [command, *args])
+
+    assert result.exit_code == 2
+    assert message in ANSI_ESCAPE.sub("", result.output)
+
+
+@pytest.fixture
+def load_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_url: str, db: sessionmaker[Session]
+) -> Path:
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    clear_fixture_game(db)
+    return tmp_path
+
+
+def test_load_missing_reloads_only_the_date_whose_load_log_row_is_gone(
+    load_env: Path, db: sessionmaker[Session]
+) -> None:
+    cache_fixture_game(load_env)
+    runner.invoke(app, ["parse", "--from", "2025-10-22", "--to", "2025-10-23"])
+    first = runner.invoke(app, ["load", "--from", "2025-10-22", "--to", "2025-10-23"])
+    assert first.exit_code == 0, first.output
+    assert len(first.output.splitlines()) == 2 * len(ROW_MODELS)
+    with db.begin() as session:
+        session.execute(
+            delete(LoadLog).where(LoadLog.table_name == "game", LoadLog.game_date == DAY)
+        )
+
+    result = runner.invoke(app, ["load", "--missing"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == "load game 2025-10-23: succeeded, 2 rows, 0 changed\n"
+    assert runner.invoke(app, ["load", "--missing"]).output == "load: nothing to load\n"
+
+
+def test_load_exits_1_when_a_table_fails(load_env: Path) -> None:
+    result = runner.invoke(app, ["load", "--date", "2025-10-23"])
+
+    assert result.exit_code == 1
+    assert result.output.splitlines()[0].startswith(
+        "load game 2025-10-23: failed: FileNotFoundError"
+    )
+
+
+def test_nightly_date_fetches_parses_and_loads_the_fixture_game(
+    monkeypatch: pytest.MonkeyPatch, load_env: Path, db: sessionmaker[Session]
+) -> None:
+    monkeypatch.delenv("HEALTHCHECKS_URL_NIGHTLY", raising=False)
+    schedule = copy.deepcopy(FIXTURE_SCHEDULE)
+    [game_date] = schedule["leagueSchedule"]["gameDates"]
+    game_date["games"] = [g for g in game_date["games"] if g["gameId"] == GAME]
+    pbp = Path(__file__).parent / "fixtures" / "pbp"
+    routes = {
+        nba_cdn.SCHEDULE_URL: json.dumps(schedule).encode(),
+        **{
+            f"{nba_stats.STATS_BASE}/{endpoint}": fixture_body(endpoint)
+            for endpoint in nba_stats.GAME_ENDPOINTS
+        },
+        **{
+            cdn_game_url(endpoint, GAME): (pbp / endpoint / f"{GAME}.json").read_bytes()
+            for endpoint in (nba_cdn.BOXSCORE, nba_cdn.PLAYBYPLAY)
+        },
+    }
+    _route_nba(monkeypatch, RoutedGet(routes))
+
+    result = runner.invoke(app, ["nightly", "--date", "2025-10-23"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[-1] == (
+        "nightly 2025-10-23: 1 final games, 1 fetched, 1 parsed"
+    )
+    with db() as session:
+        [run] = session.scalars(select(JobRun))
+        count = select(func.count()).select_from(PlayerGame).where(PlayerGame.game_id == GAME)
+        assert session.scalar(count) == 28
+    assert (run.job, run.status) == (NIGHTLY, "succeeded")
+    assert run.detail is not None
+    assert run.detail["loaded"]["player_game"] == 28
