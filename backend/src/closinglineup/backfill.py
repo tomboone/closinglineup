@@ -7,9 +7,10 @@ the per-game endpoints `nightly` fetches, but `NEVER_CACHED`, which only ever fa
 a request per game. A game already fully cached is skipped without a request.
 
 It is safe to interrupt. The raw cache is write-once and each response lands whole or not at
-all, so a run stopped by Ctrl-C, or by a connection error `NbaSession` gave up retrying, loses at
-most the request in flight: run it again and it skips the games already cached, then resumes the
-game it stopped in at its first endpoint not cached. `NbaSession` holds it to `NBA_RPS`.
+all, so a run stopped by Ctrl-C, or by `NbaUnreachableError` once `NbaSession` has given up
+retrying, loses at most the request in flight: run it again and it skips the games already
+cached, then resumes the game it stopped in at its first endpoint not cached. `NbaSession` holds
+it to `NBA_RPS`.
 """
 
 from collections.abc import Iterator
@@ -24,7 +25,7 @@ from closinglineup.scheduler import (
 )
 from closinglineup.sources import nba_stats
 from closinglineup.sources.cache import RawCache
-from closinglineup.sources.nba_http import NbaSession
+from closinglineup.sources.nba_http import NbaSession, NbaUnreachableError
 from closinglineup.sources.nba_stats import EndpointResult, FetchStatus
 
 
@@ -53,12 +54,16 @@ def fetch_season(
     """Fetch each counted final game of `season` from `start` through `end` (either open when
     None) in date order, yielding each as it is done; `force` re-fetches cached games too.
 
-    Raises `NbaHttpError` if the schedule cannot be fetched.
+    Raises `NbaHttpError` if the schedule cannot be fetched, and `NbaUnreachableError`, naming
+    the game, if NBA.com stops answering.
     """
     schedule = nba_stats.fetch_schedule_league_v2(session, cache, season, force=True)
     for day, game_id in final_games_between(schedule, start, end):
         if not force and fully_cached(cache, game_id):
             yield SeasonGame(day, game_id)
             continue
-        results = fetch_final_game(session, cache, game_id, skip=NEVER_CACHED, force=force)
+        try:
+            results = fetch_final_game(session, cache, game_id, skip=NEVER_CACHED, force=force)
+        except NbaUnreachableError as exc:
+            raise NbaUnreachableError(f"game {game_id} of {day}: {exc}") from exc
         yield SeasonGame(day, game_id, results)

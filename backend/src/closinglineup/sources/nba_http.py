@@ -6,8 +6,10 @@ from the home IP on 2026-10-20: curl, httpx, and requests got a 403; curl_cffi w
 got a 403 again. Both are required.
 
 Ported from nba-today's `nba_http.py`, adding the rate limiter (spec §4). This is the only module
-that imports curl_cffi (spec §3.1). curl_cffi's own `retry` retries every request error, read
-timeouts included, and never a 5xx, so the retry loop here is our own.
+that imports curl_cffi (spec §3.1). curl_cffi's own `retry` never retries a 5xx, so the retry loop
+here is our own. Unlike nba-today's, it retries a timeout too: a backfill runs for hours
+unattended, and stats.nba.com now and then holds a request open past `NBA_TIMEOUT_SECONDS` with
+nothing sent (curl error 28, seen on kumadrome 2026-10-22), which one more try usually gets past.
 """
 
 import json
@@ -76,12 +78,21 @@ class RateLimiter:
         self._clock.sleep_until(self._slot + self._interval * (self._jitter * self._rng.random()))
 
 
+class NbaUnreachableError(Exception):
+    """NBA.com did not answer a request on any try: a connection error or timeout on each.
+
+    Not an `NbaHttpError`, which a batch fetch reports per endpoint and carries on past: when
+    NBA.com is not answering, the next request will not get an answer either, so a run stops.
+    """
+
+
 class NbaSession:
-    """A rate-limited curl_cffi session that retries connection errors and 5xx responses.
+    """A rate-limited curl_cffi session that retries connection errors, timeouts and 5xx
+    responses.
 
     Every attempt, retries included, waits its turn at the rate limiter. Between tries it sleeps
-    `backoff * 2**attempt`. After the last retry a 5xx response is returned as-is and a connection
-    error is re-raised.
+    `backoff * 2**attempt`. After the last retry a 5xx response is returned as-is, and a
+    connection error or timeout raises `NbaUnreachableError`.
     """
 
     def __init__(
@@ -106,10 +117,15 @@ class NbaSession:
             self._limiter.acquire()
             try:
                 response = self.curl.get(url, params=query)
-            except requests.exceptions.ConnectionError as exc:
-                if last:
-                    raise
+            # `Timeout` is not a `ConnectionError`: curl error 28, an operation timed out, raises
+            # a plain one.
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 reason = type(exc).__name__
+                if last:
+                    tries = self._retries + 1
+                    raise NbaUnreachableError(
+                        f"no answer from {url} in {tries} tries: {reason}: {exc}"
+                    ) from exc
             else:
                 if response.status_code < 500 or last:
                     return response

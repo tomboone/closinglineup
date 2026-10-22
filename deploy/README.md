@@ -170,6 +170,10 @@ send about twice `NBA_RPS`: start the 2025-26 fetch after the 03:30 nightly run.
 
 It is safe to stop at any point: Ctrl-C, a dropped connection, a reboot. Run the same command again and it
 skips every game already cached, and resumes the game it stopped in at its first endpoint not cached.
+A request that times out (stats.nba.com sometimes holds one open with nothing sent) is retried three
+times; if every try fails, the run stops with `stopped: game … no answer from …` and exits 1, and the
+same command resumes it. If it keeps stopping within minutes of a restart, stats.nba.com is probably
+throttling kumadrome: wait an hour, or lower `NBA_RPS` in `.env` (0.5 doubles the run time).
 `--from 2026-01-01` (and `--to`) restrict it to a range of game dates. A game with an endpoint that failed
 is listed with the failure, the run carries on, and the command exits 1 at the end; running it again
 retries only what is missing.
