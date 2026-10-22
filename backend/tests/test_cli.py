@@ -29,7 +29,7 @@ from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import TEAMS
-from tests.fakes import RoutedGet, ScriptedGet, fake_response
+from tests.fakes import Connect, RoutedGet, ScriptedGet, fake_response
 from tests.test_backfill import InterruptedGet, season_routes
 from tests.test_loader import clear_fixture_game
 from tests.test_memberships import UNCOVERED
@@ -125,9 +125,7 @@ def scripted_nba(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ScriptedGet
     get = ScriptedGet()
 
     def fake_session(settings: Settings, clock: Clock) -> NbaSession:
-        session = NbaSession(requests.Session(), RateLimiter(1e6, clock), clock)
-        monkeypatch.setattr(session.curl, "get", get)
-        return session
+        return NbaSession(Connect(get), RateLimiter(1e6, clock), clock)
 
     monkeypatch.setattr(cli, "make_nba_session", fake_session)
     return get
@@ -293,9 +291,7 @@ def test_fetch_season_waits_out_nba_com_then_stops_cleanly_if_it_still_does_not_
 
 def _route_nba(monkeypatch: pytest.MonkeyPatch, get: RoutedGet) -> None:
     def fake_session(settings: Settings, clock: Clock) -> NbaSession:
-        session = NbaSession(requests.Session(), RateLimiter(1e6, clock), clock)
-        monkeypatch.setattr(session.curl, "get", get)
-        return session
+        return NbaSession(Connect(get), RateLimiter(1e6, clock), clock)
 
     monkeypatch.setattr(cli, "make_nba_session", fake_session)
 

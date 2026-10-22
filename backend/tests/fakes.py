@@ -1,6 +1,6 @@
 """Stand-ins for curl_cffi, so sources can be tested without the network."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from curl_cffi import requests
 
@@ -39,3 +39,17 @@ class RoutedGet:
         self.calls.append((url, params))
         body = self.routes.get(url)
         return fake_response(404) if body is None else fake_response(200, body)
+
+
+class Connect:
+    """Stands in for `NbaSession`'s `connect`: each curl session it opens answers with `get`."""
+
+    def __init__(self, get: Callable[..., requests.Response]) -> None:
+        self.get = get
+        self.opened: list[requests.Session[requests.Response]] = []
+
+    def __call__(self) -> requests.Session[requests.Response]:
+        curl = requests.Session()
+        curl.get = self.get  # pyright: ignore[reportAttributeAccessIssue]
+        self.opened.append(curl)
+        return curl

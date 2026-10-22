@@ -31,7 +31,7 @@ def clock() -> FakeClock:
 
 @pytest.fixture
 def session(clock: FakeClock) -> Iterator[NbaSession]:
-    with NbaSession(requests.Session(), RateLimiter(1e6, clock), clock) as s:
+    with NbaSession(requests.Session[requests.Response], RateLimiter(1e6, clock), clock) as s:
         yield s
 
 

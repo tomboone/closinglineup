@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import respx
-from curl_cffi import requests
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -31,7 +30,7 @@ from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaHttpError, NbaSession, RateLimiter
 from closinglineup.sources.nba_stats import SeasonType
-from tests.fakes import RoutedGet
+from tests.fakes import Connect, RoutedGet
 from tests.test_nba_stats import GAME_ID, fixture_body, season_fixture_body
 
 CDN_FIXTURES = Path(__file__).parent / "fixtures" / "cdn"
@@ -151,9 +150,7 @@ def make_jobs(
     heartbeat: Heartbeat,
 ) -> Jobs:
     def nba() -> NbaSession:
-        session = NbaSession(requests.Session(), RateLimiter(1e6, clock), clock)
-        session.curl.get = get  # pyright: ignore[reportAttributeAccessIssue]
-        return session
+        return NbaSession(Connect(get), RateLimiter(1e6, clock), clock)
 
     return Jobs(
         settings=settings,

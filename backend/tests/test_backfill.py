@@ -18,7 +18,7 @@ from closinglineup.sources.nba_http import (
     RateLimiter,
 )
 from closinglineup.sources.nba_stats import EndpointResult, FetchStatus
-from tests.fakes import RoutedGet
+from tests.fakes import Connect, RoutedGet
 from tests.test_nba_stats import WITH_DATA
 from tests.test_scheduler import (
     DAY,
@@ -99,9 +99,7 @@ def cache(tmp_path: Path, clock: FakeClock) -> RawCache:
 
 
 def _session(get: RoutedGet, clock: FakeClock) -> NbaSession:
-    session = NbaSession(requests.Session(), RateLimiter(1e6, clock), clock)
-    session.curl.get = get  # pyright: ignore[reportAttributeAccessIssue]
-    return session
+    return NbaSession(Connect(get), RateLimiter(1e6, clock), clock)
 
 
 def _throttle(start: int) -> range:
