@@ -36,11 +36,14 @@ uv run scripts/record_fixtures.py stats-season
 ```
 
 `scoreboardv3`, `commonteamroster`, `leagueplayerondetails` and `leaguedashteamstats` are kept
-whole. `commonallplayers`, `playergamelogs`, `shotchartdetail`, `leaguedashlineups` and
-`leaguedashplayerstats` list the whole league or a whole season, so each of their result sets is
-trimmed to its first 10 rows; the headers are untouched.
+whole. `commonallplayers`, `playergamelogs`, `leaguedashlineups` and `leaguedashplayerstats` list
+the whole league or a whole season, so each of their result sets is trimmed to its first 10 rows;
+the headers are untouched. `shotchartdetail` keeps Curry's 25 shots in the per-game fixture game,
+0022500006, so they can be checked against its box score, and the first 10 rows of its league
+averages.
 
-Recorded 2026-10-21 at about 20:20 ET, from the dev Mac on the home network.
+Recorded 2026-10-21 at about 20:20 ET, from the dev Mac on the home network; `shotchartdetail`
+re-recorded on 2026-10-22, the same way.
 
 ## Schedule
 

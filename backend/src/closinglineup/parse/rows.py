@@ -19,6 +19,7 @@ type ContractType = Literal["standard", "two_way", "ten_day", "exhibit_10"]
 type GameStatus = Literal["scheduled", "final", "postponed"]
 type DnpReason = Literal["cd", "injury", "inactive", "suspension", "g_league", "other"]
 type BoxSource = Literal["stats", "cdn"]
+type ShotZone = Literal["rim", "short_mid", "long_mid", "corner_3", "above_break_3"]
 
 
 class ParseError(ValueError):
@@ -112,3 +113,72 @@ class MatchupRow(Row):
     fg3a: int
     tov: int
     ast: int
+
+
+class StintRow(Row):
+    """One team's view of a stint (`stint`, less `is_garbage_time`, which `derive` fills).
+
+    Times are seconds elapsed in the period. A lineup key is five player IDs, sorted as numbers,
+    joined by `-`. `possessions` are the team's offensive possessions as pbpstats counts them
+    (`count_as_possession`).
+    """
+
+    game_id: GameId
+    period: int
+    start_sec: float
+    end_sec: float
+    team_id: int
+    lineup_key: str
+    opp_lineup_key: str
+    possessions: int
+    pts_for: int
+    pts_against: int
+
+
+class PossessionRow(Row):
+    """One pbpstats possession plus its game (`possession`).
+
+    Times are seconds elapsed in the period. `counted` is whether pbpstats counts it as a real
+    possession: one that starts with two seconds or less left and scores nothing is not.
+    `start_type` is None where pbpstats cannot tell (after a rebound of a heave). `end_type` is
+    the pbpstats event type that ended it: `FieldGoal`, `FreeThrow`, `Rebound` (a defensive one),
+    `Turnover`, `EndOfPeriod` and so on.
+    """
+
+    game_id: GameId
+    period: int
+    number: int
+    offense_team_id: int
+    start_sec: float
+    end_sec: float
+    start_score_margin: int
+    start_type: str | None = None
+    has_timeout: bool
+    previous_has_timeout: bool
+    end_type: str
+    counted: bool
+
+
+class ShotRow(Row):
+    """One field-goal attempt from `shotchartdetail` (`shot`).
+
+    `event_num` is the shot's play-by-play event number, its natural key within the game.
+    `clock_sec` is the game clock when it was taken: seconds left in the period. `x` and `y` are
+    NBA.com's court coordinates, in tenths of a foot from the basket. `shot_type` is the kind of
+    shot (`Jump Shot`, `Driving Layup Shot`); whether it was a two or a three is in `zone`.
+    """
+
+    game_id: GameId
+    event_num: int
+    player_id: int
+    team_id: int
+    period: int
+    clock_sec: int
+    x: int
+    y: int
+    distance_ft: int
+    zone: ShotZone
+    shot_type: str
+    made: bool
+    assisted_by: int | None = None
+    shot_clock_bucket: str | None = None

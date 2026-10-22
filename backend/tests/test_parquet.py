@@ -11,8 +11,9 @@ from closinglineup.load.parquet import ROW_MODELS, ParquetSchemaError, ParquetSt
 from closinglineup.parse.box import parse_box
 from closinglineup.parse.matchups import parse_matchups
 from closinglineup.parse.roster import parse_players, parse_roster
-from closinglineup.parse.rows import GameRow, Row
+from closinglineup.parse.rows import GameRow, PossessionRow, Row, ShotRow, StintRow
 from closinglineup.parse.schedule import parse_schedule
+from closinglineup.parse.shots import parse_shots
 
 FIXTURES = Path(__file__).parent / "fixtures" / "nba_stats"
 GAME = "0022500006"
@@ -41,6 +42,38 @@ def _rows() -> dict[str, list[Row]]:
             )
         ],
         "matchup": [*parse_matchups(_fixture("boxscorematchupsv3"))],
+        # pbpstats is exercised in test_pbp; these cover the columns, a NULL start type included.
+        "stint": [
+            StintRow(
+                game_id=GAME,
+                period=1,
+                start_sec=0.0,
+                end_sec=95.5,
+                team_id=1610612744,
+                lineup_key="1-2-3-4-5",
+                opp_lineup_key="6-7-8-9-10",
+                possessions=3,
+                pts_for=5,
+                pts_against=2,
+            )
+        ],
+        "possession": [
+            PossessionRow(
+                game_id=GAME,
+                period=1,
+                number=number,
+                offense_team_id=1610612744,
+                start_sec=0.0,
+                end_sec=14.0,
+                start_score_margin=0,
+                start_type=start_type,
+                has_timeout=False,
+                previous_has_timeout=False,
+                end_type="FieldGoal",
+                counted=True,
+            )
+            for number, start_type in [(1, "Off Deadball"), (2, None)]
+        ],
     }
 
 
@@ -123,5 +156,24 @@ def test_dates_lists_every_date_with_a_file_for_any_table(tmp_path: Path) -> Non
     store.write_rows("game", date(2025, 10, 24), [])
     store.write_rows("matchup", DAY, [])
     store.write_rows("game", DAY, [])
+    store.write_rows("shot", SHOT_CHART, [])
 
     assert store.dates() == [DAY, date(2025, 10, 24)]
+
+
+SHOT_CHART = "201939_2025-26_regular-season"
+
+
+def test_a_shot_file_is_keyed_like_its_shot_chart_and_round_trips(tmp_path: Path) -> None:
+    rows = parse_shots(_fixture("shotchartdetail", SHOT_CHART))
+    store = ParquetStore(tmp_path)
+
+    path = store.write_rows("shot", SHOT_CHART, rows)
+
+    assert path == tmp_path / "parquet" / "shot" / f"{SHOT_CHART}.parquet"
+    assert store.keys("shot") == [SHOT_CHART]
+    assert [ShotRow.model_validate(r) for r in store.read("shot", SHOT_CHART).to_pylist()] == rows
+
+
+def test_a_keyed_table_with_no_files_has_no_keys(tmp_path: Path) -> None:
+    assert ParquetStore(tmp_path).keys("shot") == []

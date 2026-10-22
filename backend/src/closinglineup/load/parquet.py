@@ -1,9 +1,13 @@
 """Typed rows → one parquet file per table per game date, under `DATA_DIR/parquet` (spec §3.2).
 
 The files are the contract between parsing and loading: `parse` rewrites a date's file for each
-table whole, and `load` copies it into Postgres. Each file's schema is derived from its table's
-row model, so a file and the model it was written from always agree, and `read` refuses a file
-written from an earlier model rather than loading it under the wrong columns.
+table whole, and `load` copies it into Postgres. `shot` is the exception: its rows come from one
+shot chart per player, season and season type, so its files are keyed the way that shot chart is
+cached (`<player_id>_<season>_<season type>`), and a weekly re-fetch rewrites one player's file.
+
+Each file's schema is derived from its table's row model, so a file and the model it was written
+from always agree, and `read` refuses a file written from an earlier model rather than loading it
+under the wrong columns.
 """
 
 from collections.abc import Sequence
@@ -21,22 +25,32 @@ from closinglineup.parse.rows import (
     MatchupRow,
     PlayerGameRow,
     PlayerRow,
+    PossessionRow,
     RosterMembershipRow,
     Row,
+    ShotRow,
+    StintRow,
 )
 from closinglineup.sources.cache import write_atomic
 
 SUFFIX = ".parquet"
 
-# Every table `parse` writes, by its row model, in an order that loads each table after the ones
-# its foreign keys reference.
+# Every table `parse` writes a file per game date for, by its row model, in an order that loads
+# each table after the ones its foreign keys reference.
 ROW_MODELS: dict[str, type[Row]] = {
     "game": GameRow,
     "player": PlayerRow,
     "roster_membership": RosterMembershipRow,
     "player_game": PlayerGameRow,
     "matchup": MatchupRow,
+    "stint": StintRow,
+    "possession": PossessionRow,
 }
+# Every table whose files are keyed by the raw cache key of the response they are parsed from.
+KEYED_ROW_MODELS: dict[str, type[Row]] = {"shot": ShotRow}
+
+# A file's key: its game date, or for a `KEYED_ROW_MODELS` table, a raw cache key.
+type FileKey = date | str
 
 _ARROW_TYPES: dict[Any, pa.DataType] = {
     bool: pa.bool_(),
@@ -88,39 +102,44 @@ def schema_for(model: type[Row]) -> pa.Schema:
     return pa.schema(fields)
 
 
+def row_model(table: str) -> type[Row]:
+    return ROW_MODELS.get(table) or KEYED_ROW_MODELS[table]
+
+
 class ParquetStore:
-    """`<data_dir>/parquet/<table>/<game_date>.parquet`, one file per table per game date."""
+    """`<data_dir>/parquet/<table>/<key>.parquet`: one file per table per game date, or per raw
+    cache key for a `KEYED_ROW_MODELS` table."""
 
     def __init__(self, data_dir: Path) -> None:
         self.root = data_dir / "parquet"
 
-    def path(self, table: str, game_date: date) -> Path:
-        return self.root / table / f"{game_date.isoformat()}{SUFFIX}"
+    def path(self, table: str, key: FileKey) -> Path:
+        name = key.isoformat() if isinstance(key, date) else key
+        return self.root / table / f"{name}{SUFFIX}"
 
-    def write_rows(self, table: str, game_date: date, rows: Sequence[Row]) -> Path:
-        """Write `rows` as the date's file for `table`, replacing any earlier one atomically; no
-        rows still writes a file, which loads as nothing."""
-        model = ROW_MODELS[table]
+    def write_rows(self, table: str, key: FileKey, rows: Sequence[Row]) -> Path:
+        """Write `rows` as the file for `table` and `key`, replacing any earlier one atomically;
+        no rows still writes a file, which loads as nothing."""
+        model = row_model(table)
         if strays := {type(row).__name__ for row in rows if type(row) is not model}:
             raise TypeError(f"{table} takes {model.__name__}, not {', '.join(sorted(strays))}")
         data = pa.Table.from_pylist([row.model_dump() for row in rows], schema=schema_for(model))
         sink = pa.BufferOutputStream()
         # pyarrow-stubs leaves a few of these two functions' parameter types unknown.
         pq.write_table(data, sink)  # pyright: ignore[reportUnknownMemberType]
-        path = self.path(table, game_date)
+        path = self.path(table, key)
         path.parent.mkdir(parents=True, exist_ok=True)
         write_atomic(path, sink.getvalue().to_pybytes())
         return path
 
-    def read(self, table: str, game_date: date) -> pa.Table:
-        """The date's file for `table`; raises `FileNotFoundError` if it was never written, and
-        `ParquetSchemaError` if it was written from a different row model."""
-        data = pq.read_table(self.path(table, game_date))  # pyright: ignore[reportUnknownMemberType]
-        expected = schema_for(ROW_MODELS[table])
+    def read(self, table: str, key: FileKey) -> pa.Table:
+        """The file for `table` and `key`; raises `FileNotFoundError` if it was never written,
+        and `ParquetSchemaError` if it was written from a different row model."""
+        path = self.path(table, key)
+        data = pq.read_table(path)  # pyright: ignore[reportUnknownMemberType]
+        expected = schema_for(row_model(table))
         if not data.schema.equals(expected, check_metadata=False):
-            raise ParquetSchemaError(
-                f"{self.path(table, game_date)} has schema {data.schema}, not {expected}"
-            )
+            raise ParquetSchemaError(f"{path} has schema {data.schema}, not {expected}")
         return data
 
     def dates(self) -> list[date]:
@@ -133,3 +152,14 @@ class ParquetStore:
             if path.name.endswith(SUFFIX)
         }
         return sorted(found)
+
+    def keys(self, table: str) -> list[str]:
+        """Every key a `KEYED_ROW_MODELS` table has a file for, sorted."""
+        directory = self.root / table
+        if not directory.is_dir():
+            return []
+        return sorted(
+            path.name.removesuffix(SUFFIX)
+            for path in directory.iterdir()
+            if path.name.endswith(SUFFIX)
+        )

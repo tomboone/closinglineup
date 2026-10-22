@@ -1,4 +1,4 @@
-"""The pbpstats bridge: cached play-by-play → stints and possessions (spec §3.1, §6.2).
+"""The pbpstats bridge: cached play-by-play → `StintRow`s and `PossessionRow`s (spec §3.1, §6.2).
 
 pbpstats fetches with `requests`, which NBA.com blocks, so it only ever runs in file mode over a
 directory this module fills from the raw cache (ADR-0002). This is the only importer of pbpstats.
@@ -58,6 +58,7 @@ from pbpstats.resources.enhanced_pbp import (  # pyright: ignore[reportMissingTy
     FreeThrow,
 )
 
+from closinglineup.parse.rows import PossessionRow, StintRow
 from closinglineup.sources import nba_cdn
 from closinglineup.sources.cache import RawCache, write_atomic
 
@@ -119,52 +120,6 @@ class _Possession(Protocol):
 
     @property
     def possession_start_type(self) -> str: ...
-
-
-@dataclass(frozen=True, slots=True)
-class StintRow:
-    """One team's view of a stint (spec §6.2 `stint`, less `is_garbage_time`, which M5 adds).
-
-    Times are seconds elapsed in the period. A lineup key is five player IDs, sorted as numbers,
-    joined by `-`. `possessions` are the team's offensive possessions as pbpstats counts them
-    (`count_as_possession`).
-    """
-
-    game_id: str
-    period: int
-    start_sec: float
-    end_sec: float
-    team_id: int
-    lineup_key: str
-    opp_lineup_key: str
-    possessions: int
-    pts_for: int
-    pts_against: int
-
-
-@dataclass(frozen=True, slots=True)
-class PossessionRow:
-    """One pbpstats possession plus its game (spec §6.2 `possession`).
-
-    Times are seconds elapsed in the period. `counted` is whether pbpstats counts it as a real
-    possession: one that starts with two seconds or less left and scores nothing is not.
-    `start_type` is None where pbpstats cannot tell (after a rebound of a heave). `end_type` is
-    the pbpstats event type that ended it: `FieldGoal`, `FreeThrow`, `Rebound` (a defensive one),
-    `Turnover`, `EndOfPeriod` and so on.
-    """
-
-    game_id: str
-    period: int
-    number: int
-    offense_team_id: int
-    start_sec: float
-    end_sec: float
-    start_score_margin: int
-    start_type: str | None
-    has_timeout: bool
-    previous_has_timeout: bool
-    end_type: str
-    counted: bool
 
 
 def pbpstats_dir(data_dir: Path) -> Path:

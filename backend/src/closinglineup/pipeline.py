@@ -2,10 +2,15 @@
 commands run it (spec §3.2).
 
 `parse_date` reads the date's games from the season's cached schedule, runs the box score and
-matchup parsers over each game whose traditional box score is cached, and rewrites the date's
-parquet file for every table, whole. A game a parser cannot read is reported and left out, so one
-bad payload does not hold back the rest of the date; a final game with no cached box score is
-reported as missing.
+matchup parsers over each game whose traditional box score is cached, then pbpstats over its live
+play-by-play for its stints and possessions, and rewrites the date's parquet file for every
+table, whole. A game a parser cannot read is reported and left out, so one bad payload does not
+hold back the rest of the date; a final game with no cached box score is reported as missing. A
+game whose box score parses but whose play-by-play does not (it is not cached, or pbpstats needs
+an override for it) keeps its box rows and is reported as failed, with no stints or possessions.
+
+`parse_shot_charts` parses cached shot charts into `shot` files, one per shot chart, keyed as the
+shot chart is cached (`load.parquet`).
 
 `player` and `roster_membership` are season-wide, not per game: each date's files hold the
 season's cached player list and team rosters as they are when the date is parsed, each roster's
@@ -21,6 +26,7 @@ from datetime import date, datetime, tzinfo
 from typing import Any
 
 from closinglineup.load.parquet import ParquetStore
+from closinglineup.parse import pbp
 from closinglineup.parse.box import parse_box
 from closinglineup.parse.matchups import parse_matchups
 from closinglineup.parse.roster import parse_players, parse_roster
@@ -30,10 +36,13 @@ from closinglineup.parse.rows import (
     ParseError,
     PlayerGameRow,
     PlayerRow,
+    PossessionRow,
     RosterMembershipRow,
     Row,
+    StintRow,
 )
 from closinglineup.parse.schedule import parse_schedule
+from closinglineup.parse.shots import parse_shots
 from closinglineup.season import season_label, season_of_game_id
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
@@ -46,6 +55,9 @@ REFERENCE = "reference"
 # The ways a payload of the wrong shape surfaces: `ParseError`, pydantic's `ValidationError` and
 # `JSONDecodeError` (all `ValueError`s), and a missing key or item.
 PAYLOAD_ERRORS = (ValueError, LookupError, TypeError)
+
+
+SHOT_TABLE = "shot"
 
 
 class NotCachedError(LookupError):
@@ -104,6 +116,13 @@ def _game_rows(
     return box, matchups
 
 
+def _pbp_rows(cache: RawCache, game_id: str) -> tuple[list[StintRow], list[PossessionRow]]:
+    """The game's stints and possessions, from pbpstats over its cached live play-by-play."""
+    pbp.materialize(cache, game_id)
+    data_dir = cache.root.parent
+    return pbp.stints_for_game(data_dir, game_id), pbp.possessions_for_game(data_dir, game_id)
+
+
 def _fetched_on(cache: RawCache, endpoint: str, key: str, tz: tzinfo) -> date:
     meta = cache.meta(nba_stats.SOURCE, endpoint, key)
     if meta is None:
@@ -147,6 +166,8 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
     report = ParseReport(day)
     box_rows: list[PlayerGameRow] = []
     matchup_rows: list[MatchupRow] = []
+    stint_rows: list[StintRow] = []
+    possession_rows: list[PossessionRow] = []
     for game in games:
         traditional = _payload(
             cache, nba_stats.SOURCE, nba_stats.BOXSCORE_TRADITIONAL_V3, game.game_id
@@ -163,6 +184,15 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         box_rows.extend(box)
         matchup_rows.extend(matchups)
         report.parsed.append(game.game_id)
+        try:
+            stints, possessions = _pbp_rows(cache, game.game_id)
+        # `PbpError`, a play-by-play that is not cached (`FileNotFoundError`), or whatever else
+        # pbpstats raises on a feed it cannot read, which it does not document. It is reported.
+        except Exception as exc:
+            report.failed[game.game_id] = f"play-by-play: {type(exc).__name__}: {exc}"
+            continue
+        stint_rows.extend(stints)
+        possession_rows.extend(possessions)
 
     players: list[PlayerRow] = []
     memberships: list[RosterMembershipRow] = []
@@ -176,8 +206,46 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         "roster_membership": [*memberships],
         "player_game": [*box_rows],
         "matchup": [*matchup_rows],
+        "stint": [*stint_rows],
+        "possession": [*possession_rows],
     }
     for table, rows in tables.items():
         store.write_rows(table, day, rows)
         report.rows[table] = len(rows)
+    return report
+
+
+@dataclass(frozen=True, slots=True)
+class ShotParseReport:
+    """What `parse_shot_charts` did: the rows written per shot chart parsed, and the shot charts
+    that were not cached or a parser failed on, with why."""
+
+    rows: dict[str, int] = field(default_factory=dict[str, int])
+    failed: dict[str, str] = field(default_factory=dict[str, str])
+
+
+def shot_chart_keys(cache: RawCache, season: str) -> list[str]:
+    """The cache keys of every cached shot chart of `season`, of any season type."""
+    return [
+        key
+        for key in cache.list(nba_stats.SOURCE, nba_stats.SHOT_CHART_DETAIL)
+        if key.split("_")[1:2] == [season]
+    ]
+
+
+def parse_shot_charts(cache: RawCache, store: ParquetStore, keys: list[str]) -> ShotParseReport:
+    """Parse each cached shot chart in `keys` into the `shot` file of the same key."""
+    report = ShotParseReport()
+    for key in keys:
+        payload = _payload(cache, nba_stats.SOURCE, nba_stats.SHOT_CHART_DETAIL, key)
+        if payload is None:
+            report.failed[key] = "not in the raw cache"
+            continue
+        try:
+            shots = parse_shots(payload)
+        except PAYLOAD_ERRORS as exc:
+            report.failed[key] = f"{type(exc).__name__}: {exc}"
+            continue
+        store.write_rows(SHOT_TABLE, key, shots)
+        report.rows[key] = len(shots)
     return report

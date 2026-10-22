@@ -108,7 +108,8 @@ Rules:
 ```
 fetch  : NBA.com ──curl_cffi──▶ DATA_DIR/raw/<source>/<endpoint>/<key>.json   (write-once)
 parse  : raw JSON ──▶ typed rows ──▶ DATA_DIR/parquet/<table>/<game_date>.parquet
-         (pbpstats reads DATA_DIR/pbpstats/… in file mode for stints/possessions)
+         (pbpstats reads DATA_DIR/pbpstats/… in file mode for stints/possessions;
+          shot files are per shot chart: DATA_DIR/parquet/shot/<player_id>_<season>_<type>.parquet)
 load   : parquet ──COPY──▶ staging ──upsert──▶ Postgres tables (§6)
 overlay: injury PDF / ESPN / transactions / EPM / DARKO / Spotrac ──▶ snapshot tables (§6.3)
 derive : refresh views → rotation_state → rotation_event → flags → bpm → reconcile
@@ -204,7 +205,7 @@ Every table has `created_at` / `updated_at`. IDs are NBA's (`nba_player_id`, `nb
 - `player_game(game_id, player_id, team_id, is_starter, seconds, dnp_reason NULL ∈ {cd, injury, inactive, suspension, g_league, other}, pts, fgm, fga, fg3m, fg3a, ftm, fta, oreb, dreb, ast, stl, blk, tov, pf, plus_minus, ts_pct, efg_pct, usg_pct, ast_pct, tov_pct, oreb_pct, dreb_pct, off_rating, def_rating, pace, deflections, contested_shots, charges_drawn, source ∈ {stats, cdn})` PK `(game_id, player_id)`
 - `stint(id, game_id, period, start_sec, end_sec, team_id, lineup_key, opp_lineup_key, possessions, pts_for, pts_against, is_garbage_time)` — one row per team per stint; `lineup_key` = five sorted player IDs joined by `-`.
 - `possession(id, game_id, …pbpstats columns as emitted…)` — pbpstats's schema plus `game_id`.
-- `shot(id, game_id, player_id, team_id, period, clock_sec, x, y, distance_ft, zone ∈ {rim, short_mid, long_mid, corner_3, above_break_3}, shot_type, made, assisted_by NULL, shot_clock_bucket NULL)`
+- `shot(id, game_id, player_id, team_id, period, clock_sec, x, y, distance_ft, zone ∈ {rim, short_mid, long_mid, corner_3, above_break_3}, shot_type, made, assisted_by NULL, shot_clock_bucket NULL)` — keyed by `(game_id, event_num)`, NBA.com's `GAME_EVENT_ID`; a load of a player's shot chart replaces his rows for that season and season type (NEU-1863)
 - `matchup(game_id, off_player_id, def_player_id, partial_poss, pts, fgm, fga, fg3m, fg3a, tov, ast)` PK `(game_id, off_player_id, def_player_id)`
 
 ### 6.3 Snapshots

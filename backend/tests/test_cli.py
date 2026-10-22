@@ -23,7 +23,7 @@ from closinglineup.cli import COMMANDS, app
 from closinglineup.clock import Clock
 from closinglineup.db.models import JobRun, LoadLog, PlayerGame
 from closinglineup.load.parquet import ROW_MODELS, ParquetStore
-from closinglineup.scheduler import NIGHTLY, POLL_FINALS
+from closinglineup.scheduler import NIGHTLY, POLL_FINALS, WEEKLY
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
@@ -48,10 +48,11 @@ EXPECTED = [
     "api",
     "worker",
     "nightly",
+    "weekly",
     "health",
     "reparse",
 ]
-IMPLEMENTED = {"fetch", "parse", "load", "health", "api", "worker", "nightly"}
+IMPLEMENTED = {"fetch", "parse", "load", "health", "api", "worker", "nightly", "weekly"}
 STUBS = [command for command in EXPECTED if command not in IMPLEMENTED]
 
 
@@ -295,7 +296,7 @@ def test_worker_runs_the_scheduler_with_every_job_until_sigterm(
     result = runner.invoke(app, ["worker"])
 
     assert result.exit_code == 0, result.output
-    assert calls == [[NIGHTLY, POLL_FINALS], "shutdown"]
+    assert calls == [[NIGHTLY, POLL_FINALS, WEEKLY], "shutdown"]
     assert set(handlers) == {signal.SIGTERM, signal.SIGINT}
 
 
@@ -358,7 +359,11 @@ def test_parse_exits_1_when_the_schedule_is_not_cached(data_env: Path) -> None:
         ("parse", ["--date", "2025-10-23", "--from", "2025-10-22"], "not both"),
         ("parse", ["--from", "2025-10-22"], "--from and --to go together"),
         ("parse", ["--from", "2025-10-24", "--to", "2025-10-23"], "--from is after --to"),
-        ("load", [], "pass --date, --from/--to or --missing"),
+        ("parse", ["--date", "2025-10-23", "--shots"], "pass exactly one of"),
+        ("parse", ["--date", "2025-10-23", "--season", "2025-26"], "--season goes with --shots"),
+        ("load", [], "pass --date, --from/--to, --missing or --shots"),
+        ("load", ["--shots", "--missing"], "--shots takes no dates and no --missing"),
+        ("load", ["--shots", "--date", "2025-10-23"], "--shots takes no dates and no --missing"),
     ],
 )
 def test_parse_and_load_without_dates_are_usage_errors(
@@ -368,6 +373,39 @@ def test_parse_and_load_without_dates_are_usage_errors(
 
     assert result.exit_code == 2
     assert message in ANSI_ESCAPE.sub("", result.output)
+
+
+SHOT_CHART = "201939_2025-26_regular-season"
+
+
+def _cache_shot_chart(data_dir: Path, key: str, body: bytes) -> None:
+    RawCache(data_dir).put(
+        nba_stats.SOURCE, nba_stats.SHOT_CHART_DETAIL, key, body, url="u", status=200
+    )
+
+
+def test_parse_shots_parses_every_cached_shot_chart_of_the_season(data_env: Path) -> None:
+    _cache_shot_chart(data_env, SHOT_CHART, season_fixture_body(nba_stats.SHOT_CHART_DETAIL))
+    _cache_shot_chart(data_env, "201939_2026-27_regular-season", b"{}")
+
+    result = runner.invoke(app, ["parse", "--shots", "--season", "2025-26"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == "parse shots 2025-26: 1 shot charts parsed\n"
+    assert ParquetStore(data_env).keys("shot") == [SHOT_CHART]
+
+
+def test_parse_shots_exits_1_when_a_shot_chart_fails(data_env: Path) -> None:
+    _cache_shot_chart(data_env, SHOT_CHART, b"{}")
+
+    result = runner.invoke(app, ["parse", "--shots", "--season", "2025-26"])
+
+    assert result.exit_code == 1
+    assert result.output.splitlines() == [
+        f"parse shots {SHOT_CHART}: failed: ParseError: payload has no Shot_Chart_Detail "
+        "result set",
+        "parse shots 2025-26: 0 shot charts parsed",
+    ]
 
 
 @pytest.fixture
@@ -396,7 +434,7 @@ def test_load_missing_reloads_only_the_date_whose_load_log_row_is_gone(
     result = runner.invoke(app, ["load", "--missing"])
 
     assert result.exit_code == 0, result.output
-    assert result.output == "load game 2025-10-23: succeeded, 2 rows, 0 changed\n"
+    assert result.output == "load game 2025-10-23: succeeded, 2 rows, 0 changed, 0 removed\n"
     assert runner.invoke(app, ["load", "--missing"]).output == "load: nothing to load\n"
 
 
@@ -443,3 +481,20 @@ def test_nightly_date_fetches_parses_and_loads_the_fixture_game(
     assert (run.job, run.status) == (NIGHTLY, "succeeded")
     assert run.detail is not None
     assert run.detail["loaded"]["player_game"] == 28
+
+
+def test_load_shots_loads_every_parsed_shot_chart_and_a_rerun_changes_nothing(
+    load_env: Path,
+) -> None:
+    cache_fixture_game(load_env)
+    _cache_shot_chart(load_env, SHOT_CHART, season_fixture_body(nba_stats.SHOT_CHART_DETAIL))
+    runner.invoke(app, ["parse", "--date", "2025-10-23"])
+    assert runner.invoke(app, ["load", "--date", "2025-10-23"]).exit_code == 0
+    assert runner.invoke(app, ["parse", "--shots", "--season", "2025-26"]).exit_code == 0
+
+    first = runner.invoke(app, ["load", "--shots"])
+    second = runner.invoke(app, ["load", "--shots"])
+
+    assert first.exit_code == 0, first.output
+    assert first.output == f"load shot {SHOT_CHART}: succeeded, 25 rows, 25 changed, 0 removed\n"
+    assert second.output == f"load shot {SHOT_CHART}: succeeded, 25 rows, 0 changed, 0 removed\n"

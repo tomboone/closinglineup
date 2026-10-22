@@ -14,17 +14,25 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup import scheduler
 from closinglineup.clock import FakeClock
-from closinglineup.db.models import JobRun, LoadLog, RunStatus
+from closinglineup.db.models import Game, JobRun, LoadLog, PlayerGame, RunStatus, Shot
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadError, LoadResult
 from closinglineup.load.parquet import ROW_MODELS, ParquetStore
-from closinglineup.scheduler import NIGHTLY, POLL_FINALS, Jobs, build_scheduler
+from closinglineup.scheduler import (
+    NIGHTLY,
+    POLL_FINALS,
+    WEEKLY,
+    Jobs,
+    build_scheduler,
+    shot_chart_players,
+)
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaHttpError, NbaSession, RateLimiter
+from closinglineup.sources.nba_stats import SeasonType
 from tests.fakes import RoutedGet
-from tests.test_nba_stats import GAME_ID, fixture_body
+from tests.test_nba_stats import GAME_ID, fixture_body, season_fixture_body
 
 CDN_FIXTURES = Path(__file__).parent / "fixtures" / "cdn"
 NIGHTLY_URL = "https://hc-ping.com/nightly-123"
@@ -202,6 +210,8 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
         "roster_membership": 0,
         "player_game": 0,
         "matchup": 0,
+        "stint": 0,
+        "possession": 0,
     }
     assert ok.call_count == 1
 
@@ -365,7 +375,7 @@ def _fire_times(trigger: Any, start: datetime, end: datetime) -> list[datetime]:
     return times
 
 
-def test_worker_registers_both_jobs_with_the_spec_triggers(
+def test_worker_registers_every_job_with_the_spec_triggers(
     settings: Settings, clock: FakeClock, tmp_path: Path, http: httpx.Client
 ) -> None:
     jobs = make_jobs(settings, clock, tmp_path, sessionmaker(), RoutedGet({}), Heartbeat({}, http))
@@ -374,7 +384,7 @@ def test_worker_registers_both_jobs_with_the_spec_triggers(
 
     scheduled = cast(list[Any], scheduler.get_jobs())  # pyright: ignore[reportUnknownMemberType]
     registered = {job.id: job for job in scheduled}
-    assert sorted(registered) == [NIGHTLY, POLL_FINALS]
+    assert sorted(registered) == [NIGHTLY, POLL_FINALS, WEEKLY]
     for job in registered.values():
         assert (job.max_instances, job.coalesce, job.misfire_grace_time) == (1, True, None)
     tz = settings.tz
@@ -390,3 +400,156 @@ def test_worker_registers_both_jobs_with_the_spec_triggers(
         *night,
         datetime(2026, 10, 22, 2, 0, tzinfo=tz),
     ]
+    fortnight = noon + timedelta(days=14)
+    # Mondays, the second after the end of daylight saving time.
+    assert _fire_times(registered[WEEKLY].trigger, noon, fortnight) == [
+        datetime(2026, 10, 26, 4, 30, tzinfo=tz),
+        datetime(2026, 11, 2, 4, 30, tzinfo=tz),
+    ]
+
+
+WEEKLY_URL = "https://hc-ping.com/weekly-123"
+SHOT_CHART_URL = f"{nba_stats.STATS_BASE}/{nba_stats.SHOT_CHART_DETAIL}"
+# 2026-27 games of each phase, which the weekly tests seed with who played in them.
+REGULAR = "0022600091"
+CUP_KNOCKOUT = "0022600092"
+PLAY_IN = "0052600001"
+PLAYOFF = "0042600001"
+PHASES = {REGULAR: "regular", CUP_KNOCKOUT: "cup_knockout", PLAY_IN: "play_in", PLAYOFF: "playoff"}
+CURRY = 201939
+
+
+def _seed_played(db: sessionmaker[Session], played: list[tuple[str, int, int]]) -> None:
+    """The `PHASES` games, and a GSW `player_game` row per (game, player, seconds) in `played`."""
+    games = list(PHASES)
+    with db.begin() as session:
+        session.execute(delete(Shot).where(Shot.game_id.in_(games)))
+        session.execute(delete(PlayerGame).where(PlayerGame.game_id.in_(games)))
+        session.execute(delete(Game).where(Game.game_id.in_(games)))
+        for game_id, phase in PHASES.items():
+            session.add(
+                Game(
+                    game_id=game_id,
+                    season="2026-27",
+                    game_date=DAY,
+                    phase=phase,
+                    home_team_id=1610612744,
+                    away_team_id=1610612743,
+                    status="final",
+                    home_b2b=False,
+                    away_b2b=False,
+                )
+            )
+        session.flush()
+        counts = dict.fromkeys(
+            ("pts", "fgm", "fga", "fg3m", "fg3a", "ftm", "fta", "oreb", "dreb", "ast", "stl"), 0
+        )
+        for game_id, player_id, seconds in played:
+            session.add(
+                PlayerGame(
+                    game_id=game_id,
+                    player_id=player_id,
+                    team_id=1610612744,
+                    is_starter=False,
+                    seconds=seconds,
+                    blk=0,
+                    tov=0,
+                    pf=0,
+                    plus_minus=0,
+                    source="stats",
+                    **counts,
+                )
+            )
+
+
+def test_shot_charts_are_fetched_for_each_season_type_a_player_has_played_in(
+    db: sessionmaker[Session],
+) -> None:
+    _seed_played(
+        db,
+        [
+            (REGULAR, 1, 600),
+            (CUP_KNOCKOUT, 1, 600),
+            (PLAYOFF, 1, 900),
+            (CUP_KNOCKOUT, 2, 300),
+            (PLAY_IN, 2, 120),
+            # A DNP has no shots.
+            (REGULAR, 3, 0),
+        ],
+    )
+
+    found = [(p, t) for p, t in shot_chart_players(db, "2026-27") if p in {1, 2, 3}]
+
+    assert found == [
+        (1, SeasonType.PLAYOFFS),
+        (1, SeasonType.REGULAR_SEASON),
+        (2, SeasonType.PLAY_IN),
+        (2, SeasonType.REGULAR_SEASON),
+    ]
+    assert shot_chart_players(db, "2027-28") == []
+
+
+def _shot_chart_of(game_id: str) -> bytes:
+    """The shot chart fixture, its shots moved to `game_id`."""
+    payload = json.loads(season_fixture_body(nba_stats.SHOT_CHART_DETAIL))
+    shots = payload["resultSets"][0]
+    column = shots["headers"].index("GAME_ID")
+    for row in shots["rowSet"]:
+        row[column] = game_id
+    return json.dumps(payload).encode()
+
+
+@respx.mock
+def test_weekly_refetches_parses_and_loads_the_seasons_shot_charts(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    _seed_played(db, [(REGULAR, CURRY, 2000)])
+    ok = respx.get(WEEKLY_URL).respond(200)
+    get = RoutedGet({SHOT_CHART_URL: _shot_chart_of(REGULAR)})
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({"weekly": WEEKLY_URL}, http))
+    players = len(shot_chart_players(db, "2026-27"))
+
+    first = jobs.weekly()
+    second = jobs.weekly()
+
+    key = f"{CURRY}_2026-27_regular-season"
+    curry = [params for _, params in get.calls if params and params["PlayerID"] == str(CURRY)]
+    # Re-fetched each week, since the cache would otherwise keep the first week's shots.
+    assert [(p["Season"], p["SeasonType"]) for p in curry] == [("2026-27", "Regular Season")] * 2
+    assert first["season"] == "2026-27"
+    assert first["shot_charts"] == first["fetched"] == players
+    assert (first["failed"], first["parse_failed"]) == ([], {})
+    assert (second["changed"], second["removed"]) == (0, 0)
+    assert key in jobs.store.keys("shot")
+    with db() as session:
+        loaded = session.scalars(select(Shot).where(Shot.game_id == REGULAR)).all()
+        assert {shot.player_id for shot in loaded} == {CURRY}
+        assert len(loaded) == 25
+    assert [(run.job, run.status) for run in runs(db)] == [(WEEKLY, "succeeded")] * 2
+    assert ok.call_count == 2
+
+
+@respx.mock
+def test_weekly_fails_when_every_shot_chart_fails_to_fetch(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    _seed_played(db, [(REGULAR, CURRY, 2000)])
+    fail = respx.post(f"{WEEKLY_URL}/fail").respond(200)
+    jobs = make_jobs(
+        settings, clock, tmp_path, db, RoutedGet({}), Heartbeat({"weekly": WEEKLY_URL}, http)
+    )
+
+    with pytest.raises(NbaHttpError, match="shot charts failed to fetch"):
+        jobs.weekly()
+
+    [run] = runs(db)
+    assert (run.job, run.status) == (WEEKLY, "failed")
+    assert fail.call_count == 1
