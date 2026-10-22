@@ -4,7 +4,7 @@
 
 Run it from `backend/` on a residential IP: kumadrome, or a machine on the same network. Each
 recorder is registered by name with `@recorder` and fetches through the real source functions into
-a throwaway raw cache, then writes each response, trimmed, to
+a throwaway raw cache, then writes each response, trimmed where it is bulky, to
 `tests/fixtures/<source>/<endpoint>/<key>.json`, the same layout as the cache. A recorder replaces
 the fixtures of the endpoints it records. With no names given, every registered recorder runs.
 """

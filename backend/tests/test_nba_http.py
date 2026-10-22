@@ -190,7 +190,7 @@ def test_fetch_json_force_refetches_and_overwrites(
         (fake_response(200, b"[1, 2]"), "not a JSON object"),
     ],
 )
-def test_fetch_json_never_caches_a_badresponse(
+def test_fetch_json_never_caches_a_bad_response(
     session: NbaSession,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

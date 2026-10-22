@@ -1,6 +1,7 @@
 # cdn.nba.com fixtures
 
-One trimmed response per endpoint, laid out like the raw cache (`<endpoint>/<key>.json`).
+One response per endpoint, laid out like the raw cache (`<endpoint>/<key>.json`); the schedule
+and play-by-play are trimmed, the scoreboard and box score kept whole.
 Re-record them from `backend/` on a residential IP (kumadrome, or a machine on the same network):
 
 ```
