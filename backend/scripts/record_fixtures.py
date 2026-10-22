@@ -14,7 +14,7 @@ import json
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,7 @@ from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import make_nba_session
+from closinglineup.teams import by_tricode
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 
@@ -175,6 +176,81 @@ def record_stats(options: Options) -> None:
             raw = cache.get(nba_stats.SOURCE, result.endpoint, game_id)
             assert raw is not None
             write_fixture(nba_stats.SOURCE, result.endpoint, game_id, json.loads(raw))
+
+
+# The season-wide recordings: the fixture game's season, date and home team, and its top scorer.
+SEASON = "2025-26"
+SEASON_DATE = date(2025, 10, 23)
+SEASON_TEAM = by_tricode("GSW").nba_team_id
+SEASON_PLAYER = 201939  # Stephen Curry
+# Rows kept of each result set in a trimmed fixture: enough to show the shape.
+TRIMMED_ROWS = 10
+
+
+def _trim_rows(payload: Payload) -> Payload:
+    """The first `TRIMMED_ROWS` rows of each result set."""
+    result_sets = [{**rs, "rowSet": rs["rowSet"][:TRIMMED_ROWS]} for rs in payload["resultSets"]]
+    return {**payload, "resultSets": result_sets}
+
+
+@recorder(
+    "stats-season",
+    f"stats.nba.com: every season-wide endpoint for {SEASON} (regular season), the scoreboard "
+    f"of {SEASON_DATE}, and GSW and Stephen Curry where one team or player is asked for; the "
+    f"league-wide lists trimmed to their first {TRIMMED_ROWS} rows",
+)
+def record_stats_season(options: Options) -> None:
+    clock = SystemClock()
+    regular = nba_stats.SeasonType.REGULAR_SEASON
+    advanced = nba_stats.MeasureType.ADVANCED
+    with (
+        tempfile.TemporaryDirectory() as data_dir,
+        make_nba_session(_settings(), clock) as session,
+    ):
+        cache = RawCache(Path(data_dir), clock)
+
+        def record(endpoint: str, payload: Payload, *, trim: bool = False) -> None:
+            (key,) = cache.list(nba_stats.SOURCE, endpoint)
+            write_fixture(nba_stats.SOURCE, endpoint, key, _trim_rows(payload) if trim else payload)
+
+        record(nba_stats.SCOREBOARD_V3, nba_stats.fetch_scoreboard_v3(session, cache, SEASON_DATE))
+        record(
+            nba_stats.COMMON_TEAM_ROSTER,
+            nba_stats.fetch_common_team_roster(session, cache, SEASON_TEAM, SEASON),
+        )
+        record(
+            nba_stats.COMMON_ALL_PLAYERS,
+            nba_stats.fetch_common_all_players(session, cache, SEASON),
+            trim=True,
+        )
+        record(
+            nba_stats.PLAYER_GAME_LOGS,
+            nba_stats.fetch_player_game_logs(session, cache, SEASON, regular),
+            trim=True,
+        )
+        record(
+            nba_stats.SHOT_CHART_DETAIL,
+            nba_stats.fetch_shot_chart_detail(session, cache, SEASON_PLAYER, SEASON, regular),
+            trim=True,
+        )
+        record(
+            nba_stats.LEAGUE_DASH_LINEUPS,
+            nba_stats.fetch_league_dash_lineups(session, cache, SEASON, regular),
+            trim=True,
+        )
+        record(
+            nba_stats.LEAGUE_PLAYER_ON_DETAILS,
+            nba_stats.fetch_league_player_on_details(session, cache, SEASON_TEAM, SEASON, regular),
+        )
+        record(
+            nba_stats.LEAGUE_DASH_PLAYER_STATS,
+            nba_stats.fetch_league_dash_player_stats(session, cache, SEASON, regular, advanced),
+            trim=True,
+        )
+        record(
+            nba_stats.LEAGUE_DASH_TEAM_STATS,
+            nba_stats.fetch_league_dash_team_stats(session, cache, SEASON, regular, advanced),
+        )
 
 
 def _registry() -> str:

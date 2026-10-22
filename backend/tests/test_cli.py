@@ -13,8 +13,9 @@ from closinglineup.clock import Clock
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
+from closinglineup.teams import TEAMS
 from tests.fakes import ScriptedGet, fake_response
-from tests.test_nba_stats import ENDPOINTS, GAME_ID, fixture_body
+from tests.test_nba_stats import ENDPOINTS, GAME_ID, fixture_body, season_fixture_body
 
 runner = CliRunner()
 
@@ -115,7 +116,7 @@ def test_fetch_game_id_on_a_cached_game_makes_no_requests(
 
     assert result.exit_code == 0, result.output
     assert scripted_nba.calls == []
-    assert result.output.splitlines() == [f"{endpoint}: cached" for endpoint in ENDPOINTS]
+    assert result.output.splitlines() == [f"{e} {GAME_ID}: cached" for e in ENDPOINTS]
 
 
 def test_fetch_game_id_with_force_makes_eight_requests_and_fails_on_a_failed_endpoint(
@@ -129,5 +130,55 @@ def test_fetch_game_id_with_force_makes_eight_requests_and_fails_on_a_failed_end
     assert result.exit_code == 1
     assert len(scripted_nba.calls) == 8
     assert result.output.splitlines()[-1] == (
-        f"playbyplayv2: failed: playbyplayv2 has no data for game {GAME_ID}"
+        f"playbyplayv2 {GAME_ID}: failed: playbyplayv2 has no data for game {GAME_ID}"
     )
+
+
+def test_fetch_rosters_writes_a_roster_per_team_and_the_player_list(
+    scripted_nba: ScriptedGet, tmp_path: Path
+) -> None:
+    roster = fake_response(200, season_fixture_body("commonteamroster"))
+    players = fake_response(200, season_fixture_body("commonallplayers"))
+    scripted_nba.outcomes.extend([*[roster] * 30, players])
+
+    result = runner.invoke(app, ["fetch", "--rosters", "--season", "2026-27"])
+
+    assert result.exit_code == 0, result.output
+    rosters = RawCache(tmp_path).list("nba_stats", "commonteamroster")
+    assert rosters == sorted(f"{t.nba_team_id}_2026-27" for t in TEAMS)
+    assert RawCache(tmp_path).list("nba_stats", "commonallplayers") == ["2026-27"]
+    assert result.output.splitlines()[0] == "commonteamroster 1610612737_2026-27: fetched"
+
+
+def test_fetch_shots_fetches_the_player_for_the_season_type(
+    scripted_nba: ScriptedGet, tmp_path: Path
+) -> None:
+    scripted_nba.outcomes.append(fake_response(200, season_fixture_body("shotchartdetail")))
+
+    args = ["--shots", "--player-id", "201939", "--season", "2025-26", "--season-type", "Playoffs"]
+    result = runner.invoke(app, ["fetch", *args])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == "shotchartdetail 201939_2025-26_playoffs: fetched\n"
+    [(_, params)] = scripted_nba.calls
+    assert params is not None
+    assert (params["PlayerID"], params["SeasonType"]) == ("201939", "Playoffs")
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        ([], "pass exactly one of"),
+        (["--rosters", "--aggregates"], "pass exactly one of"),
+        (["--game-id", GAME_ID, "--shots"], "pass exactly one of"),
+        (["--shots"], "--shots needs --player-id"),
+    ],
+)
+def test_fetch_without_exactly_one_mode_is_a_usage_error(
+    scripted_nba: ScriptedGet, args: list[str], message: str
+) -> None:
+    result = runner.invoke(app, ["fetch", *args])
+
+    assert result.exit_code == 2
+    assert message in ANSI_ESCAPE.sub("", result.output)
+    assert scripted_nba.calls == []
