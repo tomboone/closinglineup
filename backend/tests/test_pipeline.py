@@ -8,7 +8,7 @@ import pytest
 
 from closinglineup.clock import FakeClock
 from closinglineup.load.parquet import ParquetStore
-from closinglineup.pipeline import NotCachedError, game_date_of, parse_date
+from closinglineup.pipeline import REFERENCE, NotCachedError, game_date_of, parse_date
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from tests.test_nba_stats import WITH_DATA, fixture_body, season_fixture_body
@@ -143,6 +143,20 @@ def test_a_game_a_parser_cannot_read_is_reported_and_left_out(tmp_path: Path) ->
     assert report.failed == {
         UNCACHED: f"ParseError: cached box scores of {UNCACHED} are for game {GAME}"
     }
+    assert report.rows["player_game"] == PLAYER_GAMES
+
+
+def test_reference_rows_a_parser_cannot_read_are_reported_and_left_out(tmp_path: Path) -> None:
+    cache = cache_fixture_game(tmp_path)
+    key = f"{GSW}_2025-26"
+    cache.put(
+        nba_stats.SOURCE, nba_stats.COMMON_TEAM_ROSTER, key, b"{}", url="u", status=200, force=True
+    )
+
+    report = parse_date(cache, ParquetStore(tmp_path), DAY, TZ)
+
+    assert report.failed == {REFERENCE: "ParseError: payload has no CommonTeamRoster result set"}
+    assert (report.rows["player"], report.rows["roster_membership"]) == (0, 0)
     assert report.rows["player_game"] == PLAYER_GAMES
 
 

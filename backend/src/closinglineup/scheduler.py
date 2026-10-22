@@ -125,8 +125,9 @@ class Jobs:
         A game is final if the schedule says so or `poll_finals` saw it go final. An endpoint that
         answers badly is listed in the run's detail and does not fail the job, since
         `playbyplayv2` currently always does (see `nba_stats.fetch_playbyplay_v2`); nor does a
-        game a parser cannot read, which `parse_date` leaves out. A table that fails to load fails
-        the job, and its failed `load_log` row is there for `load --missing`.
+        game a parser cannot read, which `parse_date` leaves out. Each earlier parsed date whose
+        last load of a table failed or never ran is loaded again. A table that fails to load fails
+        the job, and its failed `load_log` row is there for the next run.
         """
         return self._run(NIGHTLY, lambda: self._nightly(day), family="nightly")
 
@@ -159,7 +160,10 @@ class Jobs:
         self.finals.pop(day, None)
         parsed = parse_date(self.cache, self.store, day, self.settings.tz)
         loaded = load_dates(self.db, self.store, self.clock, [day])
-        raise_for_failures(loaded)
+        # Self-heals any earlier date a past run left without a successful load (spec §3.2).
+        earlier = [d for d in self.store.dates() if d != day]
+        healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
+        raise_for_failures([*loaded, *healed])
         return {
             "date": day.isoformat(),
             "games": games,
@@ -169,6 +173,7 @@ class Jobs:
             "parse_failed": parsed.failed,
             "parse_missing": parsed.missing,
             "loaded": {result.table: result.rows for result in loaded},
+            "healed": [f"{result.table} {result.game_date}" for result in healed],
         }
 
     def _poll_finals(self) -> Detail:

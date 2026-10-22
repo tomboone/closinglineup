@@ -168,7 +168,7 @@ def parse(
         try:
             days = [game_date_of(cache, game_id)]
         except NotCachedError as exc:
-            typer.echo(f"parse {game_id}: failed: {exc}", err=True)
+            typer.echo(f"parse {game_id}: failed: {exc}")
             raise typer.Exit(1) from None
     for day in days or []:
         try:

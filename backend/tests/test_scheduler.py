@@ -9,15 +9,15 @@ import httpx
 import pytest
 import respx
 from curl_cffi import requests
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup import scheduler
 from closinglineup.clock import FakeClock
-from closinglineup.db.models import JobRun, RunStatus
+from closinglineup.db.models import JobRun, LoadLog, RunStatus
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadError, LoadResult
-from closinglineup.load.parquet import ParquetStore
+from closinglineup.load.parquet import ROW_MODELS, ParquetStore
 from closinglineup.scheduler import NIGHTLY, POLL_FINALS, Jobs, build_scheduler
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
@@ -206,6 +206,29 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
     assert ok.call_count == 1
 
 
+def test_nightly_loads_again_an_earlier_date_with_no_successful_load(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    earlier = DAY - timedelta(days=3)
+    with db.begin() as session:
+        session.execute(delete(LoadLog).where(LoadLog.game_date == earlier))
+    store = ParquetStore(tmp_path)
+    for table in ROW_MODELS:
+        store.write_rows(table, earlier, [])
+    get = RoutedGet(nba_routes(SCHEDULE, FINAL_A, FINAL_B))
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    first = jobs.nightly(DAY)
+    second = jobs.nightly(DAY)
+
+    assert first["healed"] == [f"{table} {earlier}" for table in ROW_MODELS]
+    assert second["healed"] == []
+
+
 @respx.mock
 def test_nightly_with_a_table_that_fails_to_load_fails_the_job(
     settings: Settings,
@@ -218,8 +241,9 @@ def test_nightly_with_a_table_that_fails_to_load_fails_the_job(
     fail = respx.post(f"{NIGHTLY_URL}/fail").respond(200)
     failed = LoadResult("game", DAY, RunStatus.FAILED, error="IntegrityError: boom")
 
-    def failing_load(*args: Any, **kwargs: Any) -> list[LoadResult]:
-        return [failed]
+    def failing_load(*args: Any, missing: bool = False) -> list[LoadResult]:
+        # Fails the date's own load; there is no earlier date to heal.
+        return [] if missing else [failed]
 
     monkeypatch.setattr(scheduler, "load_dates", failing_load)
     get = RoutedGet(nba_routes(SCHEDULE, FINAL_A, FINAL_B))

@@ -8,8 +8,11 @@ bad payload does not hold back the rest of the date; a final game with no cached
 reported as missing.
 
 `player` and `roster_membership` are season-wide, not per game: each date's files hold the
-season's cached player list and team rosters, each roster's memberships open from the day it was
-fetched (`parse.roster`). Loading them again for another date is a no-op upsert.
+season's cached player list and team rosters as they are when the date is parsed, each roster's
+memberships open from the day it was fetched (`parse.roster`). The cache keeps one roster per team
+per season, so parsing an earlier date after a newer roster fetch writes that fetch's
+memberships, not the ones of the date; `derive` builds the history (NEU-1869). Reference rows a
+parser cannot read are reported under `REFERENCE` and left out, like a game's.
 """
 
 import json
@@ -37,6 +40,13 @@ from closinglineup.sources.cache import RawCache
 
 type Payload = dict[str, Any]
 
+# `ParseReport.failed`'s key for the season's player list and rosters.
+REFERENCE = "reference"
+
+# The ways a payload of the wrong shape surfaces: `ParseError`, pydantic's `ValidationError` and
+# `JSONDecodeError` (all `ValueError`s), and a missing key or item.
+PAYLOAD_ERRORS = (ValueError, LookupError, TypeError)
+
 
 class NotCachedError(LookupError):
     """A response the parse step needs is not in the raw cache."""
@@ -45,7 +55,8 @@ class NotCachedError(LookupError):
 @dataclass(frozen=True, slots=True)
 class ParseReport:
     """What `parse_date` did for one date: the games it parsed, the final games it had no box
-    score for, the games a parser failed on (with why), and the rows written per table."""
+    score for, the games (or `REFERENCE`) a parser failed on, with why, and the rows written per
+    table."""
 
     game_date: date
     parsed: list[str] = field(default_factory=list[str])
@@ -146,16 +157,19 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
             continue
         try:
             box, matchups = _game_rows(cache, game.game_id, traditional)
-        # The ways a payload of the wrong shape surfaces: `ParseError`, pydantic's
-        # `ValidationError` and `JSONDecodeError` (all `ValueError`s), and a missing key or item.
-        except (ValueError, LookupError, TypeError) as exc:
+        except PAYLOAD_ERRORS as exc:
             report.failed[game.game_id] = f"{type(exc).__name__}: {exc}"
             continue
         box_rows.extend(box)
         matchup_rows.extend(matchups)
         report.parsed.append(game.game_id)
 
-    players, memberships = _reference_rows(cache, season, tz)
+    players: list[PlayerRow] = []
+    memberships: list[RosterMembershipRow] = []
+    try:
+        players, memberships = _reference_rows(cache, season, tz)
+    except PAYLOAD_ERRORS as exc:
+        report.failed[REFERENCE] = f"{type(exc).__name__}: {exc}"
     tables: dict[str, list[Row]] = {
         "game": [*games],
         "player": [*players],
