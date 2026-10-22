@@ -15,7 +15,7 @@ The season-wide endpoints are keyed by season, and season type where they take o
 whatever the season looked like when first fetched; a refresh during the season passes `force`.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -38,6 +38,7 @@ BOXSCORE_USAGE_V3 = "boxscoreusagev3"
 PLAYBYPLAY_V3 = "playbyplayv3"
 PLAYBYPLAY_V2 = "playbyplayv2"
 SCOREBOARD_V3 = "scoreboardv3"
+SCHEDULE_LEAGUE_V2 = "scheduleleaguev2"
 COMMON_TEAM_ROSTER = "commonteamroster"
 COMMON_ALL_PLAYERS = "commonallplayers"
 PLAYER_GAME_LOGS = "playergamelogs"
@@ -322,9 +323,15 @@ def _attempt(
 
 
 def fetch_game(
-    session: NbaSession, cache: RawCache, game_id: str, *, force: bool = False
+    session: NbaSession,
+    cache: RawCache,
+    game_id: str,
+    *,
+    force: bool = False,
+    skip: Collection[str] = (),
 ) -> list[EndpointResult]:
-    """Fetch every per-game endpoint for `game_id` into the cache, in `GAME_ENDPOINTS` order.
+    """Fetch every per-game endpoint for `game_id` but `skip` into the cache, in `GAME_ENDPOINTS`
+    order.
 
     An endpoint that answers badly (`NbaHttpError`) is reported as FAILED and the rest still run,
     so one endpoint's outage costs only its own data; a connection error, which `NbaSession` has
@@ -339,6 +346,7 @@ def fetch_game(
             force=force,
         )
         for endpoint, fetch in GAME_ENDPOINTS.items()
+        if endpoint not in skip
     ]
 
 
@@ -359,6 +367,16 @@ def _scoreboard_v3(game_date: date) -> Request:
             raise NbaHttpError(f"{SCOREBOARD_V3} for {day} has games not final: {not_final}")
 
     return Request(SCOREBOARD_V3, day, {"GameDate": day, "LeagueID": NBA_LEAGUE_ID}, check)
+
+
+def _schedule_league_v2(season: str) -> Request:
+    def check(data: Payload) -> None:
+        schedule: Payload = data.get("leagueSchedule") or {}
+        if schedule.get("seasonYear") != season or not schedule.get("gameDates"):
+            raise NbaHttpError(f"{SCHEDULE_LEAGUE_V2} has no data for {season}")
+
+    params = {"LeagueID": NBA_LEAGUE_ID, "Season": season}
+    return Request(SCHEDULE_LEAGUE_V2, season, params, check)
 
 
 def _common_team_roster(team_id: int, season: str) -> Request:
@@ -513,6 +531,20 @@ def fetch_scoreboard_v3(
     only until then.
     """
     return _fetch(session, cache, _scoreboard_v3(game_date), force=force)
+
+
+def fetch_schedule_league_v2(
+    session: NbaSession, cache: RawCache, season: str, *, force: bool = False
+) -> Payload:
+    """The schedule of any season, in cdn.nba.com's `scheduleLeagueV2` shape, cached under the
+    season.
+
+    cdn.nba.com serves only the current season's (`nba_cdn.fetch_schedule`), so a past season's
+    comes from here. It fills in as the season goes, as that one does, so a refresh passes
+    `force`. Probed 2026-10-22: 2025-26 lists 1,400 games, all final, and 2026-27 the season so
+    far, updated that morning.
+    """
+    return _fetch(session, cache, _schedule_league_v2(season), force=force)
 
 
 def fetch_common_team_roster(

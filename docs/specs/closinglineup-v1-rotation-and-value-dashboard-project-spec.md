@@ -141,6 +141,7 @@ One function per endpoint; parameter names follow nba_api's documentation for th
 | Endpoint | Key params | Used for | Cadence |
 |---|---|---|---|
 | `scoreboardv3` | `GameDate`, `LeagueID=00` | game status for a date | nightly, backfill |
+| `scheduleleaguev2` | `LeagueID=00`, `Season` | any season's schedule, in cdn.nba.com's shape; the CDN serves only the current season's (NEU-1864) | backfill |
 | `boxscoretraditionalv3` | `GameID`, `StartPeriod=0`, `EndPeriod=14`, `StartRange=0`, `EndRange=0`, `RangeType=0` | starters, minutes, traditional box, DNP reasons | per game |
 | `boxscoreadvancedv3` | same | TS%, eFG%, usage, AST%, TOV%, REB%, ratings | per game |
 | `boxscorehustlev2` | `GameID` | deflections, contested shots, charges | per game |
@@ -197,7 +198,7 @@ Every table has `created_at` / `updated_at`. IDs are NBA's (`nba_player_id`, `nb
 
 - `team(nba_team_id PK, tricode, name, conference, division)`
 - `player(nba_player_id PK, name, birthdate, draft_year, draft_pick, height_in, position)`
-- `roster_membership(id, player_id, team_id, start_date, end_date NULL, contract_type ∈ {standard, two_way, ten_day, exhibit_10}, source)` — derived nightly from rosters + transactions; a player is on one team per date.
+- `roster_membership(id, player_id, team_id, start_date, end_date NULL, contract_type ∈ {standard, two_way, ten_day, exhibit_10}, source)` — derived nightly from rosters + transactions; a player is on one team per date. A season's history is first built from its games: a span per run of games a player has a `player_game` row with one team, `source='player_game'` (NEU-1864).
 - `game(game_id PK, season, game_date, phase ∈ {regular, cup_knockout, play_in, playoff}, home_team_id, away_team_id, status ∈ {scheduled, final, postponed}, home_score, away_score, home_b2b, away_b2b)`
 
 ### 6.2 Per game
