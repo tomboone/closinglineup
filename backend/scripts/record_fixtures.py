@@ -21,7 +21,7 @@ from typing import Any
 from closinglineup.clock import SystemClock
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
-from closinglineup.sources import nba_cdn
+from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import make_nba_session
 
@@ -32,7 +32,7 @@ type Payload = dict[str, Any]
 
 @dataclass(frozen=True, slots=True)
 class Options:
-    # The game whose box score and play-by-play are recorded; the latest final one when unset.
+    # The game whose box scores and play-by-play are recorded; each recorder has its own default.
     game_id: str | None
 
 
@@ -150,6 +150,33 @@ def record_cdn(options: Options) -> None:
     write_fixture(source, nba_cdn.PLAYBYPLAY, game_id, _trim_pbp(pbp))
 
 
+# A 2025-26 game that went to overtime, DEN at GSW on 2025-10-23, 137-131 after one overtime: the
+# full game the per-game parsers, pbpstats's among them, are tested on (spec §11).
+STATS_GAME_ID = "0022500006"
+
+
+@recorder(
+    "stats",
+    "stats.nba.com: every per-game endpoint for --game-id (default: the 2025-26 overtime game "
+    f"{STATS_GAME_ID}), whole; an endpoint that fails keeps its existing fixture",
+)
+def record_stats(options: Options) -> None:
+    clock = SystemClock()
+    game_id = options.game_id or STATS_GAME_ID
+    with (
+        tempfile.TemporaryDirectory() as data_dir,
+        make_nba_session(_settings(), clock) as session,
+    ):
+        cache = RawCache(Path(data_dir), clock)
+        for result in nba_stats.fetch_game(session, cache, game_id):
+            if result.status is nba_stats.FetchStatus.FAILED:
+                print(f"skipped {result.endpoint}: {result.error}")
+                continue
+            raw = cache.get(nba_stats.SOURCE, result.endpoint, game_id)
+            assert raw is not None
+            write_fixture(nba_stats.SOURCE, result.endpoint, game_id, json.loads(raw))
+
+
 def _registry() -> str:
     width = max(map(len, RECORDERS))
     lines = [f"  {name:<{width}}  {r.help}" for name, r in sorted(RECORDERS.items())]
@@ -163,7 +190,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--game-id", help="game for the per-game recordings (default: latest final)"
+        "--game-id", help="game for the per-game recordings (default: see each recorder)"
     )
     parser.add_argument(
         "recorders", nargs="*", metavar="RECORDER", help="recorders to run (default: all)"

@@ -7,8 +7,12 @@ import typer
 import uvicorn
 from sqlalchemy.exc import OperationalError
 
+from closinglineup.clock import SystemClock
 from closinglineup.db.session import make_engine, ping
 from closinglineup.settings import Settings
+from closinglineup.sources.cache import RawCache
+from closinglineup.sources.nba_http import make_nba_session
+from closinglineup.sources.nba_stats import FetchStatus, fetch_game
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -36,6 +40,23 @@ def health() -> None:
     finally:
         engine.dispose()
     typer.echo("health: ok")
+
+
+@app.command("fetch", help=COMMANDS["fetch"])
+def fetch(
+    game_id: Annotated[str, typer.Option(help="Fetch every per-game endpoint for this game.")],
+    force: Annotated[bool, typer.Option(help="Re-fetch responses already cached.")] = False,
+) -> None:
+    settings = Settings()
+    clock = SystemClock()
+    cache = RawCache(settings.data_dir, clock)
+    with make_nba_session(settings, clock) as session:
+        results = fetch_game(session, cache, game_id, force=force)
+    for result in results:
+        reason = f": {result.error}" if result.error else ""
+        typer.echo(f"{result.endpoint}: {result.status}{reason}")
+    if any(result.status is FetchStatus.FAILED for result in results):
+        raise typer.Exit(1)
 
 
 @app.command("api", help=COMMANDS["api"])
