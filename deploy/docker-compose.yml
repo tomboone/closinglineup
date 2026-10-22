@@ -1,0 +1,99 @@
+# closinglineup on kumadrome, the home server (spec §12). Deploy and operate per README.md; local
+# development uses the root docker-compose.yml instead.
+name: closinglineup
+
+x-app: &app
+  # `latest` tracks main; pin `sha-<7>` to roll back (README).
+  image: ghcr.io/tomboone/closinglineup:latest
+  env_file: .env
+  environment:
+    # Built here rather than in .env, so the password is set in one place.
+    DATABASE_URL: postgresql+psycopg://closinglineup:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/closinglineup
+    DATA_DIR: /data
+  volumes:
+    # create_host_path: false makes the start fail if the USB drive is not mounted, instead of
+    # Docker creating an empty, root-owned directory on the root disk.
+    - type: bind
+      source: ${DATA_HOST_DIR:?set DATA_HOST_DIR in .env}
+      target: /data
+      bind:
+        create_host_path: false
+  restart: unless-stopped
+  init: true
+  labels:
+    - com.centurylinklabs.watchtower.enable=true
+    - com.centurylinklabs.watchtower.scope=closinglineup
+
+services:
+  postgres:
+    # Not watched by Watchtower: a major upgrade needs a dump and restore, never a pull.
+    image: postgres:17
+    environment:
+      POSTGRES_USER: closinglineup
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: closinglineup
+    volumes:
+      - type: bind
+        source: ${PG_HOST_DIR:?set PG_HOST_DIR in .env}
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U closinglineup -d closinglineup"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    <<: *app
+    # Migrates before serving, so a Watchtower update that brings a migration applies it; only
+    # `app` migrates, so two containers never race on the same upgrade.
+    command: ["sh", "-c", "alembic upgrade head && exec closinglineup api"]
+    # The image's DB round-trip, plus a request to the API: it serves only once the migrations
+    # above have run, so healthy here means the schema is at head.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          closinglineup health && python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      start_interval: 2s
+    ports:
+      # Loopback only: nothing on the LAN reaches it. The Tailscale sidecar (M7) will serve it on
+      # the personal tailnet.
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    <<: *app
+    command: ["closinglineup", "worker"]
+    depends_on:
+      # `app` is healthy only once it has migrated and is serving, so the worker never writes
+      # `job_run` rows into a schema that is not there yet.
+      app:
+        condition: service_healthy
+
+  # Polls GHCR every 5 minutes and restarts only enabled containers in the `closinglineup` scope, so
+  # it leaves the other stacks' containers (and their own Watchtowers) on the same host alone. The
+  # instance carries its own scope label, as Watchtower's multiple-instance docs require.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    command: ["--label-enable", "--scope", "closinglineup", "--interval", "300", "--cleanup"]
+    environment:
+      # Watchtower's client defaults to API 1.25, which Docker Engine 29+ rejects.
+      DOCKER_API_VERSION: "1.44"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/watchtower", "--health-check"]
+      interval: 60s
+      timeout: 10s
+    labels:
+      - com.centurylinklabs.watchtower.scope=closinglineup
