@@ -13,7 +13,7 @@ timeouts included, and never a 5xx, so the retry loop here is our own.
 import json
 import logging
 import random
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from types import TracebackType
 from typing import Any, Self
@@ -39,7 +39,8 @@ log = logging.getLogger(__name__)
 
 
 class NbaHttpError(Exception):
-    """A response that must not be cached: a non-200 status, or a body that is not a JSON object."""
+    """A response that must not be cached: a non-200 status, a body that is not a JSON object, or
+    one its endpoint's check rejects."""
 
 
 class RateLimiter:
@@ -152,11 +153,13 @@ def fetch_json(
     params: Mapping[str, str] | None = None,
     *,
     force: bool = False,
+    check: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """The cached response for `key`, fetching and caching it first on a miss or with `force`.
 
-    Only a 200 whose body is a JSON object is cached; anything else raises `NbaHttpError`, so a
-    bad response is retried on the next run instead of being kept forever.
+    Only a 200 whose body is a JSON object, and which `check` accepts by returning rather than
+    raising `NbaHttpError`, is cached; anything else raises, so a bad response is retried on the
+    next run instead of being kept forever.
     """
     if not force and (cached := cache.get(source, endpoint, key)) is not None:
         return _json_object(cached, url)
@@ -164,6 +167,8 @@ def fetch_json(
     if response.status_code != 200:
         raise NbaHttpError(f"HTTP {response.status_code} from {url}")
     data = _json_object(response.content, url)
+    if check is not None:
+        check(data)
     cache.put(
         source,
         endpoint,

@@ -20,6 +20,7 @@ from closinglineup.sources.nba_http import (
     fetch_json,
     make_nba_session,
 )
+from tests.fakes import ScriptedGet, fake_response
 
 URL = "https://stats.nba.com/stats/boxscoretraditionalv3"
 PARAMS = {"GameID": "0022500001"}
@@ -40,28 +41,6 @@ def session(clock: FakeClock) -> Iterator[NbaSession]:
 
 def _elapsed(clock: FakeClock) -> float:
     return (clock.now() - START).total_seconds()
-
-
-def _response(status: int, body: bytes = b"") -> requests.Response:
-    response = requests.Response()
-    response.status_code = status
-    response.content = body
-    return response
-
-
-class ScriptedGet:
-    """Stands in for `curl_cffi.Session.get`: returns or raises each scripted outcome in turn."""
-
-    def __init__(self, *outcomes: requests.Response | Exception) -> None:
-        self._outcomes = list(outcomes)
-        self.calls: list[tuple[str, dict[str, str] | None]] = []
-
-    def __call__(self, url: str, params: dict[str, str] | None = None) -> requests.Response:
-        self.calls.append((url, params))
-        outcome = self._outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
 
 
 def test_nba_http_is_the_only_importer_of_curl_cffi() -> None:
@@ -116,7 +95,7 @@ def test_rate_limiter_does_not_wait_after_an_idle_spell(clock: FakeClock) -> Non
 def test_a_503_then_200_returns_the_200(
     session: NbaSession, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    get = ScriptedGet(_response(503), _response(200))
+    get = ScriptedGet(fake_response(503), fake_response(200))
     monkeypatch.setattr(session.curl, "get", get)
 
     response = session.get(URL, params=PARAMS)
@@ -129,7 +108,7 @@ def test_a_503_then_200_returns_the_200(
 def test_gives_up_after_three_retries_and_returns_the_last_5xx(
     session: NbaSession, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    get = ScriptedGet(*[_response(502)] * 4)
+    get = ScriptedGet(*[fake_response(502)] * 4)
     monkeypatch.setattr(session.curl, "get", get)
 
     assert session.get(URL).status_code == 502
@@ -151,7 +130,7 @@ def test_connection_errors_are_retried_then_reraised(
 def test_does_not_retry_a_403_or_a_read_timeout(
     session: NbaSession, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    get = ScriptedGet(_response(403), requests.exceptions.ReadTimeout("slow"))
+    get = ScriptedGet(fake_response(403), requests.exceptions.ReadTimeout("slow"))
     monkeypatch.setattr(session.curl, "get", get)
 
     assert session.get(URL).status_code == 403
@@ -171,7 +150,7 @@ def test_fetch_json_miss_fetches_writes_and_returns(
     session: NbaSession, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     cache = RawCache(tmp_path)
-    get = ScriptedGet(_response(200, b'{"boxScore": 1}'))
+    get = ScriptedGet(fake_response(200, b'{"boxScore": 1}'))
     monkeypatch.setattr(session.curl, "get", get)
 
     assert _fetch(session, cache) == {"boxScore": 1}
@@ -197,7 +176,7 @@ def test_fetch_json_force_refetches_and_overwrites(
 ) -> None:
     cache = RawCache(tmp_path)
     cache.put("nba_stats", "boxscoretraditionalv3", "0022500001", b'{"v": 1}', url=URL, status=200)
-    monkeypatch.setattr(session.curl, "get", ScriptedGet(_response(200, b'{"v": 2}')))
+    monkeypatch.setattr(session.curl, "get", ScriptedGet(fake_response(200, b'{"v": 2}')))
 
     assert _fetch(session, cache, force=True) == {"v": 2}
     assert cache.get("nba_stats", "boxscoretraditionalv3", "0022500001") == b'{"v": 2}'
@@ -206,12 +185,12 @@ def test_fetch_json_force_refetches_and_overwrites(
 @pytest.mark.parametrize(
     ("response", "error"),
     [
-        (_response(403, b"Access Denied"), "HTTP 403"),
-        (_response(200, b"<html>maintenance</html>"), "not JSON"),
-        (_response(200, b"[1, 2]"), "not a JSON object"),
+        (fake_response(403, b"Access Denied"), "HTTP 403"),
+        (fake_response(200, b"<html>maintenance</html>"), "not JSON"),
+        (fake_response(200, b"[1, 2]"), "not a JSON object"),
     ],
 )
-def test_fetch_json_never_caches_a_bad_response(
+def test_fetch_json_never_caches_a_badresponse(
     session: NbaSession,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
