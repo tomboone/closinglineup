@@ -3,20 +3,47 @@
 from datetime import date, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, MetaData, String, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    MetaData,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Deterministic constraint names, so migrations can drop and alter what they created.
 NAMING_CONVENTION = {
-    "ix": "ix_%(column_0_label)s",
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
     "ck": "ck_%(table_name)s_%(constraint_name)s",
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
 
 _STATUS_CHECK = "status IN ('running', 'succeeded', 'failed')"
+
+# Categorical columns are text with a CHECK rather than Postgres enums, so a new value is a
+# constraint change rather than an enum type migration (NEU-1860).
+CONFERENCES = ("East", "West")
+DIVISIONS = ("Atlantic", "Central", "Southeast", "Northwest", "Pacific", "Southwest")
+CONTRACT_TYPES = ("standard", "two_way", "ten_day", "exhibit_10")
+GAME_PHASES = ("regular", "cup_knockout", "play_in", "playoff")
+GAME_STATUSES = ("scheduled", "final", "postponed")
+DNP_REASONS = ("cd", "injury", "inactive", "suspension", "g_league", "other")
+BOX_SOURCES = ("stats", "cdn")
+SHOT_ZONES = ("rim", "short_mid", "long_mid", "corner_3", "above_break_3")
+
+
+def _one_of(column: str, values: tuple[str, ...]) -> CheckConstraint:
+    """A CHECK that `column` holds one of `values`; NULL passes, as with any CHECK."""
+    listed = ", ".join(f"'{value}'" for value in values)
+    return CheckConstraint(f"{column} IN ({listed})", name=column)
 
 
 class Base(DeclarativeBase):
@@ -62,3 +89,216 @@ class JobRun(Timestamps, Base):
     finished_at: Mapped[datetime | None]
     status: Mapped[str] = mapped_column(String)
     detail: Mapped[dict[str, Any] | None]
+
+
+# Reference (spec §6.1). Per-game rows reference `team` and `game`, which the migration seeds and
+# the schedule fills ahead of any box score. They do not reference `player`, which the daily
+# roster pull fills: a player signed today can play tonight, before his `player` row exists.
+
+
+class Team(Timestamps, Base):
+    """The 30 franchises, seeded from `closinglineup.teams` by the migration that creates it."""
+
+    __tablename__ = "team"
+    __table_args__ = (_one_of("conference", CONFERENCES), _one_of("division", DIVISIONS))
+
+    nba_team_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    tricode: Mapped[str] = mapped_column(String, unique=True)
+    name: Mapped[str] = mapped_column(String)
+    conference: Mapped[str] = mapped_column(String)
+    division: Mapped[str] = mapped_column(String)
+
+
+class Player(Timestamps, Base):
+    __tablename__ = "player"
+
+    nba_player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    name: Mapped[str] = mapped_column(String)
+    birthdate: Mapped[date | None]
+    draft_year: Mapped[int | None]
+    draft_pick: Mapped[int | None]
+    height_in: Mapped[int | None]
+    position: Mapped[str | None] = mapped_column(String)
+
+
+class RosterMembership(Timestamps, Base):
+    """A player's span on a team, derived nightly from rosters and transactions; open-ended while
+    `end_date` is NULL. A player is on one team per date: `derive` keeps spans from
+    overlapping, since the table does not."""
+
+    __tablename__ = "roster_membership"
+    __table_args__ = (
+        UniqueConstraint("player_id", "team_id", "start_date"),
+        _one_of("contract_type", CONTRACT_TYPES),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    player_id: Mapped[int]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    start_date: Mapped[date]
+    end_date: Mapped[date | None]
+    contract_type: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+
+
+class Game(Timestamps, Base):
+    """A counted game (spec §2): never preseason, All-Star or Summer League."""
+
+    __tablename__ = "game"
+    __table_args__ = (_one_of("phase", GAME_PHASES), _one_of("status", GAME_STATUSES))
+
+    game_id: Mapped[str] = mapped_column(String, primary_key=True)
+    season: Mapped[str] = mapped_column(String)
+    game_date: Mapped[date] = mapped_column(index=True)
+    phase: Mapped[str] = mapped_column(String)
+    home_team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    away_team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    status: Mapped[str] = mapped_column(String)
+    home_score: Mapped[int | None]
+    away_score: Mapped[int | None]
+    home_b2b: Mapped[bool]
+    away_b2b: Mapped[bool]
+
+
+# Per game (spec §6.2).
+
+
+class PlayerGame(Timestamps, Base):
+    """One player's game for one team, DNPs included. Counting stats come from either source;
+    the advanced and hustle columns are NULL where the source has none (cdn) or a DNP leaves
+    them undefined."""
+
+    __tablename__ = "player_game"
+    __table_args__ = (
+        Index(None, "player_id", "team_id"),
+        _one_of("dnp_reason", DNP_REASONS),
+        _one_of("source", BOX_SOURCES),
+    )
+
+    game_id: Mapped[str] = mapped_column(ForeignKey("game.game_id"), primary_key=True)
+    player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    is_starter: Mapped[bool]
+    seconds: Mapped[int]
+    dnp_reason: Mapped[str | None] = mapped_column(String)
+    pts: Mapped[int]
+    fgm: Mapped[int]
+    fga: Mapped[int]
+    fg3m: Mapped[int]
+    fg3a: Mapped[int]
+    ftm: Mapped[int]
+    fta: Mapped[int]
+    oreb: Mapped[int]
+    dreb: Mapped[int]
+    ast: Mapped[int]
+    stl: Mapped[int]
+    blk: Mapped[int]
+    tov: Mapped[int]
+    pf: Mapped[int]
+    plus_minus: Mapped[int]
+    ts_pct: Mapped[float | None]
+    efg_pct: Mapped[float | None]
+    usg_pct: Mapped[float | None]
+    ast_pct: Mapped[float | None]
+    tov_pct: Mapped[float | None]
+    oreb_pct: Mapped[float | None]
+    dreb_pct: Mapped[float | None]
+    off_rating: Mapped[float | None]
+    def_rating: Mapped[float | None]
+    pace: Mapped[float | None]
+    deflections: Mapped[int | None]
+    contested_shots: Mapped[int | None]
+    charges_drawn: Mapped[int | None]
+    source: Mapped[str] = mapped_column(String)
+
+
+class Stint(Timestamps, Base):
+    """One team's view of a stint, as `parse.pbp.StintRow` emits it. `is_garbage_time` is NULL
+    until `derive` classifies the stint (spec §7.4).
+
+    The unique key leads with `(game_id, team_id)`, so it is also the index the views read by.
+    """
+
+    __tablename__ = "stint"
+    __table_args__ = (UniqueConstraint("game_id", "team_id", "period", "start_sec"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    game_id: Mapped[str] = mapped_column(ForeignKey("game.game_id"))
+    period: Mapped[int]
+    start_sec: Mapped[float]
+    end_sec: Mapped[float]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    lineup_key: Mapped[str] = mapped_column(String)
+    opp_lineup_key: Mapped[str] = mapped_column(String)
+    possessions: Mapped[int]
+    pts_for: Mapped[int]
+    pts_against: Mapped[int]
+    is_garbage_time: Mapped[bool | None]
+
+
+class Possession(Timestamps, Base):
+    """One pbpstats possession, as `parse.pbp.PossessionRow` emits it. pbpstats numbers
+    possessions from 1 within each period."""
+
+    __tablename__ = "possession"
+    __table_args__ = (UniqueConstraint("game_id", "period", "number"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    game_id: Mapped[str] = mapped_column(ForeignKey("game.game_id"))
+    period: Mapped[int]
+    number: Mapped[int]
+    offense_team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    start_sec: Mapped[float]
+    end_sec: Mapped[float]
+    start_score_margin: Mapped[int]
+    start_type: Mapped[str | None] = mapped_column(String)
+    has_timeout: Mapped[bool]
+    previous_has_timeout: Mapped[bool]
+    end_type: Mapped[str] = mapped_column(String)
+    counted: Mapped[bool]
+
+
+class Shot(Timestamps, Base):
+    """One field-goal attempt from `shotchartdetail`. `event_num` is its `GAME_EVENT_ID`, not in
+    spec §6.2: it is the shot's natural key, which a reload upserts on."""
+
+    __tablename__ = "shot"
+    __table_args__ = (
+        UniqueConstraint("game_id", "event_num"),
+        Index(None, "player_id", "game_id"),
+        _one_of("zone", SHOT_ZONES),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    game_id: Mapped[str] = mapped_column(ForeignKey("game.game_id"))
+    event_num: Mapped[int]
+    player_id: Mapped[int]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    period: Mapped[int]
+    clock_sec: Mapped[int]
+    x: Mapped[int]
+    y: Mapped[int]
+    distance_ft: Mapped[int]
+    zone: Mapped[str] = mapped_column(String)
+    shot_type: Mapped[str] = mapped_column(String)
+    made: Mapped[bool]
+    assisted_by: Mapped[int | None]
+    shot_clock_bucket: Mapped[str | None] = mapped_column(String)
+
+
+class Matchup(Timestamps, Base):
+    """One offensive player against one defender in a game, from `boxscorematchupsv3`."""
+
+    __tablename__ = "matchup"
+
+    game_id: Mapped[str] = mapped_column(ForeignKey("game.game_id"), primary_key=True)
+    off_player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    def_player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    partial_poss: Mapped[float]
+    pts: Mapped[int]
+    fgm: Mapped[int]
+    fga: Mapped[int]
+    fg3m: Mapped[int]
+    fg3a: Mapped[int]
+    tov: Mapped[int]
+    ast: Mapped[int]

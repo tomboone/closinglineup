@@ -5,9 +5,24 @@ from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 BACKEND = Path(__file__).parents[1]
+
+BASELINE = "62f166b83d8c"
+BASELINE_TABLES = {"load_log", "job_run"}
+# Spec §6.1 and §6.2.
+DATA_TABLES = {
+    "team",
+    "player",
+    "roster_membership",
+    "game",
+    "player_game",
+    "stint",
+    "possession",
+    "shot",
+    "matchup",
+}
 
 
 def alembic(*args: str, database_url: str) -> subprocess.CompletedProcess[str]:
@@ -27,16 +42,47 @@ def test_migrations_have_one_head() -> None:
     assert len(script.get_heads()) == 1
 
 
-def test_upgrade_head_creates_the_baseline_tables_and_leaves_no_drift(database_url: str) -> None:
+def _tables(database_url: str) -> set[str]:
+    engine = create_engine(database_url)
+    try:
+        return set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_head_creates_every_table_and_leaves_no_drift(database_url: str) -> None:
+    upgrade = alembic("upgrade", "head", database_url=database_url)
+    assert upgrade.returncode == 0, upgrade.stderr
+
+    assert _tables(database_url) >= BASELINE_TABLES | DATA_TABLES
+
+    check = alembic("check", database_url=database_url)
+    assert check.returncode == 0, check.stdout + check.stderr
+
+
+def test_upgrade_seeds_the_30_teams(database_url: str) -> None:
     upgrade = alembic("upgrade", "head", database_url=database_url)
     assert upgrade.returncode == 0, upgrade.stderr
 
     engine = create_engine(database_url)
     try:
-        tables = set(inspect(engine).get_table_names())
+        with engine.connect() as connection:
+            count = connection.execute(text("SELECT count(*) FROM team")).scalar_one()
     finally:
         engine.dispose()
-    assert {"load_log", "job_run"} <= tables
+    assert count == 30
 
-    check = alembic("check", database_url=database_url)
-    assert check.returncode == 0, check.stdout + check.stderr
+
+def test_downgrade_to_the_baseline_drops_the_data_tables_cleanly(database_url: str) -> None:
+    assert alembic("upgrade", "head", database_url=database_url).returncode == 0
+
+    downgrade = alembic("downgrade", BASELINE, database_url=database_url)
+    try:
+        assert downgrade.returncode == 0, downgrade.stderr
+        tables = _tables(database_url)
+        assert not tables & DATA_TABLES
+        assert tables >= BASELINE_TABLES
+    finally:
+        # Leave the database at head for every other test, which upgrades and asserts on it
+        # itself; asserting here would mask a failed downgrade.
+        alembic("upgrade", "head", database_url=database_url)
