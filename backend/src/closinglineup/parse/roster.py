@@ -7,7 +7,8 @@ since traded or signed elsewhere has no draft slot here).
 
 A roster is a snapshot, so its memberships are open-ended from the date it was taken; `derive`
 closes and stitches them with transactions (NEU-1869). The contract type is read from
-`HOW_ACQUIRED` where it names one (two-way, 10-day, Exhibit 10), and is `standard` otherwise.
+`HOW_ACQUIRED` where it names one (two-way, 10-day, Exhibit 10), and is `standard` otherwise. The
+markers are asserted, not observed: no row of the GSW fixture roster names a contract type.
 """
 
 import re

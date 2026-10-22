@@ -25,7 +25,7 @@ PHASES_2025_26 = {
     "0042500121": Phase.PLAYOFF,  # East first round
     "0042500401": Phase.PLAYOFF,  # Finals
 }
-# SAS at IND on 2027-01-14, then IND at SAS on 2027-01-17, both in Paris.
+# SAS at IND on 2027-01-14 in Paris, then IND at SAS on 2027-01-17 in Manchester.
 SAS, IND = 1610612759, 1610612740
 PARIS_FIRST, PARIS_SECOND = "0022600075", "0022600076"
 
@@ -103,11 +103,18 @@ def test_back_to_back_is_a_game_the_day_after_the_teams_last() -> None:
     assert (first.home_b2b, first.away_b2b) == (False, False)
 
 
+def test_a_postponed_game_puts_no_one_on_a_back_to_back() -> None:
+    moved = _edit_game(_load(SCHEDULE_2026_27), PARIS_SECOND, gameDateEst="2027-01-15T00:00:00Z")
+    postponed = _edit_game(moved, PARIS_FIRST, postponedStatus="Y")
+    second = _by_id(parse_schedule(postponed))[PARIS_SECOND]
+    assert (second.home_b2b, second.away_b2b) == (False, False)
+
+
 def test_back_to_back_is_per_team() -> None:
     # SAS's second game a day after its first, against a team that was idle the day before.
     moved = _edit_game(
         _load(SCHEDULE_2026_27),
-        "0022600673",  # GSW at SAS, 2027-01-26
+        "0022600673",  # HOU at SAS, 2027-01-26
         gameDateEst="2027-01-15T00:00:00Z",
     )
     game = _by_id(parse_schedule(moved))["0022600673"]

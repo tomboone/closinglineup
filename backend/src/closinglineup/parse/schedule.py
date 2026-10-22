@@ -5,7 +5,9 @@ lists Cup knockout and postseason games with team ID 0 until their matchups are 
 refresh fills them in.
 
 A team is on a back-to-back when it played a counted game the calendar day before, on the
-Eastern-time dates NBA.com keeps games on (`gameDateEst`).
+Eastern-time dates NBA.com keeps games on (`gameDateEst`); a postponed game is not one it played.
+A game in progress is still `scheduled`: `game.status` has no in-progress value, and `nightly`
+only loads finals.
 """
 
 from collections.abc import Iterator
@@ -52,7 +54,12 @@ def parse_schedule(payload: dict[str, Any]) -> list[GameRow]:
             continue
         kept.append((game, phase, date.fromisoformat(game["gameDateEst"][:10]), home, away))
 
-    played = {(team, day) for _, _, day, home, away in kept for team in (home, away)}
+    played = {
+        (team, day)
+        for game, _, day, home, away in kept
+        if _status(game) != "postponed"
+        for team in (home, away)
+    }
 
     def b2b(team: int, day: date) -> bool:
         return (team, day - timedelta(days=1)) in played

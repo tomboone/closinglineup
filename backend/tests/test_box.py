@@ -22,6 +22,7 @@ STARTERS = {
 DNPS = {GSW: {1631218, 1630611, 1630311}, DEN: {1641747, 1630192, 1629618, 1631124, 1641816}}
 ROSTER_SIZES = {GSW: 13, DEN: 15}
 JIMMY_BUTLER = 202710
+JONATHAN_KUMINGA = 1630228
 # Regulation plus one overtime, five on the floor.
 TEAM_SECONDS = (48 + 5) * 60 * 5
 
@@ -112,6 +113,12 @@ def test_a_player_joins_all_four_boxes() -> None:
         charges_drawn=0,
         source="stats",
     )
+
+
+def test_turnover_rate_is_a_fraction_like_the_other_rates() -> None:
+    kuminga = next(row for row in _game() if row.player_id == JONATHAN_KUMINGA)
+    assert kuminga.tov_pct == pytest.approx(0.063)  # `turnoverRatio` 6.3
+    assert kuminga.ast_pct == pytest.approx(0.1)
 
 
 def test_a_dnp_has_no_advanced_or_hustle_numbers() -> None:

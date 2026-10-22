@@ -6,9 +6,11 @@ supplies starters, minutes, the counting stats and the DNP comment. `boxscoreadv
 supplies the rates and ratings, `boxscoreusagev3` the usage rate, and `boxscorehustlev2` the
 deflections, contests and charges; any of the three may be missing for a game, leaving its
 columns NULL. A DNP's advanced and hustle columns are NULL too: advanced reports them as zeros
-and hustle leaves the player out.
+and hustle leaves the player out. Rates are fractions (0.222 for 22.2%); advanced's
+`turnoverRatio` is turnovers per 100 plays, so it is divided by 100 to match.
 
-The traditional box lists only the active players, so an inactive player has no row here.
+The traditional box lists only the active players, so an inactive player has no row here, and no
+stats.nba.com box this fetcher pulls lists them; cdn.nba.com's live box does.
 
 In the v3 boxes a starter is the player with a `position`; bench players have an empty one.
 Minutes are `MM:SS`, rounded per player so that the team's sum comes out exact, which gives
@@ -59,6 +61,10 @@ def parse_seconds(minutes: str | None) -> int:
     if found := _ISO.match(minutes):
         return round(int(found[1]) * 60 + float(found[2]))
     raise ParseError(f"unreadable minutes {minutes!r}")
+
+
+def _per_100(value: float | str | None) -> float | None:
+    return None if value is None else float(value) / 100
 
 
 def classify_dnp(comment: str) -> DnpReason:
@@ -142,7 +148,7 @@ def parse_box(
                         efg_pct=adv.get("effectiveFieldGoalPercentage"),
                         usg_pct=use.get("usagePercentage"),
                         ast_pct=adv.get("assistPercentage"),
-                        tov_pct=adv.get("turnoverRatio"),
+                        tov_pct=_per_100(adv.get("turnoverRatio")),
                         oreb_pct=adv.get("offensiveReboundPercentage"),
                         dreb_pct=adv.get("defensiveReboundPercentage"),
                         off_rating=adv.get("offensiveRating"),
