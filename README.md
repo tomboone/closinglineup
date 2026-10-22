@@ -69,6 +69,11 @@ docker run --rm -p 127.0.0.1:8000:8000 -e DATABASE_URL=postgresql+psycopg://… 
 Every push to `main` publishes `ghcr.io/tomboone/closinglineup:latest` and `:sha-<7>`
 (`.github/workflows/image.yml`).
 
+## Deployment
+
+The home server runs `deploy/docker-compose.yml`: Postgres, the app, the worker and a scoped
+Watchtower that pulls each new image. `deploy/README.md` is the runbook.
+
 ## License
 
 MIT. See `LICENSE.md`.
