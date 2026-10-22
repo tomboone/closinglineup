@@ -2,6 +2,7 @@
 row as it starts and finishes (spec §3.3, §6.4).
 
 So far `nightly` refreshes the schedule, fetches, parses and loads; derive joins it when it lands.
+`weekly` re-fetches, parses and loads the season's shot charts.
 """
 
 import logging
@@ -18,24 +19,43 @@ from apscheduler.schedulers.background import (  # pyright: ignore[reportMissing
 )
 from apscheduler.triggers.combining import OrTrigger  # pyright: ignore[reportMissingTypeStubs]
 from apscheduler.triggers.cron import CronTrigger  # pyright: ignore[reportMissingTypeStubs]
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.clock import Clock
-from closinglineup.db.models import JobRun, RunStatus
+from closinglineup.db.models import Game, JobRun, PlayerGame, RunStatus
 from closinglineup.heartbeat import Heartbeat, JobFamily
-from closinglineup.load.loader import load_dates, raise_for_failures
+from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures
 from closinglineup.load.parquet import ParquetStore
-from closinglineup.pipeline import parse_date
-from closinglineup.season import is_counted, season_label
+from closinglineup.pipeline import SHOT_TABLE, parse_date, parse_shot_charts
+from closinglineup.season import Phase, is_counted, season_label
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaHttpError, NbaSession
-from closinglineup.sources.nba_stats import EndpointResult, FetchStatus, GameFetch, fetch_game
+from closinglineup.sources.nba_stats import (
+    EndpointResult,
+    FetchStatus,
+    GameFetch,
+    SeasonType,
+    fetch_game,
+    fetch_player_shots,
+)
 
 NIGHTLY = "nightly"
 POLL_FINALS = "poll_finals"
+WEEKLY = "weekly"
+
+# The season type each game phase's shots are charted under. The Cup quarterfinals and semifinals
+# are regular-season games; the final (season type 6) is in no season type `shotchartdetail` is
+# fetched for, so its shots are not fetched.
+SHOT_SEASON_TYPES: dict[str, SeasonType] = {
+    Phase.REGULAR: SeasonType.REGULAR_SEASON,
+    Phase.CUP_KNOCKOUT: SeasonType.REGULAR_SEASON,
+    Phase.PLAY_IN: SeasonType.PLAY_IN,
+    Phase.PLAYOFF: SeasonType.PLAYOFFS,
+}
 
 # The schedule's `gameDates[].gameDate`, an Eastern date, e.g. `10/20/2026 00:00:00`.
 SCHEDULE_DATE_FORMAT = "%m/%d/%Y %H:%M:%S"
@@ -84,6 +104,20 @@ def fully_cached(cache: RawCache, game_id: str) -> bool:
         for endpoint in nba_stats.GAME_ENDPOINTS
         if endpoint not in NEVER_CACHED
     ) and all(cache.exists(nba_cdn.SOURCE, endpoint, game_id) for endpoint in CDN_GAME_ENDPOINTS)
+
+
+def shot_chart_players(db: sessionmaker[Session], season: str) -> list[tuple[int, SeasonType]]:
+    """Every player who has played in `season`, with each season type he has played in, sorted:
+    the shot charts `weekly` fetches. A player who has not played has no shots, and stats.nba.com
+    answers his shot chart with an empty shell, which fails the fetch."""
+    with db() as session:
+        played = session.execute(
+            select(PlayerGame.player_id, Game.phase)
+            .join(Game, Game.game_id == PlayerGame.game_id)
+            .where(Game.season == season, PlayerGame.seconds > 0)
+            .distinct()
+        )
+        return sorted({(player_id, SHOT_SEASON_TYPES[phase]) for player_id, phase in played})
 
 
 def _fetch_cdn_game(session: NbaSession, cache: RawCache, game_id: str) -> list[EndpointResult]:
@@ -136,6 +170,17 @@ class Jobs:
         today = self.clock.now().astimezone(self.settings.tz).date()
         return self.nightly(today - timedelta(days=1))
 
+    def weekly(self) -> Detail:
+        """Re-fetch the shot chart of every player who has played this season, in each season
+        type he has played in, then parse and load them (spec §3.3).
+
+        A shot chart that fails to fetch or parse is listed in the run's detail and does not fail
+        the job; whatever was loaded from it before stays. Every shot chart failing to fetch fails
+        the job, as does a shot file that fails to load: one with a shot in a game that has no
+        `game` row yet, for instance.
+        """
+        return self._run(WEEKLY, self._weekly, family="weekly")
+
     def poll_finals(self) -> Detail:
         """Note the games today's scoreboard shows final, for `nightly` to fetch."""
         return self._run(POLL_FINALS, self._poll_finals)
@@ -173,7 +218,37 @@ class Jobs:
             "parse_failed": parsed.failed,
             "parse_missing": parsed.missing,
             "loaded": {result.table: result.rows for result in loaded},
-            "healed": [f"{result.table} {result.game_date}" for result in healed],
+            "healed": [f"{result.table} {result.key}" for result in healed],
+        }
+
+    def _weekly(self) -> Detail:
+        season = season_label(self.clock.now().astimezone(self.settings.tz).date())
+        players = shot_chart_players(self.db, season)
+        with self.nba() as session:
+            results = [
+                result
+                for player_id, season_type in players
+                for result in fetch_player_shots(
+                    session, self.cache, player_id, season, season_type, force=True
+                )
+            ]
+        fetched = [r.key for r in results if r.status is not FetchStatus.FAILED]
+        if results and not fetched:
+            raise NbaHttpError(f"every one of {len(results)} shot charts failed to fetch")
+        parsed = parse_shot_charts(self.cache, self.store, fetched)
+        loaded = load_keyed(self.db, self.store, self.clock, SHOT_TABLE, parsed.rows)
+        raise_for_failures(loaded)
+        return {
+            "season": season,
+            "shot_charts": len(players),
+            "fetched": len(fetched),
+            "failed": [
+                {"key": r.key, "error": r.error} for r in results if r.status is FetchStatus.FAILED
+            ],
+            "parse_failed": parsed.failed,
+            "rows": sum(r.rows for r in loaded),
+            "changed": sum(r.changed for r in loaded),
+            "removed": sum(r.removed for r in loaded),
         }
 
     def _poll_finals(self) -> Detail:
@@ -236,6 +311,10 @@ def nightly_trigger(tz: tzinfo) -> CronTrigger:
     return CronTrigger(hour=3, minute=30, timezone=tz)
 
 
+def weekly_trigger(tz: tzinfo) -> CronTrigger:
+    return CronTrigger(day_of_week="mon", hour=4, minute=30, timezone=tz)
+
+
 def poll_finals_trigger(tz: tzinfo) -> OrTrigger:
     """Every 30 minutes from 18:00 through 02:00."""
     return OrTrigger(
@@ -262,6 +341,7 @@ def build_scheduler(jobs: Jobs) -> BackgroundScheduler:
     for job, func, trigger in [
         (NIGHTLY, jobs.nightly_yesterday, nightly_trigger(tz)),
         (POLL_FINALS, jobs.poll_finals, poll_finals_trigger(tz)),
+        (WEEKLY, jobs.weekly, weekly_trigger(tz)),
     ]:
         # No misfire grace limit: APScheduler drops a run that starts more than its grace (1 s by
         # default) late, and on one thread a job due while another runs always starts late.

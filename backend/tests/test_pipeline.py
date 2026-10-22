@@ -8,10 +8,19 @@ import pytest
 
 from closinglineup.clock import FakeClock
 from closinglineup.load.parquet import ParquetStore
-from closinglineup.pipeline import REFERENCE, NotCachedError, game_date_of, parse_date
+from closinglineup.pipeline import (
+    REFERENCE,
+    NotCachedError,
+    game_date_of,
+    parse_date,
+    parse_shot_charts,
+    shot_chart_keys,
+)
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from tests.test_nba_stats import WITH_DATA, fixture_body, season_fixture_body
+
+PBP_FIXTURES = Path(__file__).parent / "fixtures" / "pbp"
 
 TZ = ZoneInfo("America/New_York")
 # DEN at GSW, the stats.nba.com fixture game, beside a final game with nothing cached.
@@ -59,9 +68,9 @@ SCHEDULE: Payload = {
 }
 
 
-def cache_fixture_game(data_dir: Path, *, rosters: bool = True) -> RawCache:
-    """The fixture game's schedule and box scores in a raw cache under `data_dir`, and with
-    `rosters`, the GSW roster and the player list."""
+def cache_fixture_game(data_dir: Path, *, rosters: bool = True, pbp: bool = True) -> RawCache:
+    """The fixture game's schedule and box scores in a raw cache under `data_dir`; with `pbp`,
+    its live play-by-play, and with `rosters`, the GSW roster and the player list."""
     cache = RawCache(data_dir, FakeClock(ROSTERS_FETCHED))
     cache.put(
         nba_cdn.SOURCE,
@@ -73,6 +82,9 @@ def cache_fixture_game(data_dir: Path, *, rosters: bool = True) -> RawCache:
     )
     for endpoint in WITH_DATA:
         cache.put(nba_stats.SOURCE, endpoint, GAME, fixture_body(endpoint), url="u", status=200)
+    if pbp:
+        body = (PBP_FIXTURES / nba_cdn.PLAYBYPLAY / f"{GAME}.json").read_bytes()
+        cache.put(nba_cdn.SOURCE, nba_cdn.PLAYBYPLAY, GAME, body, url="u", status=200)
     if rosters:
         for endpoint, key in [
             (nba_stats.COMMON_TEAM_ROSTER, f"{GSW}_2025-26"),
@@ -99,9 +111,27 @@ def test_a_date_is_parsed_into_a_file_per_table(tmp_path: Path) -> None:
         "roster_membership": GSW_ROSTER,
         "player_game": PLAYER_GAMES,
         "matchup": store.read("matchup", DAY).num_rows,
+        "stint": store.read("stint", DAY).num_rows,
+        "possession": store.read("possession", DAY).num_rows,
     }
-    assert report.rows["matchup"] > 0
-    assert set(store.read("player_game", DAY).column("game_id").to_pylist()) == {GAME}
+    assert min(report.rows["matchup"], report.rows["stint"], report.rows["possession"]) > 0
+    for table in ("player_game", "stint", "possession"):
+        assert set(store.read(table, DAY).column("game_id").to_pylist()) == {GAME}
+
+
+def test_a_game_without_its_play_by_play_keeps_its_box_rows_and_is_reported(
+    tmp_path: Path,
+) -> None:
+    store = ParquetStore(tmp_path)
+
+    report = parse_date(cache_fixture_game(tmp_path, pbp=False), store, DAY, TZ)
+
+    assert report.parsed == [GAME]
+    assert report.failed[GAME].startswith(
+        f"play-by-play: FileNotFoundError: game {GAME} has no cached play-by-play"
+    )
+    assert report.rows["player_game"] == PLAYER_GAMES
+    assert report.rows["stint"] == report.rows["possession"] == 0
 
 
 def test_a_roster_opens_on_the_day_it_was_fetched_in_tz(tmp_path: Path) -> None:
@@ -181,3 +211,37 @@ def test_a_games_date_comes_from_its_seasons_schedule(tmp_path: Path) -> None:
     assert game_date_of(cache, GAME) == DAY
     with pytest.raises(NotCachedError, match="0022500999 is not in"):
         game_date_of(cache, "0022500999")
+
+
+SHOT_CHART = "201939_2025-26_regular-season"
+
+
+def _cache_shot_chart(cache: RawCache, key: str, body: bytes) -> None:
+    cache.put(nba_stats.SOURCE, nba_stats.SHOT_CHART_DETAIL, key, body, url="u", status=200)
+
+
+def test_shot_charts_are_parsed_into_a_file_each_keyed_like_the_cache(tmp_path: Path) -> None:
+    cache = RawCache(tmp_path)
+    store = ParquetStore(tmp_path)
+    _cache_shot_chart(cache, SHOT_CHART, season_fixture_body(nba_stats.SHOT_CHART_DETAIL))
+    _cache_shot_chart(cache, "201939_2024-25_regular-season", b"{}")
+
+    keys = shot_chart_keys(cache, "2025-26")
+    report = parse_shot_charts(cache, store, [*keys, "1_2025-26_playoffs"])
+
+    assert keys == [SHOT_CHART]
+    assert report.rows == {SHOT_CHART: 25}
+    assert report.failed == {"1_2025-26_playoffs": "not in the raw cache"}
+    assert store.keys("shot") == [SHOT_CHART]
+    assert store.read("shot", SHOT_CHART).num_rows == 25
+
+
+def test_a_shot_chart_a_parser_cannot_read_is_reported_and_left_out(tmp_path: Path) -> None:
+    cache = RawCache(tmp_path)
+    store = ParquetStore(tmp_path)
+    _cache_shot_chart(cache, SHOT_CHART, b"{}")
+
+    report = parse_shot_charts(cache, store, [SHOT_CHART])
+
+    assert report.failed == {SHOT_CHART: "ParseError: payload has no Shot_Chart_Detail result set"}
+    assert store.keys("shot") == []

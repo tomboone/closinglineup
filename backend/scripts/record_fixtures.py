@@ -227,11 +227,22 @@ def _trim_rows(payload: Payload) -> Payload:
     return {**payload, "resultSets": result_sets}
 
 
+def _trim_shots(payload: Payload) -> Payload:
+    """The shots of the per-game fixture game, so they can be checked against its box score, and
+    the first `TRIMMED_ROWS` rows of the league averages."""
+    shots, *rest = payload["resultSets"]
+    game = shots["headers"].index("GAME_ID")
+    kept = {**shots, "rowSet": [row for row in shots["rowSet"] if row[game] == STATS_GAME_ID]}
+    averages = [{**rs, "rowSet": rs["rowSet"][:TRIMMED_ROWS]} for rs in rest]
+    return {**payload, "resultSets": [kept, *averages]}
+
+
 @recorder(
     "stats-season",
     f"stats.nba.com: every season-wide endpoint for {SEASON} (regular season), the scoreboard "
     f"of {SEASON_DATE}, and GSW and Stephen Curry where one team or player is asked for; the "
-    f"league-wide lists trimmed to their first {TRIMMED_ROWS} rows",
+    f"league-wide lists trimmed to their first {TRIMMED_ROWS} rows, and Curry's shots to those "
+    f"of {STATS_GAME_ID}",
 )
 def record_stats_season(options: Options) -> None:
     clock = SystemClock()
@@ -243,9 +254,11 @@ def record_stats_season(options: Options) -> None:
     ):
         cache = RawCache(Path(data_dir), clock)
 
-        def record(endpoint: str, payload: Payload, *, trim: bool = False) -> None:
+        def record(
+            endpoint: str, payload: Payload, *, trim: Callable[[Payload], Payload] | None = None
+        ) -> None:
             (key,) = cache.list(nba_stats.SOURCE, endpoint)
-            write_fixture(nba_stats.SOURCE, endpoint, key, _trim_rows(payload) if trim else payload)
+            write_fixture(nba_stats.SOURCE, endpoint, key, trim(payload) if trim else payload)
 
         record(nba_stats.SCOREBOARD_V3, nba_stats.fetch_scoreboard_v3(session, cache, SEASON_DATE))
         record(
@@ -255,22 +268,22 @@ def record_stats_season(options: Options) -> None:
         record(
             nba_stats.COMMON_ALL_PLAYERS,
             nba_stats.fetch_common_all_players(session, cache, SEASON),
-            trim=True,
+            trim=_trim_rows,
         )
         record(
             nba_stats.PLAYER_GAME_LOGS,
             nba_stats.fetch_player_game_logs(session, cache, SEASON, regular),
-            trim=True,
+            trim=_trim_rows,
         )
         record(
             nba_stats.SHOT_CHART_DETAIL,
             nba_stats.fetch_shot_chart_detail(session, cache, SEASON_PLAYER, SEASON, regular),
-            trim=True,
+            trim=_trim_shots,
         )
         record(
             nba_stats.LEAGUE_DASH_LINEUPS,
             nba_stats.fetch_league_dash_lineups(session, cache, SEASON, regular),
-            trim=True,
+            trim=_trim_rows,
         )
         record(
             nba_stats.LEAGUE_PLAYER_ON_DETAILS,
@@ -279,7 +292,7 @@ def record_stats_season(options: Options) -> None:
         record(
             nba_stats.LEAGUE_DASH_PLAYER_STATS,
             nba_stats.fetch_league_dash_player_stats(session, cache, SEASON, regular, advanced),
-            trim=True,
+            trim=_trim_rows,
         )
         record(
             nba_stats.LEAGUE_DASH_TEAM_STATS,

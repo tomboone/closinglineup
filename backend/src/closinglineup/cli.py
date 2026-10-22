@@ -21,10 +21,17 @@ from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
 from closinglineup.heartbeat import Heartbeat
-from closinglineup.load.loader import load_dates
+from closinglineup.load.loader import LoadResult, load_dates, load_keyed
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.logging import configure_logging
-from closinglineup.pipeline import NotCachedError, game_date_of, parse_date
+from closinglineup.pipeline import (
+    SHOT_TABLE,
+    NotCachedError,
+    game_date_of,
+    parse_date,
+    parse_shot_charts,
+    shot_chart_keys,
+)
 from closinglineup.scheduler import Jobs, build_scheduler
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
@@ -52,6 +59,7 @@ COMMANDS = {
     "api": "Serve the API and the built frontend.",
     "worker": "Run the job scheduler.",
     "nightly": "Run the nightly job once: refresh the schedule, fetch, parse and load a date.",
+    "weekly": "Run the weekly job once: re-fetch, parse and load the season's shot charts.",
     "health": "Check that the database answers.",
     "reparse": "Re-parse cached raw responses after a parser change.",
 }
@@ -156,13 +164,30 @@ def parse(
         str | None,
         typer.Option(help="Parse this game's date: a date's parquet files hold it whole."),
     ] = None,
+    shots: Annotated[
+        bool, typer.Option("--shots", help="Parse every cached shot chart of --season.")
+    ] = False,
+    season: Annotated[
+        str | None, typer.Option(help="With --shots: e.g. 2026-27. Defaults to the current one.")
+    ] = None,
 ) -> None:
     settings = Settings()
     cache = RawCache(settings.data_dir)
     store = ParquetStore(settings.data_dir)
     days = _days(date, start, end)
-    if (days is None) == (game_id is None):
-        raise typer.BadParameter("pass exactly one of --date, --from/--to, --game-id")
+    if sum([days is not None, game_id is not None, shots]) != 1:
+        raise typer.BadParameter("pass exactly one of --date, --from/--to, --game-id, --shots")
+    if season is not None and not shots:
+        raise typer.BadParameter("--season goes with --shots")
+    if shots:
+        season = season or season_label(SystemClock().now().astimezone(settings.tz).date())
+        report = parse_shot_charts(cache, store, shot_chart_keys(cache, season))
+        for key, error in report.failed.items():
+            typer.echo(f"parse shots {key}: failed: {error}")
+        typer.echo(f"parse shots {season}: {len(report.rows)} shot charts parsed")
+        if report.failed:
+            raise typer.Exit(1)
+        return
     failed = False
     if game_id is not None:
         try:
@@ -199,28 +224,31 @@ def load(
             help="Only the tables and dates not yet loaded; with no dates, of every parsed date.",
         ),
     ] = False,
+    shots: Annotated[bool, typer.Option("--shots", help="Load every parsed shot chart.")] = False,
 ) -> None:
     days = _days(date, start, end)
-    if days is None and not missing:
-        raise typer.BadParameter("pass --date, --from/--to or --missing")
+    if shots and (days is not None or missing):
+        raise typer.BadParameter("--shots takes no dates and no --missing")
+    if days is None and not missing and not shots:
+        raise typer.BadParameter("pass --date, --from/--to, --missing or --shots")
     settings = Settings()
     engine = make_engine(settings)
+    db = make_session_factory(engine)
+    store = ParquetStore(settings.data_dir)
     try:
-        results = load_dates(
-            make_session_factory(engine),
-            ParquetStore(settings.data_dir),
-            SystemClock(),
-            days,
-            missing=missing,
+        results: list[LoadResult] = (
+            load_keyed(db, store, SystemClock(), SHOT_TABLE)
+            if shots
+            else load_dates(db, store, SystemClock(), days, missing=missing)
         )
     finally:
         engine.dispose()
     for result in results:
         if result.status is RunStatus.FAILED:
-            typer.echo(f"load {result.table} {result.game_date}: failed: {result.error}")
+            typer.echo(f"load {result.table} {result.key}: failed: {result.error}")
         else:
-            outcome = f"{result.rows} rows, {result.changed} changed"
-            typer.echo(f"load {result.table} {result.game_date}: {result.status}, {outcome}")
+            outcome = f"{result.rows} rows, {result.changed} changed, {result.removed} removed"
+            typer.echo(f"load {result.table} {result.key}: {result.status}, {outcome}")
     if not results:
         typer.echo("load: nothing to load")
     if any(result.status is RunStatus.FAILED for result in results):
@@ -268,6 +296,25 @@ def nightly(
     typer.echo(
         f"nightly {day}: {len(detail['games'])} final games, {len(detail['fetched'])} fetched, "
         f"{len(detail['parsed'])} parsed"
+    )
+
+
+@app.command("weekly", help=COMMANDS["weekly"])
+def weekly() -> None:
+    settings = Settings()
+    with _open_jobs(settings, SystemClock()) as jobs:
+        try:
+            detail = jobs.weekly()
+        except Exception as exc:
+            typer.echo(f"weekly: failed: {type(exc).__name__}: {exc}", err=True)
+            raise typer.Exit(1) from None
+    for failure in detail["failed"]:
+        typer.echo(f"shotchartdetail {failure['key']}: failed: {failure['error']}")
+    for key, error in detail["parse_failed"].items():
+        typer.echo(f"parse shots {key}: failed: {error}")
+    typer.echo(
+        f"weekly {detail['season']}: {detail['shot_charts']} shot charts, "
+        f"{detail['fetched']} fetched, {detail['rows']} shots loaded"
     )
 
 
