@@ -144,9 +144,10 @@ One function per endpoint; parameter names follow nba_api's documentation for th
 | `boxscoreadvancedv3` | same | TS%, eFG%, usage, AST%, TOV%, REB%, ratings | per game |
 | `boxscorehustlev2` | `GameID` | deflections, contested shots, charges | per game |
 | `boxscorematchupsv3` | `GameID` | matchup rows | per game |
-| `boxscoreusagev3` | `GameID` | usage split | per game |
+| `boxscoreusagev3` | same as `boxscoretraditionalv3` | usage split | per game |
 | `playbyplayv3` | `GameID`, `StartPeriod=0`, `EndPeriod=14` | our own PBP (shot clock, descriptions) | per game |
-| `playbyplayv2` + `boxscoretraditionalv2` | `GameID` | **the payloads pbpstats parses** (it expects the v2 resultSets shape) | per game |
+| `boxscoretraditionalv2` | `GameID`, `StartPeriod=0`, `EndPeriod=14`, `StartRange=0`, `EndRange=55800`, `RangeType=2` (pbpstats's own range; `RangeType=0` returns no rows) | **a payload pbpstats parses** (it expects the v2 resultSets shape) | per game |
+| `playbyplayv2` | `GameID`, `StartPeriod=0`, `EndPeriod=14` | **a payload pbpstats parses**. Returns `{}` for every game as of 2026-10-21 (NEU-1855), so the fetcher reports it failed | per game |
 | `shotchartdetail` | `PlayerID`, `TeamID=0`, `Season`, `SeasonType`, `ContextMeasure=FGA`, `LeagueID=00`, plus the empty-string params nba_api sends | shot rows | weekly per active player |
 | `commonteamroster` | `TeamID`, `Season` | roster, contract type hints | daily |
 | `commonallplayers` | `LeagueID=00`, `Season`, `IsOnlyCurrentSeason=0` | player reference | daily |
