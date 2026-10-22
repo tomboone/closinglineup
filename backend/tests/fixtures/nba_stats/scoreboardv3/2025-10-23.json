@@ -1,0 +1,421 @@
+{
+ "meta": {
+  "version": 1,
+  "request": "http://nba.cloud/league/00/2025/10/23/scoreboard?Format=json",
+  "time": "2026-08-04T09:18:49.1849Z"
+ },
+ "scoreboard": {
+  "gameDate": "2025-10-23",
+  "leagueId": "00",
+  "leagueName": "National Basketball Association",
+  "games": [
+   {
+    "gameId": "0022500005",
+    "gameCode": "20251023/OKCIND",
+    "gameStatus": 3,
+    "gameStatusText": "Final/OT2",
+    "period": 6,
+    "gameClock": "",
+    "gameTimeUTC": "2025-10-23T23:30:00Z",
+    "gameEt": "2025-10-23T19:30:00Z",
+    "regulationPeriods": 4,
+    "seriesGameNumber": "",
+    "gameLabel": "",
+    "gameSubLabel": "",
+    "seriesText": "",
+    "ifNecessary": false,
+    "seriesConference": "",
+    "poRoundDesc": "",
+    "gameSubtype": "",
+    "isNeutral": false,
+    "gameLeaders": {
+     "homeLeaders": {
+      "personId": 1627783,
+      "name": "Pascal Siakam",
+      "playerSlug": "pascal-siakam",
+      "jerseyNum": "43",
+      "position": "F",
+      "teamTricode": "IND",
+      "points": 32,
+      "rebounds": 15,
+      "assists": 4
+     },
+     "awayLeaders": {
+      "personId": 1628983,
+      "name": "Shai Gilgeous-Alexander",
+      "playerSlug": "shai-gilgeous-alexander",
+      "jerseyNum": "2",
+      "position": "G",
+      "teamTricode": "OKC",
+      "points": 55,
+      "rebounds": 8,
+      "assists": 5
+     }
+    },
+    "teamLeaders": {
+     "homeLeaders": {
+      "personId": 1627783,
+      "name": "Pascal Siakam",
+      "playerSlug": "pascal-siakam",
+      "jerseyNum": "43",
+      "position": "F",
+      "teamTricode": "IND",
+      "points": 24.0,
+      "rebounds": 6.6,
+      "assists": 3.8
+     },
+     "awayLeaders": {
+      "personId": 1628983,
+      "name": "Shai Gilgeous-Alexander",
+      "playerSlug": "shai-gilgeous-alexander",
+      "jerseyNum": "2",
+      "position": "G",
+      "teamTricode": "OKC",
+      "points": 31.1,
+      "rebounds": 4.3,
+      "assists": 6.6
+     },
+     "seasonLeadersFlag": 0
+    },
+    "broadcasters": {
+     "nationalBroadcasters": [
+      {
+       "broadcasterId": 2,
+       "broadcastDisplay": "ESPN",
+       "broadcasterTeamId": -1,
+       "broadcasterDescription": ""
+      }
+     ],
+     "nationalRadioBroadcasters": [
+      {
+       "broadcasterId": 1001098,
+       "broadcastDisplay": "SiriusXM",
+       "broadcasterTeamId": -1,
+       "broadcasterDescription": ""
+      }
+     ],
+     "nationalOttBroadcasters": [],
+     "homeTvBroadcasters": [
+      {
+       "broadcasterId": 1001236,
+       "broadcastDisplay": "FDSNIN",
+       "broadcasterTeamId": 1610612754,
+       "broadcasterDescription": ""
+      }
+     ],
+     "homeRadioBroadcasters": [
+      {
+       "broadcasterId": 1641,
+       "broadcastDisplay": "WFNI-FM/AM",
+       "broadcasterTeamId": 1610612754,
+       "broadcasterDescription": ""
+      }
+     ],
+     "homeOttBroadcasters": [],
+     "awayTvBroadcasters": [
+      {
+       "broadcasterId": 1001245,
+       "broadcastDisplay": "FDSNOK",
+       "broadcasterTeamId": 1610612760,
+       "broadcasterDescription": ""
+      }
+     ],
+     "awayRadioBroadcasters": [
+      {
+       "broadcasterId": 1140,
+       "broadcastDisplay": "WWLS",
+       "broadcasterTeamId": 1610612760,
+       "broadcasterDescription": ""
+      }
+     ],
+     "awayOttBroadcasters": []
+    },
+    "homeTeam": {
+     "teamId": 1610612754,
+     "teamName": "Pacers",
+     "teamCity": "Indiana",
+     "teamTricode": "IND",
+     "teamSlug": "pacers",
+     "wins": 0,
+     "losses": 1,
+     "score": 135,
+     "seed": 0,
+     "inBonus": null,
+     "timeoutsRemaining": 0,
+     "periods": [
+      {
+       "period": 1,
+       "periodType": "REGULAR",
+       "score": 25
+      },
+      {
+       "period": 2,
+       "periodType": "REGULAR",
+       "score": 22
+      },
+      {
+       "period": 3,
+       "periodType": "REGULAR",
+       "score": 31
+      },
+      {
+       "period": 4,
+       "periodType": "REGULAR",
+       "score": 35
+      },
+      {
+       "period": 5,
+       "periodType": "OVERTIME",
+       "score": 11
+      },
+      {
+       "period": 6,
+       "periodType": "OVERTIME",
+       "score": 11
+      }
+     ]
+    },
+    "awayTeam": {
+     "teamId": 1610612760,
+     "teamName": "Thunder",
+     "teamCity": "Oklahoma City",
+     "teamTricode": "OKC",
+     "teamSlug": "thunder",
+     "wins": 2,
+     "losses": 0,
+     "score": 141,
+     "seed": 0,
+     "inBonus": null,
+     "timeoutsRemaining": 0,
+     "periods": [
+      {
+       "period": 1,
+       "periodType": "REGULAR",
+       "score": 22
+      },
+      {
+       "period": 2,
+       "periodType": "REGULAR",
+       "score": 32
+      },
+      {
+       "period": 3,
+       "periodType": "REGULAR",
+       "score": 27
+      },
+      {
+       "period": 4,
+       "periodType": "REGULAR",
+       "score": 32
+      },
+      {
+       "period": 5,
+       "periodType": "OVERTIME",
+       "score": 11
+      },
+      {
+       "period": 6,
+       "periodType": "OVERTIME",
+       "score": 17
+      }
+     ]
+    }
+   },
+   {
+    "gameId": "0022500006",
+    "gameCode": "20251023/DENGSW",
+    "gameStatus": 3,
+    "gameStatusText": "Final/OT",
+    "period": 5,
+    "gameClock": "",
+    "gameTimeUTC": "2025-10-24T02:00:00Z",
+    "gameEt": "2025-10-23T22:00:00Z",
+    "regulationPeriods": 4,
+    "seriesGameNumber": "",
+    "gameLabel": "",
+    "gameSubLabel": "",
+    "seriesText": "",
+    "ifNecessary": false,
+    "seriesConference": "",
+    "poRoundDesc": "",
+    "gameSubtype": "",
+    "isNeutral": false,
+    "gameLeaders": {
+     "homeLeaders": {
+      "personId": 201939,
+      "name": "Stephen Curry",
+      "playerSlug": "stephen-curry",
+      "jerseyNum": "30",
+      "position": "G",
+      "teamTricode": "GSW",
+      "points": 42,
+      "rebounds": 6,
+      "assists": 7
+     },
+     "awayLeaders": {
+      "personId": 203932,
+      "name": "Aaron Gordon",
+      "playerSlug": "aaron-gordon",
+      "jerseyNum": "32",
+      "position": "F",
+      "teamTricode": "DEN",
+      "points": 50,
+      "rebounds": 8,
+      "assists": 2
+     }
+    },
+    "teamLeaders": {
+     "homeLeaders": {
+      "personId": 1641764,
+      "name": "Brandin Podziemski",
+      "playerSlug": "brandin-podziemski",
+      "jerseyNum": "2",
+      "position": "G",
+      "teamTricode": "GSW",
+      "points": 13.8,
+      "rebounds": 5.1,
+      "assists": 3.7
+     },
+     "awayLeaders": {
+      "personId": 203999,
+      "name": "Nikola Jokić",
+      "playerSlug": "nikola-jokić",
+      "jerseyNum": "15",
+      "position": "C",
+      "teamTricode": "DEN",
+      "points": 27.7,
+      "rebounds": 12.9,
+      "assists": 10.7
+     },
+     "seasonLeadersFlag": 0
+    },
+    "broadcasters": {
+     "nationalBroadcasters": [
+      {
+       "broadcasterId": 2,
+       "broadcastDisplay": "ESPN",
+       "broadcasterTeamId": -1,
+       "broadcasterDescription": ""
+      }
+     ],
+     "nationalRadioBroadcasters": [
+      {
+       "broadcasterId": 1001098,
+       "broadcastDisplay": "SiriusXM",
+       "broadcasterTeamId": -1,
+       "broadcasterDescription": ""
+      }
+     ],
+     "nationalOttBroadcasters": [],
+     "homeTvBroadcasters": [
+      {
+       "broadcasterId": 1097,
+       "broadcastDisplay": "NBCSBA",
+       "broadcasterTeamId": 1610612744,
+       "broadcasterDescription": ""
+      }
+     ],
+     "homeRadioBroadcasters": [
+      {
+       "broadcasterId": 1597,
+       "broadcastDisplay": "KGMZ-FM",
+       "broadcasterTeamId": 1610612744,
+       "broadcasterDescription": ""
+      }
+     ],
+     "homeOttBroadcasters": [],
+     "awayTvBroadcasters": [],
+     "awayRadioBroadcasters": [
+      {
+       "broadcasterId": 1730,
+       "broadcastDisplay": "KKSE-FM",
+       "broadcasterTeamId": 1610612743,
+       "broadcasterDescription": ""
+      }
+     ],
+     "awayOttBroadcasters": []
+    },
+    "homeTeam": {
+     "teamId": 1610612744,
+     "teamName": "Warriors",
+     "teamCity": "Golden State",
+     "teamTricode": "GSW",
+     "teamSlug": "warriors",
+     "wins": 2,
+     "losses": 0,
+     "score": 137,
+     "seed": 0,
+     "inBonus": null,
+     "timeoutsRemaining": 1,
+     "periods": [
+      {
+       "period": 1,
+       "periodType": "REGULAR",
+       "score": 27
+      },
+      {
+       "period": 2,
+       "periodType": "REGULAR",
+       "score": 34
+      },
+      {
+       "period": 3,
+       "periodType": "REGULAR",
+       "score": 33
+      },
+      {
+       "period": 4,
+       "periodType": "REGULAR",
+       "score": 26
+      },
+      {
+       "period": 5,
+       "periodType": "OVERTIME",
+       "score": 17
+      }
+     ]
+    },
+    "awayTeam": {
+     "teamId": 1610612743,
+     "teamName": "Nuggets",
+     "teamCity": "Denver",
+     "teamTricode": "DEN",
+     "teamSlug": "nuggets",
+     "wins": 0,
+     "losses": 1,
+     "score": 131,
+     "seed": 0,
+     "inBonus": null,
+     "timeoutsRemaining": 0,
+     "periods": [
+      {
+       "period": 1,
+       "periodType": "REGULAR",
+       "score": 31
+      },
+      {
+       "period": 2,
+       "periodType": "REGULAR",
+       "score": 39
+      },
+      {
+       "period": 3,
+       "periodType": "REGULAR",
+       "score": 24
+      },
+      {
+       "period": 4,
+       "periodType": "REGULAR",
+       "score": 26
+      },
+      {
+       "period": 5,
+       "periodType": "OVERTIME",
+       "score": 11
+      }
+     ]
+    }
+   }
+  ]
+ }
+}

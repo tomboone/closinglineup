@@ -23,6 +23,25 @@ Recorded 2026-10-21 at about 20:13 ET, from the dev Mac on the home network.
 to cache that response, so the recorder cannot re-record it; it was written by hand from a probe
 on the same evening.
 
+## Season-wide endpoints
+
+One response per endpoint for 2025-26, regular season, laid out under its cache key: the
+scoreboard of 2025-10-23 (the fixture game's date), and GSW (`1610612744`) and Stephen Curry
+(`201939`) where an endpoint takes one team or player. `leaguedashplayerstats` and
+`leaguedashteamstats` are recorded in the `Advanced` measure type only, since each endpoint keeps
+one fixture. Re-record them the same way:
+
+```
+uv run scripts/record_fixtures.py stats-season
+```
+
+`scoreboardv3`, `commonteamroster`, `leagueplayerondetails` and `leaguedashteamstats` are kept
+whole. `commonallplayers`, `playergamelogs`, `shotchartdetail`, `leaguedashlineups` and
+`leaguedashplayerstats` list the whole league or a whole season, so each of their result sets is
+trimmed to its first 10 rows; the headers are untouched.
+
+Recorded 2026-10-21 at about 20:20 ET, from the dev Mac on the home network.
+
 ## Schedule
 
 `scheduleleaguev2/2025-26.json` is the 2025-26 schedule in the cdn.nba.com shape. It was recorded

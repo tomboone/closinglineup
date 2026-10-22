@@ -9,10 +9,18 @@ from sqlalchemy.exc import OperationalError
 
 from closinglineup.clock import SystemClock
 from closinglineup.db.session import make_engine, ping
+from closinglineup.season import season_label
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import make_nba_session
-from closinglineup.sources.nba_stats import FetchStatus, fetch_game
+from closinglineup.sources.nba_stats import (
+    FetchStatus,
+    SeasonType,
+    fetch_aggregates,
+    fetch_game,
+    fetch_player_shots,
+    fetch_rosters,
+)
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -44,17 +52,52 @@ def health() -> None:
 
 @app.command("fetch", help=COMMANDS["fetch"])
 def fetch(
-    game_id: Annotated[str, typer.Option(help="Fetch every per-game endpoint for this game.")],
+    game_id: Annotated[
+        str | None, typer.Option(help="Fetch every per-game endpoint for this game.")
+    ] = None,
+    rosters: Annotated[
+        bool, typer.Option("--rosters", help="Fetch every team's roster and every player.")
+    ] = False,
+    shots: Annotated[bool, typer.Option("--shots", help="Fetch --player-id's shot chart.")] = False,
+    aggregates: Annotated[
+        bool,
+        typer.Option(
+            "--aggregates",
+            help="Fetch the league-wide game logs, lineups, stats dashboards and on/off.",
+        ),
+    ] = False,
+    player_id: Annotated[int | None, typer.Option(help="The player whose shots to fetch.")] = None,
+    season: Annotated[
+        str | None, typer.Option(help="Season, e.g. 2026-27. Defaults to the current one.")
+    ] = None,
+    season_type: Annotated[SeasonType, typer.Option(help="Season type.")] = (
+        SeasonType.REGULAR_SEASON
+    ),
     force: Annotated[bool, typer.Option(help="Re-fetch responses already cached.")] = False,
 ) -> None:
+    modes = sum([game_id is not None, rosters, shots, aggregates])
+    if modes != 1:
+        raise typer.BadParameter("pass exactly one of --game-id, --rosters, --shots, --aggregates")
+    if shots and player_id is None:
+        raise typer.BadParameter("--shots needs --player-id")
     settings = Settings()
     clock = SystemClock()
     cache = RawCache(settings.data_dir, clock)
+    season = season or season_label(clock.now().astimezone(settings.tz).date())
     with make_nba_session(settings, clock) as session:
-        results = fetch_game(session, cache, game_id, force=force)
+        if game_id is not None:
+            results = fetch_game(session, cache, game_id, force=force)
+        elif rosters:
+            results = fetch_rosters(session, cache, season, force=force)
+        elif shots and player_id is not None:
+            results = fetch_player_shots(
+                session, cache, player_id, season, season_type, force=force
+            )
+        else:
+            results = fetch_aggregates(session, cache, season, season_type, force=force)
     for result in results:
         reason = f": {result.error}" if result.error else ""
-        typer.echo(f"{result.endpoint}: {result.status}{reason}")
+        typer.echo(f"{result.endpoint} {result.key}: {result.status}{reason}")
     if any(result.status is FetchStatus.FAILED for result in results):
         raise typer.Exit(1)
 
