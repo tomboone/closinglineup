@@ -1,30 +1,53 @@
 import re
+import signal
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from types import FrameType
+from typing import Any, cast
 
 import pytest
 import uvicorn
+from apscheduler.schedulers.background import (  # pyright: ignore[reportMissingTypeStubs]
+    BackgroundScheduler,
+)
 from curl_cffi import requests
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
 from closinglineup import cli
 from closinglineup.cli import COMMANDS, app
 from closinglineup.clock import Clock
+from closinglineup.db.models import JobRun
+from closinglineup.scheduler import NIGHTLY, POLL_FINALS
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import TEAMS
-from tests.fakes import ScriptedGet, fake_response
+from tests.fakes import RoutedGet, ScriptedGet, fake_response
 from tests.test_nba_stats import ENDPOINTS, GAME_ID, fixture_body, season_fixture_body
+from tests.test_scheduler import FINAL_A, FINAL_B, SCHEDULE, nba_routes
 
 runner = CliRunner()
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
-EXPECTED = ["fetch", "parse", "load", "derive", "overlays", "api", "worker", "health", "reparse"]
-STUBS = [command for command in EXPECTED if command not in {"fetch", "health", "api"}]
+EXPECTED = [
+    "fetch",
+    "parse",
+    "load",
+    "derive",
+    "overlays",
+    "api",
+    "worker",
+    "nightly",
+    "health",
+    "reparse",
+]
+IMPLEMENTED = {"fetch", "health", "api", "worker", "nightly"}
+STUBS = [command for command in EXPECTED if command not in IMPLEMENTED]
 
 
-def test_help_lists_the_nine_commands() -> None:
+def test_help_lists_every_command() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
@@ -182,3 +205,85 @@ def test_fetch_without_exactly_one_mode_is_a_usage_error(
     assert result.exit_code == 2
     assert message in ANSI_ESCAPE.sub("", result.output)
     assert scripted_nba.calls == []
+
+
+def _route_nba(monkeypatch: pytest.MonkeyPatch, get: RoutedGet) -> None:
+    def fake_session(settings: Settings, clock: Clock) -> NbaSession:
+        session = NbaSession(requests.Session(), RateLimiter(1e6, clock), clock)
+        monkeypatch.setattr(session.curl, "get", get)
+        return session
+
+    monkeypatch.setattr(cli, "make_nba_session", fake_session)
+
+
+@pytest.fixture
+def nightly_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_url: str) -> None:
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("HEALTHCHECKS_URL_NIGHTLY", raising=False)
+
+
+@pytest.mark.usefixtures("nightly_env")
+def test_nightly_date_fetches_that_dates_final_games_and_records_the_run(
+    monkeypatch: pytest.MonkeyPatch, db: sessionmaker[Session]
+) -> None:
+    get = RoutedGet(nba_routes(SCHEDULE, FINAL_A, FINAL_B))
+    _route_nba(monkeypatch, get)
+
+    result = runner.invoke(app, ["nightly", "--date", "2026-10-20"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[-1] == "nightly 2026-10-20: 2 final games, 2 fetched"
+    with db() as session:
+        [run] = session.scalars(select(JobRun))
+    assert (run.job, run.status) == (NIGHTLY, "succeeded")
+    assert run.detail is not None
+    assert run.detail["fetched"] == [FINAL_A, FINAL_B]
+
+
+@pytest.mark.usefixtures("nightly_env")
+def test_nightly_exits_1_when_the_job_fails(
+    monkeypatch: pytest.MonkeyPatch, db: sessionmaker[Session]
+) -> None:
+    _route_nba(monkeypatch, RoutedGet(nba_routes(None)))
+
+    result = runner.invoke(app, ["nightly", "--date", "2026-10-20"])
+
+    assert result.exit_code == 1
+    assert "nightly 2026-10-20: failed: NbaHttpError: HTTP 404" in result.output
+    with db() as session:
+        assert [run.status for run in session.scalars(select(JobRun))] == ["failed"]
+
+
+def test_worker_runs_the_scheduler_with_every_job_until_sigterm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused@127.0.0.1:1/x")
+    handlers: dict[int, Callable[[int, FrameType | None], None]] = {}
+    calls: list[object] = []
+
+    def fake_signal(signum: int, handler: Callable[[int, FrameType | None], None]) -> None:
+        handlers[signum] = handler
+
+    def fake_start(scheduler: BackgroundScheduler) -> None:
+        jobs = cast(list[Any], scheduler.get_jobs())  # pyright: ignore[reportUnknownMemberType]
+        calls.append(sorted(job.id for job in jobs))
+        handlers[signal.SIGTERM](signal.SIGTERM, None)
+
+    def fake_shutdown(scheduler: BackgroundScheduler) -> None:
+        calls.append("shutdown")
+
+    def no_logging(level: str) -> None:
+        pass
+
+    # Neither the root logger nor the test process's signal handlers are the test's to change.
+    monkeypatch.setattr(cli, "configure_logging", no_logging)
+    monkeypatch.setattr(signal, "signal", fake_signal)
+    monkeypatch.setattr(BackgroundScheduler, "start", fake_start)
+    monkeypatch.setattr(BackgroundScheduler, "shutdown", fake_shutdown)
+
+    result = runner.invoke(app, ["worker"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [[NIGHTLY, POLL_FINALS], "shutdown"]
+    assert set(handlers) == {signal.SIGTERM, signal.SIGINT}

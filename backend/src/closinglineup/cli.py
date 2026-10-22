@@ -1,14 +1,26 @@
 """Command-line entry point: every job is a command (spec §3.1)."""
 
+import logging
+import signal
+import threading
+import time
+from collections.abc import Generator
+from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
+from types import FrameType
 from typing import Annotated
 
+import httpx
 import typer
 import uvicorn
 from sqlalchemy.exc import OperationalError
 
-from closinglineup.clock import SystemClock
-from closinglineup.db.session import make_engine, ping
+from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
+from closinglineup.db.session import make_engine, make_session_factory, ping
+from closinglineup.heartbeat import Heartbeat
+from closinglineup.logging import configure_logging
+from closinglineup.scheduler import Jobs, build_scheduler
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
@@ -24,6 +36,8 @@ from closinglineup.sources.nba_stats import (
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
+log = logging.getLogger(__name__)
+
 COMMANDS = {
     "fetch": "Fetch raw responses from NBA.com into the raw cache.",
     "parse": "Parse cached raw responses into parquet rows.",
@@ -32,6 +46,7 @@ COMMANDS = {
     "overlays": "Fetch injuries, transactions, impact metrics and contracts.",
     "api": "Serve the API and the built frontend.",
     "worker": "Run the job scheduler.",
+    "nightly": "Run the nightly job once: refresh the schedule, fetch a date's final games.",
     "health": "Check that the database answers.",
     "reparse": "Re-parse cached raw responses after a parser change.",
 }
@@ -100,6 +115,70 @@ def fetch(
         typer.echo(f"{result.endpoint} {result.key}: {result.status}{reason}")
     if any(result.status is FetchStatus.FAILED for result in results):
         raise typer.Exit(1)
+
+
+@contextmanager
+def _open_jobs(settings: Settings, clock: Clock) -> Generator[Jobs]:
+    engine = make_engine(settings)
+    try:
+        with httpx.Client() as http:
+            yield Jobs(
+                settings=settings,
+                clock=clock,
+                cache=RawCache(settings.data_dir, clock),
+                nba=lambda: make_nba_session(settings, clock),
+                db=make_session_factory(engine),
+                heartbeat=Heartbeat.from_settings(settings, http),
+            )
+    finally:
+        engine.dispose()
+
+
+@app.command("nightly", help=COMMANDS["nightly"])
+def nightly(
+    date: Annotated[
+        datetime | None,
+        typer.Option(formats=["%Y-%m-%d"], help="The game date. Defaults to yesterday in TZ."),
+    ] = None,
+) -> None:
+    settings = Settings()
+    clock = SystemClock()
+    day = date.date() if date else clock.now().astimezone(settings.tz).date() - timedelta(days=1)
+    with _open_jobs(settings, clock) as jobs:
+        try:
+            detail = jobs.nightly(day)
+        except Exception as exc:
+            typer.echo(f"nightly {day}: failed: {type(exc).__name__}: {exc}", err=True)
+            raise typer.Exit(1) from None
+    for failure in detail["failed"]:
+        typer.echo(f"{failure['endpoint']} {failure['key']}: failed: {failure['error']}")
+    typer.echo(
+        f"nightly {day}: {len(detail['games'])} final games, {len(detail['fetched'])} fetched"
+    )
+
+
+@app.command("worker", help=COMMANDS["worker"])
+def worker() -> None:
+    settings = Settings()
+    configure_logging(settings.log_level)
+    stop = threading.Event()
+
+    def on_signal(signum: int, frame: FrameType | None) -> None:
+        stop.set()
+
+    # Docker stops a container with SIGTERM.
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, on_signal)
+    with _open_jobs(settings, SystemClock()) as jobs:
+        scheduler = build_scheduler(jobs)
+        scheduler.start()  # pyright: ignore[reportUnknownMemberType]
+        log.info("worker started")
+        # Polled rather than `stop.wait()`, which holds the lock `set()` needs (see `SystemClock`).
+        while not stop.is_set():
+            time.sleep(POLL_SECONDS)
+        # Waits for a job under way to finish.
+        scheduler.shutdown()  # pyright: ignore[reportUnknownMemberType]
+    log.info("worker stopped")
 
 
 @app.command("api", help=COMMANDS["api"])

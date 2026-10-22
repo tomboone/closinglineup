@@ -1,5 +1,7 @@
 """Stand-ins for curl_cffi, so sources can be tested without the network."""
 
+from collections.abc import Mapping
+
 from curl_cffi import requests
 
 
@@ -23,3 +25,17 @@ class ScriptedGet:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+class RoutedGet:
+    """Stands in for `curl_cffi.Session.get`: answers each URL with its routed body, and any other
+    with a 404."""
+
+    def __init__(self, routes: Mapping[str, bytes]) -> None:
+        self.routes = dict(routes)
+        self.calls: list[tuple[str, dict[str, str] | None]] = []
+
+    def __call__(self, url: str, params: dict[str, str] | None = None) -> requests.Response:
+        self.calls.append((url, params))
+        body = self.routes.get(url)
+        return fake_response(404) if body is None else fake_response(200, body)
