@@ -1,16 +1,17 @@
 import json
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from curl_cffi import requests
 
-from closinglineup.backfill import SeasonGame, fetch_season
+from closinglineup.backfill import PAUSES, SeasonGame, fetch_season
 from closinglineup.clock import FakeClock
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import (
+    RETRIES,
     NbaHttpError,
     NbaSession,
     NbaUnreachableError,
@@ -58,6 +59,28 @@ class InterruptedGet(RoutedGet):
         return super().__call__(url, params)
 
 
+class ThrottledGet(RoutedGet):
+    """`RoutedGet`, timing out on every request whose number (from 1) falls in one of `windows`,
+    as stats.nba.com does while it throttles."""
+
+    def __init__(self, routes: Mapping[str, bytes], *windows: range) -> None:
+        super().__init__(routes)
+        self.windows = windows
+
+    def __call__(self, url: str, params: dict[str, str] | None = None) -> requests.Response:
+        if any(len(self.calls) + 1 in window for window in self.windows):
+            self.calls.append((url, params))
+            raise requests.exceptions.Timeout("curl: (28) Operation timed out")
+        return super().__call__(url, params)
+
+
+class Paused(list[tuple[date, str, timedelta]]):
+    """An `on_pause` that records each pause."""
+
+    def __call__(self, day: date, game_id: str, wait: timedelta) -> None:
+        self.append((day, game_id, wait))
+
+
 def season_routes() -> dict[str, bytes]:
     """`SCHEDULE` from stats.nba.com, and every per-game endpoint of its final games."""
     routes = nba_routes(None, *(game_id for _, game_id in FINALS))
@@ -81,6 +104,12 @@ def _session(get: RoutedGet, clock: FakeClock) -> NbaSession:
     return session
 
 
+def _throttle(start: int) -> range:
+    """The requests, from number `start`, of one throttled spell `NbaSession` gives up on: each
+    try of a request."""
+    return range(start, start + RETRIES + 1)
+
+
 def _requested(get: RoutedGet) -> list[str]:
     """Each request's endpoint: the last path segment of a stats.nba.com URL, the feed of a
     cdn.nba.com one."""
@@ -95,7 +124,7 @@ def test_fetch_season_fetches_each_final_game_oldest_first_and_caches_the_schedu
 ) -> None:
     get = RoutedGet(season_routes())
 
-    games = list(fetch_season(_session(get, clock), cache, SEASON))
+    games = list(fetch_season(_session(get, clock), cache, clock, SEASON))
 
     assert [(game.game_date, game.game_id) for game in games] == FINALS
     assert len(get.calls) == 1 + 3 * PER_GAME
@@ -107,10 +136,10 @@ def test_fetch_season_fetches_each_final_game_oldest_first_and_caches_the_schedu
 def test_fetch_season_skips_fully_cached_games_without_a_request(
     cache: RawCache, clock: FakeClock
 ) -> None:
-    list(fetch_season(_session(RoutedGet(season_routes()), clock), cache, SEASON))
+    list(fetch_season(_session(RoutedGet(season_routes()), clock), cache, clock, SEASON))
     get = RoutedGet(season_routes())
 
-    games = list(fetch_season(_session(get, clock), cache, SEASON))
+    games = list(fetch_season(_session(get, clock), cache, clock, SEASON))
 
     assert games == [SeasonGame(day, game_id) for day, game_id in FINALS]
     assert _requested(get) == [nba_stats.SCHEDULE_LEAGUE_V2]
@@ -125,12 +154,12 @@ def test_fetch_season_stops_at_an_interrupted_game_and_resumes_it_where_it_stopp
 
     done: list[SeasonGame] = []
     with pytest.raises(KeyboardInterrupt):
-        done.extend(fetch_season(_session(first, clock), cache, SEASON))
+        done.extend(fetch_season(_session(first, clock), cache, clock, SEASON))
     assert [game.game_id for game in done] == [FINAL_DAY_BEFORE]
     assert len(first.calls) == stopped
 
     second = RoutedGet(season_routes())
-    games = list(fetch_season(_session(second, clock), cache, SEASON))
+    games = list(fetch_season(_session(second, clock), cache, clock, SEASON))
 
     # The finished game is skipped; the interrupted one resumes at its first endpoint not cached.
     assert games[0] == SeasonGame(*FINALS[0])
@@ -157,21 +186,70 @@ def test_fetch_season_stops_naming_the_game_when_nba_com_stops_answering_and_res
     first = InterruptedGet(season_routes(), at=1 + PER_GAME + 1, error=timeout)
 
     done: list[SeasonGame] = []
+    paused = Paused()
     with pytest.raises(NbaUnreachableError, match=f"game {FINAL_A} of {DAY}: no answer from"):
-        done.extend(fetch_season(_session(first, clock), cache, SEASON))
+        done.extend(
+            fetch_season(
+                _session(first, clock),
+                cache,
+                clock,
+                SEASON,
+                on_pause=paused,
+            )
+        )
     assert [game.game_id for game in done] == [FINAL_DAY_BEFORE]
+    # It waited out every pause, trying the game again after each, before it stopped.
+    assert paused == [(DAY, FINAL_A, wait) for wait in PAUSES]
+    assert len(first.calls) - (1 + PER_GAME) == (len(PAUSES) + 1) * (RETRIES + 1)
 
     second = RoutedGet(season_routes())
-    games = list(fetch_season(_session(second, clock), cache, SEASON))
+    games = list(fetch_season(_session(second, clock), cache, clock, SEASON))
 
     assert [game.game_id for game in games] == [FINAL_DAY_BEFORE, FINAL_A, FINAL_B]
     assert fetched_games(second)["stats"] == {FINAL_A, FINAL_B}
 
 
+def test_fetch_season_waits_out_a_throttle_and_carries_on_with_the_game(
+    cache: RawCache, clock: FakeClock
+) -> None:
+    # The schedule, the first game and three endpoints of the second, then a throttled spell.
+    get = ThrottledGet(season_routes(), _throttle(1 + PER_GAME + 4))
+    paused = Paused()
+    began = clock.now()
+
+    games = list(fetch_season(_session(get, clock), cache, clock, SEASON, on_pause=paused))
+
+    assert [game.game_id for game in games] == [FINAL_DAY_BEFORE, FINAL_A, FINAL_B]
+    assert all(not game.failed for game in games)
+    assert paused == [(DAY, FINAL_A, PAUSES[0])]
+    assert clock.now() - began >= PAUSES[0]
+    # The try after the pause picks the game up at the endpoint that went unanswered.
+    assert fetched_games(get) == {
+        "stats": {FINAL_DAY_BEFORE, FINAL_A, FINAL_B},
+        "cdn": {FINAL_DAY_BEFORE, FINAL_A, FINAL_B},
+    }
+    assert len(get.calls) == 1 + 3 * PER_GAME + RETRIES + 1
+
+
+def test_a_game_that_gets_through_starts_the_next_stop_at_the_first_pause(
+    cache: RawCache, clock: FakeClock
+) -> None:
+    # A throttled spell in the second game, and another in the third.
+    second = 1 + PER_GAME + 1
+    third = second + (RETRIES + 1) + PER_GAME
+    get = ThrottledGet(season_routes(), _throttle(second), _throttle(third))
+    paused = Paused()
+
+    games = list(fetch_season(_session(get, clock), cache, clock, SEASON, on_pause=paused))
+
+    assert len(games) == 3
+    assert paused == [(DAY, FINAL_A, PAUSES[0]), (DAY, FINAL_B, PAUSES[0])]
+
+
 def test_fetch_season_keeps_to_the_dates_from_and_to(cache: RawCache, clock: FakeClock) -> None:
     get = RoutedGet(season_routes())
 
-    games = list(fetch_season(_session(get, clock), cache, SEASON, start=DAY, end=DAY))
+    games = list(fetch_season(_session(get, clock), cache, clock, SEASON, start=DAY, end=DAY))
 
     assert [game.game_id for game in games] == [FINAL_A, FINAL_B]
     assert fetched_games(get)["stats"] == {FINAL_A, FINAL_B}
@@ -184,7 +262,7 @@ def test_fetch_season_reports_a_feed_that_answers_badly_and_carries_on(
     del routes[f"{nba_cdn.CDN_BASE}/liveData/boxscore/boxscore_{FINAL_A}.json"]
     get = RoutedGet(routes)
 
-    games = list(fetch_season(_session(get, clock), cache, SEASON, start=DAY))
+    games = list(fetch_season(_session(get, clock), cache, clock, SEASON, start=DAY))
 
     assert [(r.endpoint, r.key) for r in games[0].failed] == [(nba_cdn.BOXSCORE, FINAL_A)]
     assert games[1].failed == []
@@ -197,12 +275,12 @@ def test_fetch_season_raises_when_the_schedule_cannot_be_fetched(
     del routes[SCHEDULE_URL]
 
     with pytest.raises(NbaHttpError, match="HTTP 404"):
-        list(fetch_season(_session(RoutedGet(routes), clock), cache, SEASON))
+        list(fetch_season(_session(RoutedGet(routes), clock), cache, clock, SEASON))
 
 
 def test_a_date_with_no_finals_fetches_nothing(cache: RawCache, clock: FakeClock) -> None:
     get = RoutedGet(season_routes())
     later = date(2026, 11, 1)
 
-    assert list(fetch_season(_session(get, clock), cache, SEASON, start=later)) == []
+    assert list(fetch_season(_session(get, clock), cache, clock, SEASON, start=later)) == []
     assert _requested(get) == [nba_stats.SCHEDULE_LEAGUE_V2]
