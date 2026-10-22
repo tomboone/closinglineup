@@ -70,8 +70,8 @@ class RawCache:
             "params": dict(params or {}),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
-        _write_atomic(path.with_name(f"{key}{META_SUFFIX}"), json.dumps(meta, indent=2).encode())
-        _write_atomic(path, content)
+        write_atomic(path.with_name(f"{key}{META_SUFFIX}"), json.dumps(meta, indent=2).encode())
+        write_atomic(path, content)
         return True
 
     def list(self, source: str, endpoint: str) -> list[str]:
@@ -86,7 +86,7 @@ class RawCache:
         )
 
 
-def _write_atomic(path: Path, content: bytes) -> None:
+def write_atomic(path: Path, content: bytes) -> None:
     """Write via a temp file in the same directory and rename, so readers never see a partial."""
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:

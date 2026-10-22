@@ -146,8 +146,8 @@ One function per endpoint; parameter names follow nba_api's documentation for th
 | `boxscorematchupsv3` | `GameID` | matchup rows | per game |
 | `boxscoreusagev3` | same as `boxscoretraditionalv3` | usage split | per game |
 | `playbyplayv3` | `GameID`, `StartPeriod=0`, `EndPeriod=14` | our own PBP (shot clock, descriptions) | per game |
-| `boxscoretraditionalv2` | `GameID`, `StartPeriod=0`, `EndPeriod=14`, `StartRange=0`, `EndRange=55800`, `RangeType=2` (pbpstats's own range; `RangeType=0` returns no rows) | **a payload pbpstats parses** (it expects the v2 resultSets shape) | per game |
-| `playbyplayv2` | `GameID`, `StartPeriod=0`, `EndPeriod=14` | **a payload pbpstats parses**. Returns `{}` for every game as of 2026-10-21 (NEU-1855), so the fetcher reports it failed | per game |
+| `boxscoretraditionalv2` | `GameID`, `StartPeriod=0`, `EndPeriod=14`, `StartRange=0`, `EndRange=55800`, `RangeType=2` (pbpstats's own range; `RangeType=0` returns no rows) | the v2 resultSets box. pbpstats's `live` loaders, which `parse/pbp.py` uses, do not read it (NEU-1857) | per game |
+| `playbyplayv2` | `GameID`, `StartPeriod=0`, `EndPeriod=14` | nothing: it returns `{}` for every game as of 2026-10-21 (NEU-1855), so the fetcher reports it failed, and pbpstats reads cdn.nba.com's live play-by-play instead (§4.2, NEU-1857) | per game |
 | `shotchartdetail` | `PlayerID`, `TeamID=0`, `Season`, `SeasonType`, `ContextMeasure=FGA`, `LeagueID=00`, plus the empty-string params nba_api sends | shot rows | weekly per active player |
 | `commonteamroster` | `TeamID`, `Season` | roster, contract type hints | daily |
 | `commonallplayers` | `LeagueID=00`, `Season`, `IsOnlyCurrentSeason=0` | player reference | daily |
@@ -156,13 +156,13 @@ One function per endpoint; parameter names follow nba_api's documentation for th
 | `leagueplayerondetails` | `TeamID`, `Season`, `SeasonType`, `MeasureType=Advanced` | reconciliation of on/off | weekly |
 | `leaguedashplayerstats`, `leaguedashteamstats` | `Season`, `SeasonType`, `MeasureType` | cross-checks | weekly |
 
-The exact filenames and directory layout pbpstats expects in file mode (`pbp/stats_<game_id>.json`, `game_details/stats_<game_id>.json`, overrides) are verified against the pinned pbpstats version in M2 and recorded in `parse/pbp.py`'s docstring; the fetcher writes those files from the v2 responses.
+pbpstats runs its `live` loaders in file mode over cdn.nba.com's live play-by-play (§4.2), since its `stats_nba` loaders need `playbyplayv2`. The exact layout (`pbp/live_<game_id>.json` and `overrides/missing_period_starters.json`) was verified against the pinned pbpstats 1.3.11 in NEU-1857 and is recorded in `parse/pbp.py`'s docstring. `parse.pbp.materialize` writes the file from the raw cache.
 
 ### 4.2 cdn.nba.com (`sources/nba_cdn.py`)
 
 - `static/json/staticData/scheduleLeagueV2_1.json` — the season schedule; the source of `game` rows and the counted-game filter.
 - `static/json/liveData/scoreboard/todaysScoreboard_00.json` — same-day final polling.
-- `static/json/liveData/boxscore/boxscore_<game_id>.json`, `static/json/liveData/playbyplay/playbyplay_<game_id>.json` — fallback box and PBP when stats.nba.com fails for a game; parsed into the same row types with `source='cdn'`.
+- `static/json/liveData/boxscore/boxscore_<game_id>.json`, `static/json/liveData/playbyplay/playbyplay_<game_id>.json` — fallback box and PBP when stats.nba.com fails for a game; parsed into the same row types with `source='cdn'`. The live play-by-play is also the input pbpstats reads for stints and possessions, for every game (§4.1, NEU-1857).
 
 The same `NbaSession` is used; cdn.nba.com also fingerprints TLS.
 
@@ -186,7 +186,7 @@ Spotrac team cap page per team, weekly → `contract(player, season, salary, gua
 
 ## 5. Raw cache (`sources/cache.py`)
 
-`DATA_DIR/raw/<source>/<endpoint>/<key>.json` where `key` is the game ID, the date, `<player_id>_<season>` or `<team_id>_<season>` as appropriate; injury PDFs are kept as `raw/injury/<report_datetime>.pdf`. Files are write-once; a `.meta.json` sibling records `fetched_at`, status and the request params. `closinglineup reparse --from --to` re-runs parse → load → derive from the cache without the network. pbpstats override files (`DATA_DIR/pbpstats/overrides/`) are committed to the repo under `backend/pbpstats_overrides/` and copied in on container start.
+`DATA_DIR/raw/<source>/<endpoint>/<key>.json` where `key` is the game ID, the date, `<player_id>_<season>` or `<team_id>_<season>` as appropriate; injury PDFs are kept as `raw/injury/<report_datetime>.pdf`. Files are write-once; a `.meta.json` sibling records `fetched_at`, status and the request params. `closinglineup reparse --from --to` re-runs parse → load → derive from the cache without the network. pbpstats override files (`DATA_DIR/pbpstats/overrides/`) are committed to the repo under `backend/pbpstats_overrides/` and copied in by `parse.pbp.materialize` before pbpstats reads a game.
 
 ## 6. Data model (Postgres, schema `public`)
 

@@ -16,3 +16,5 @@ Recorded 2026-10-21 at about 20:03 ET, from the dev Mac on the home network, for
 early in the evening, so the scoreboard's games are scheduled or in progress, none final. The
 2026-27 schedule lists no All-Star, play-in or playoff games yet; the 2025-26 stats.nba.com
 schedule fixture in the same shape covers those phases.
+
+The whole-game play-by-play and box scores that `parse/pbp.py` is tested on live in `../pbp/`.

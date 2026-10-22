@@ -59,11 +59,13 @@ def recorder(name: str, help: str) -> Callable[[RecordFn], RecordFn]:
     return register
 
 
-def write_fixture(source: str, endpoint: str, key: str, payload: Payload) -> None:
-    """Write `payload` as the endpoint's only fixture."""
+def write_fixture(
+    source: str, endpoint: str, key: str, payload: Payload, *, replace: bool = True
+) -> None:
+    """Write `payload` as the endpoint's only fixture, or beside the others unless `replace`."""
     directory = FIXTURES / source / endpoint
     directory.mkdir(parents=True, exist_ok=True)
-    for stale in directory.glob("*.json"):
+    for stale in directory.glob("*.json") if replace else ():
         stale.unlink()
     path = directory / f"{key}.json"
     path.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n")
@@ -176,6 +178,38 @@ def record_stats(options: Options) -> None:
             raw = cache.get(nba_stats.SOURCE, result.endpoint, game_id)
             assert raw is not None
             write_fixture(nba_stats.SOURCE, result.endpoint, game_id, json.loads(raw))
+
+
+# The full games `parse/pbp.py` is tested on (spec §11): the overtime game above, and MIN at OKC
+# on 2025-11-26, whose substitutions logged between free throws and end-of-quarter heave are the
+# ordering quirks the stint builder has to handle.
+PBP_GAME_IDS = (STATS_GAME_ID, "0022500064")
+PBP_FIXTURES = "pbp"
+
+
+@recorder(
+    "pbp",
+    "cdn.nba.com: the live play-by-play and box score of each pbpstats test game "
+    f"({', '.join(PBP_GAME_IDS)}), whole",
+)
+def record_pbp(options: Options) -> None:
+    clock = SystemClock()
+    with (
+        tempfile.TemporaryDirectory() as data_dir,
+        make_nba_session(_settings(), clock) as session,
+    ):
+        cache = RawCache(Path(data_dir), clock)
+        payloads = [
+            (endpoint, game_id, fetch(session, cache, game_id))
+            for game_id in PBP_GAME_IDS
+            for endpoint, fetch in (
+                (nba_cdn.PLAYBYPLAY, nba_cdn.fetch_live_pbp),
+                (nba_cdn.BOXSCORE, nba_cdn.fetch_live_boxscore),
+            )
+        ]
+    for endpoint, game_id, payload in payloads:
+        replace = game_id == PBP_GAME_IDS[0]
+        write_fixture(PBP_FIXTURES, endpoint, game_id, payload, replace=replace)
 
 
 # The season-wide recordings: the fixture game's season, date and home team, and its top scorer.
