@@ -38,7 +38,7 @@ from closinglineup.scheduler import Jobs, build_scheduler
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
-from closinglineup.sources.nba_http import NbaHttpError, make_nba_session
+from closinglineup.sources.nba_http import NbaHttpError, NbaUnreachableError, make_nba_session
 from closinglineup.sources.nba_stats import (
     FetchStatus,
     SeasonType,
@@ -143,16 +143,20 @@ def fetch(
         _fetch_season(settings, clock, cache, season, first, last, force=force)
         return
     with make_nba_session(settings, clock) as session:
-        if game_id is not None:
-            results = fetch_game(session, cache, game_id, force=force)
-        elif rosters:
-            results = fetch_rosters(session, cache, season, force=force)
-        elif shots and player_id is not None:
-            results = fetch_player_shots(
-                session, cache, player_id, season, season_type, force=force
-            )
-        else:
-            results = fetch_aggregates(session, cache, season, season_type, force=force)
+        try:
+            if game_id is not None:
+                results = fetch_game(session, cache, game_id, force=force)
+            elif rosters:
+                results = fetch_rosters(session, cache, season, force=force)
+            elif shots and player_id is not None:
+                results = fetch_player_shots(
+                    session, cache, player_id, season, season_type, force=force
+                )
+            else:
+                results = fetch_aggregates(session, cache, season, season_type, force=force)
+        except NbaUnreachableError as exc:
+            typer.echo(f"fetch: stopped: {exc}")
+            raise typer.Exit(1) from None
     for result in results:
         reason = f": {result.error}" if result.error else ""
         typer.echo(f"{result.endpoint} {result.key}: {result.status}{reason}")
@@ -203,6 +207,10 @@ def _fetch_season(
                     failed.append(game.game_id)
         except NbaHttpError as exc:
             typer.echo(f"fetch {season}: failed: {exc}")
+            raise typer.Exit(1) from None
+        except NbaUnreachableError as exc:
+            typer.echo(f"fetch {season}: stopped: {exc}")
+            typer.echo(f"fetch {season}: run the same command again to resume")
             raise typer.Exit(1) from None
     typer.echo(
         f"fetch {season}: {games} final games, {cached} already cached, "

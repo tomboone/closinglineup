@@ -334,8 +334,8 @@ def fetch_game(
     order.
 
     An endpoint that answers badly (`NbaHttpError`) is reported as FAILED and the rest still run,
-    so one endpoint's outage costs only its own data; a connection error, which `NbaSession` has
-    already retried, propagates.
+    so one endpoint's outage costs only its own data; `NbaUnreachableError`, raised once
+    `NbaSession` has retried a connection error or timeout, propagates.
     """
     return [
         _attempt(

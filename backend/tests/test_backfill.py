@@ -10,7 +10,12 @@ from closinglineup.backfill import SeasonGame, fetch_season
 from closinglineup.clock import FakeClock
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
-from closinglineup.sources.nba_http import NbaHttpError, NbaSession, RateLimiter
+from closinglineup.sources.nba_http import (
+    NbaHttpError,
+    NbaSession,
+    NbaUnreachableError,
+    RateLimiter,
+)
 from closinglineup.sources.nba_stats import EndpointResult, FetchStatus
 from tests.fakes import RoutedGet
 from tests.test_nba_stats import WITH_DATA
@@ -34,13 +39,20 @@ PER_GAME = len(WITH_DATA) + len(CDN)
 
 
 class InterruptedGet(RoutedGet):
-    """`RoutedGet`, interrupted as by Ctrl-C when it is asked for request number `at`."""
+    """`RoutedGet`, interrupted as by Ctrl-C when it is asked for request number `at`, or with
+    `error` from then on."""
 
-    def __init__(self, routes: Mapping[str, bytes], at: int) -> None:
+    def __init__(
+        self, routes: Mapping[str, bytes], at: int, error: BaseException | None = None
+    ) -> None:
         super().__init__(routes)
         self.at = at
+        self.error = error
 
     def __call__(self, url: str, params: dict[str, str] | None = None) -> requests.Response:
+        if self.error is not None and len(self.calls) + 1 >= self.at:
+            self.calls.append((url, params))
+            raise self.error
         if len(self.calls) + 1 == self.at:
             raise KeyboardInterrupt
         return super().__call__(url, params)
@@ -135,6 +147,25 @@ def test_fetch_season_stops_at_an_interrupted_game_and_resumes_it_where_it_stopp
         *(EndpointResult(e, FINAL_A, FetchStatus.FETCHED) for e in [*resumed, *CDN]),
     ]
     assert fetched_games(second) == {"stats": {FINAL_A, FINAL_B}, "cdn": {FINAL_A, FINAL_B}}
+
+
+def test_fetch_season_stops_naming_the_game_when_nba_com_stops_answering_and_resumes_it(
+    cache: RawCache, clock: FakeClock
+) -> None:
+    # The schedule, the first game, then a timeout on every try of the second game's first request.
+    timeout = requests.exceptions.Timeout("curl: (28) Operation timed out")
+    first = InterruptedGet(season_routes(), at=1 + PER_GAME + 1, error=timeout)
+
+    done: list[SeasonGame] = []
+    with pytest.raises(NbaUnreachableError, match=f"game {FINAL_A} of {DAY}: no answer from"):
+        done.extend(fetch_season(_session(first, clock), cache, SEASON))
+    assert [game.game_id for game in done] == [FINAL_DAY_BEFORE]
+
+    second = RoutedGet(season_routes())
+    games = list(fetch_season(_session(second, clock), cache, SEASON))
+
+    assert [game.game_id for game in games] == [FINAL_DAY_BEFORE, FINAL_A, FINAL_B]
+    assert fetched_games(second)["stats"] == {FINAL_A, FINAL_B}
 
 
 def test_fetch_season_keeps_to_the_dates_from_and_to(cache: RawCache, clock: FakeClock) -> None:

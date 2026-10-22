@@ -30,7 +30,7 @@ from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import TEAMS
 from tests.fakes import RoutedGet, ScriptedGet, fake_response
-from tests.test_backfill import season_routes
+from tests.test_backfill import InterruptedGet, season_routes
 from tests.test_loader import clear_fixture_game
 from tests.test_memberships import UNCOVERED
 from tests.test_nba_stats import ENDPOINTS, GAME_ID, fixture_body, season_fixture_body
@@ -265,6 +265,31 @@ def test_fetch_season_exits_1_on_a_failed_endpoint_or_schedule(
     assert no_schedule.output == (
         "fetch 2025-26: failed: scheduleleaguev2 has no data for 2025-26\n"
     )
+
+
+def test_fetch_season_stops_cleanly_when_nba_com_stops_answering(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused@127.0.0.1:1/x")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    timeout = requests.exceptions.Timeout("curl: (28) Operation timed out")
+    get = InterruptedGet(season_routes(), at=2, error=timeout)
+
+    # No retries: the CLI runs on the system clock, which would sleep through the backoff.
+    def fake_session(settings: Settings, clock: Clock) -> NbaSession:
+        session = NbaSession(requests.Session(), RateLimiter(1e6, clock), clock, retries=0)
+        monkeypatch.setattr(session.curl, "get", get)
+        return session
+
+    monkeypatch.setattr(cli, "make_nba_session", fake_session)
+
+    result = runner.invoke(app, ["fetch", "--season", "2026-27", "--from", "2026-10-20"])
+
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    stopped, resume = result.output.splitlines()
+    assert stopped.startswith(f"fetch 2026-27: stopped: game {FINAL_A} of 2026-10-20: no answer")
+    assert resume == "fetch 2026-27: run the same command again to resume"
 
 
 def _route_nba(monkeypatch: pytest.MonkeyPatch, get: RoutedGet) -> None:

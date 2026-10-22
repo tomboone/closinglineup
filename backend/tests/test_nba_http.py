@@ -16,6 +16,7 @@ from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import (
     NbaHttpError,
     NbaSession,
+    NbaUnreachableError,
     RateLimiter,
     fetch_json,
     make_nba_session,
@@ -116,27 +117,47 @@ def test_gives_up_after_three_retries_and_returns_the_last_5xx(
     assert _elapsed(clock) == pytest.approx(0.5 + 1.0 + 2.0, abs=1e-3)
 
 
-def test_connection_errors_are_retried_then_reraised(
-    session: NbaSession, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.exceptions.ConnectionError("refused"),
+        # What curl error 28, an operation timed out, raises: a plain `Timeout`, which is not a
+        # `ConnectionError`.
+        requests.exceptions.Timeout("curl: (28) Operation timed out"),
+        requests.exceptions.ReadTimeout("slow"),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+def test_connection_errors_and_timeouts_are_retried_then_raised_as_unreachable(
+    session: NbaSession, monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
-    get = ScriptedGet(*[requests.exceptions.ConnectionError("refused")] * 4)
+    get = ScriptedGet(*[error] * 4)
     monkeypatch.setattr(session.curl, "get", get)
 
-    with pytest.raises(requests.exceptions.ConnectionError):
+    with pytest.raises(NbaUnreachableError, match=f"no answer from {URL} in 4 tries") as raised:
         session.get(URL)
     assert len(get.calls) == 4
+    assert raised.value.__cause__ is error
 
 
-def test_does_not_retry_a_403_or_a_read_timeout(
+def test_a_timeout_then_200_returns_the_200(
     session: NbaSession, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    get = ScriptedGet(fake_response(403), requests.exceptions.ReadTimeout("slow"))
+    get = ScriptedGet(requests.exceptions.Timeout("timed out"), fake_response(200, b"{}"))
+    monkeypatch.setattr(session.curl, "get", get)
+
+    assert session.get(URL).status_code == 200
+    assert _elapsed(clock) == pytest.approx(0.5, abs=1e-3)
+
+
+def test_does_not_retry_a_403(
+    session: NbaSession, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    get = ScriptedGet(fake_response(403))
     monkeypatch.setattr(session.curl, "get", get)
 
     assert session.get(URL).status_code == 403
-    with pytest.raises(requests.exceptions.ReadTimeout):
-        session.get(URL)
-    assert len(get.calls) == 2
+    assert len(get.calls) == 1
     assert _elapsed(clock) == pytest.approx(0, abs=1e-3)
 
 
