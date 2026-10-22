@@ -1,6 +1,7 @@
 """ORM models. Alembic autogenerates migrations against `Base.metadata` (spec §6)."""
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any, ClassVar
 
 from sqlalchemy import (
@@ -25,6 +26,15 @@ NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
+
+class RunStatus(StrEnum):
+    """A `job_run` or `load_log` row's status."""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
 
 _STATUS_CHECK = "status IN ('running', 'succeeded', 'failed')"
 

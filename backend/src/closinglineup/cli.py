@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import date as Date
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import FrameType
@@ -17,9 +18,13 @@ import uvicorn
 from sqlalchemy.exc import OperationalError
 
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
+from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
 from closinglineup.heartbeat import Heartbeat
+from closinglineup.load.loader import load_dates
+from closinglineup.load.parquet import ParquetStore
 from closinglineup.logging import configure_logging
+from closinglineup.pipeline import NotCachedError, game_date_of, parse_date
 from closinglineup.scheduler import Jobs, build_scheduler
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
@@ -46,7 +51,7 @@ COMMANDS = {
     "overlays": "Fetch injuries, transactions, impact metrics and contracts.",
     "api": "Serve the API and the built frontend.",
     "worker": "Run the job scheduler.",
-    "nightly": "Run the nightly job once: refresh the schedule, fetch a date's final games.",
+    "nightly": "Run the nightly job once: refresh the schedule, fetch, parse and load a date.",
     "health": "Check that the database answers.",
     "reparse": "Re-parse cached raw responses after a parser change.",
 }
@@ -117,6 +122,111 @@ def fetch(
         raise typer.Exit(1)
 
 
+# Plain assignments, not `type` aliases, which typer cannot read.
+DateOption = Annotated[datetime | None, typer.Option(formats=["%Y-%m-%d"], help="A game date.")]
+FromOption = Annotated[
+    datetime | None, typer.Option("--from", formats=["%Y-%m-%d"], help="First game date.")
+]
+ToOption = Annotated[
+    datetime | None, typer.Option("--to", formats=["%Y-%m-%d"], help="Last game date.")
+]
+
+
+def _days(date: datetime | None, start: datetime | None, end: datetime | None) -> list[Date] | None:
+    """The game dates `--date` or `--from`/`--to` name, or None if neither was passed."""
+    if date is not None:
+        if start is not None or end is not None:
+            raise typer.BadParameter("pass --date or --from/--to, not both")
+        return [date.date()]
+    if start is None and end is None:
+        return None
+    if start is None or end is None:
+        raise typer.BadParameter("--from and --to go together")
+    if start > end:
+        raise typer.BadParameter("--from is after --to")
+    return [start.date() + timedelta(days=n) for n in range((end - start).days + 1)]
+
+
+@app.command("parse", help=COMMANDS["parse"])
+def parse(
+    date: DateOption = None,
+    start: FromOption = None,
+    end: ToOption = None,
+    game_id: Annotated[
+        str | None,
+        typer.Option(help="Parse this game's date: a date's parquet files hold it whole."),
+    ] = None,
+) -> None:
+    settings = Settings()
+    cache = RawCache(settings.data_dir)
+    store = ParquetStore(settings.data_dir)
+    days = _days(date, start, end)
+    if (days is None) == (game_id is None):
+        raise typer.BadParameter("pass exactly one of --date, --from/--to, --game-id")
+    failed = False
+    if game_id is not None:
+        try:
+            days = [game_date_of(cache, game_id)]
+        except NotCachedError as exc:
+            typer.echo(f"parse {game_id}: failed: {exc}")
+            raise typer.Exit(1) from None
+    for day in days or []:
+        try:
+            report = parse_date(cache, store, day, settings.tz)
+        except NotCachedError as exc:
+            typer.echo(f"parse {day}: failed: {exc}")
+            failed = True
+            continue
+        for failed_game, error in report.failed.items():
+            typer.echo(f"parse {day} {failed_game}: failed: {error}")
+        for missing_game in report.missing:
+            typer.echo(f"parse {day} {missing_game}: final, but no box score cached")
+        typer.echo(f"parse {day}: {len(report.parsed)} games parsed")
+        failed = failed or bool(report.failed)
+    if failed:
+        raise typer.Exit(1)
+
+
+@app.command("load", help=COMMANDS["load"])
+def load(
+    date: DateOption = None,
+    start: FromOption = None,
+    end: ToOption = None,
+    missing: Annotated[
+        bool,
+        typer.Option(
+            "--missing",
+            help="Only the tables and dates not yet loaded; with no dates, of every parsed date.",
+        ),
+    ] = False,
+) -> None:
+    days = _days(date, start, end)
+    if days is None and not missing:
+        raise typer.BadParameter("pass --date, --from/--to or --missing")
+    settings = Settings()
+    engine = make_engine(settings)
+    try:
+        results = load_dates(
+            make_session_factory(engine),
+            ParquetStore(settings.data_dir),
+            SystemClock(),
+            days,
+            missing=missing,
+        )
+    finally:
+        engine.dispose()
+    for result in results:
+        if result.status is RunStatus.FAILED:
+            typer.echo(f"load {result.table} {result.game_date}: failed: {result.error}")
+        else:
+            outcome = f"{result.rows} rows, {result.changed} changed"
+            typer.echo(f"load {result.table} {result.game_date}: {result.status}, {outcome}")
+    if not results:
+        typer.echo("load: nothing to load")
+    if any(result.status is RunStatus.FAILED for result in results):
+        raise typer.Exit(1)
+
+
 @contextmanager
 def _open_jobs(settings: Settings, clock: Clock) -> Generator[Jobs]:
     engine = make_engine(settings)
@@ -126,6 +236,7 @@ def _open_jobs(settings: Settings, clock: Clock) -> Generator[Jobs]:
                 settings=settings,
                 clock=clock,
                 cache=RawCache(settings.data_dir, clock),
+                store=ParquetStore(settings.data_dir),
                 nba=lambda: make_nba_session(settings, clock),
                 db=make_session_factory(engine),
                 heartbeat=Heartbeat.from_settings(settings, http),
@@ -152,8 +263,11 @@ def nightly(
             raise typer.Exit(1) from None
     for failure in detail["failed"]:
         typer.echo(f"{failure['endpoint']} {failure['key']}: failed: {failure['error']}")
+    for failed_game, error in detail["parse_failed"].items():
+        typer.echo(f"parse {failed_game}: failed: {error}")
     typer.echo(
-        f"nightly {day}: {len(detail['games'])} final games, {len(detail['fetched'])} fetched"
+        f"nightly {day}: {len(detail['games'])} final games, {len(detail['fetched'])} fetched, "
+        f"{len(detail['parsed'])} parsed"
     )
 
 

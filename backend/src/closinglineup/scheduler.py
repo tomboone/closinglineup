@@ -1,15 +1,13 @@
 """The worker's jobs, on APScheduler: each runs the functions the CLI does and records a `job_run`
 row as it starts and finishes (spec §3.3, §6.4).
 
-So far `nightly` only refreshes the schedule and fetches; parse, load and derive join it as they
-land.
+So far `nightly` refreshes the schedule, fetches, parses and loads; derive joins it when it lands.
 """
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, tzinfo
-from enum import StrEnum
 from typing import Any
 
 from apscheduler.executors.pool import (  # pyright: ignore[reportMissingTypeStubs]
@@ -24,8 +22,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.clock import Clock
-from closinglineup.db.models import JobRun
+from closinglineup.db.models import JobRun, RunStatus
 from closinglineup.heartbeat import Heartbeat, JobFamily
+from closinglineup.load.loader import load_dates, raise_for_failures
+from closinglineup.load.parquet import ParquetStore
+from closinglineup.pipeline import parse_date
 from closinglineup.season import is_counted, season_label
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
@@ -49,12 +50,6 @@ CDN_GAME_ENDPOINTS: dict[str, GameFetch] = {
 type Detail = dict[str, Any]
 
 log = logging.getLogger(__name__)
-
-
-class RunStatus(StrEnum):
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +111,7 @@ class Jobs:
     settings: Settings
     clock: Clock
     cache: RawCache
+    store: ParquetStore
     nba: Callable[[], NbaSession]
     db: sessionmaker[Session]
     heartbeat: Heartbeat
@@ -123,12 +119,15 @@ class Jobs:
     finals: dict[date, set[str]] = field(default_factory=dict[date, set[str]])
 
     def nightly(self, day: date) -> Detail:
-        """Refresh the schedule, then fetch every per-game endpoint of each counted game final on
-        `day` that is not yet fully cached.
+        """Refresh the schedule, fetch every per-game endpoint of each counted game final on `day`
+        that is not yet fully cached, then parse and load the date.
 
         A game is final if the schedule says so or `poll_finals` saw it go final. An endpoint that
         answers badly is listed in the run's detail and does not fail the job, since
-        `playbyplayv2` currently always does (see `nba_stats.fetch_playbyplay_v2`).
+        `playbyplayv2` currently always does (see `nba_stats.fetch_playbyplay_v2`); nor does a
+        game a parser cannot read, which `parse_date` leaves out. Each earlier parsed date whose
+        last load of a table failed or never ran is loaded again. A table that fails to load fails
+        the job, and its failed `load_log` row is there for the next run.
         """
         return self._run(NIGHTLY, lambda: self._nightly(day), family="nightly")
 
@@ -159,7 +158,23 @@ class Jobs:
                     if r.status is FetchStatus.FAILED
                 )
         self.finals.pop(day, None)
-        return {"date": day.isoformat(), "games": games, "fetched": pending, "failed": failed}
+        parsed = parse_date(self.cache, self.store, day, self.settings.tz)
+        loaded = load_dates(self.db, self.store, self.clock, [day])
+        # Self-heals any earlier date a past run left without a successful load (spec §3.2).
+        earlier = [d for d in self.store.dates() if d != day]
+        healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
+        raise_for_failures([*loaded, *healed])
+        return {
+            "date": day.isoformat(),
+            "games": games,
+            "fetched": pending,
+            "failed": failed,
+            "parsed": parsed.parsed,
+            "parse_failed": parsed.failed,
+            "parse_missing": parsed.missing,
+            "loaded": {result.table: result.rows for result in loaded},
+            "healed": [f"{result.table} {result.game_date}" for result in healed],
+        }
 
     def _poll_finals(self) -> Detail:
         with self.nba() as session:
