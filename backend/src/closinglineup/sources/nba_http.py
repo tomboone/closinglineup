@@ -9,7 +9,13 @@ Ported from nba-today's `nba_http.py`, adding the rate limiter (spec §4). This 
 that imports curl_cffi (spec §3.1). curl_cffi's own `retry` never retries a 5xx, so the retry loop
 here is our own. Unlike nba-today's, it retries a timeout too: a backfill runs for hours
 unattended, and stats.nba.com now and then holds a request open past `NBA_TIMEOUT_SECONDS` with
-nothing sent (curl error 28, seen on kumadrome 2026-10-22), which one more try usually gets past.
+nothing sent (curl error 28, seen on kumadrome 2026-10-22).
+
+A timeout or connection error also drops the curl session, its open connection and its cookies
+with it, and the next try opens a new one. On kumadrome a session that had started timing out
+never answered again, through every retry and backfill pause up to 30 minutes, while a fresh
+process fetched at once: whatever stats.nba.com holds against the old connection or its cookies,
+a new session does not carry it.
 """
 
 import json
@@ -91,20 +97,22 @@ class NbaSession:
     responses.
 
     Every attempt, retries included, waits its turn at the rate limiter. Between tries it sleeps
-    `backoff * 2**attempt`. After the last retry a 5xx response is returned as-is, and a
-    connection error or timeout raises `NbaUnreachableError`.
+    `backoff * 2**attempt`. A connection error or timeout closes the curl session and `connect`
+    opens a new one. After the last retry a 5xx response is returned as-is, and a connection
+    error or timeout raises `NbaUnreachableError`.
     """
 
     def __init__(
         self,
-        curl: requests.Session[requests.Response],
+        connect: Callable[[], requests.Session[requests.Response]],
         limiter: RateLimiter,
         clock: Clock,
         *,
         retries: int = RETRIES,
         backoff: float = BACKOFF_SECONDS,
     ) -> None:
-        self.curl = curl
+        self._connect = connect
+        self.curl = connect()
         self._limiter = limiter
         self._clock = clock
         self._retries = retries
@@ -121,6 +129,8 @@ class NbaSession:
             # a plain one.
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 reason = type(exc).__name__
+                self.curl.close()
+                self.curl = self._connect()
                 if last:
                     tries = self._retries + 1
                     raise NbaUnreachableError(
@@ -153,10 +163,12 @@ class NbaSession:
 
 
 def make_nba_session(settings: Settings, clock: Clock) -> NbaSession:
-    curl = requests.Session(
-        impersonate=IMPERSONATE, headers=NBA_HEADERS, timeout=settings.nba_timeout_seconds
-    )
-    return NbaSession(curl, RateLimiter(settings.nba_rps, clock), clock)
+    def connect() -> requests.Session[requests.Response]:
+        return requests.Session(
+            impersonate=IMPERSONATE, headers=NBA_HEADERS, timeout=settings.nba_timeout_seconds
+        )
+
+    return NbaSession(connect, RateLimiter(settings.nba_rps, clock), clock)
 
 
 def fetch_json(

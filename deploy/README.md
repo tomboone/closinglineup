@@ -170,8 +170,10 @@ send about twice `NBA_RPS`: start the 2025-26 fetch after the 03:30 nightly run.
 
 It is safe to stop at any point: Ctrl-C, a dropped connection, a reboot. Run the same command again and it
 skips every game already cached, and resumes the game it stopped in at its first endpoint not cached.
-A few hundred games into a run, stats.nba.com tends to throttle kumadrome: it holds requests open with
-nothing sent until they time out. Each request is tried four times, then the run waits it out, printing
+A few hundred games into a run, stats.nba.com tends to stop answering: it holds requests open with nothing
+sent until they time out. A connection that has started doing that never recovers, while a new one is
+answered at once, so each timed-out request is tried again on a fresh connection (with fresh cookies),
+four tries in all. If none is answered, the run waits it out, printing
 `… no answer from NBA.com, trying again in 5 min` and trying the game again after 5, 15 and 30 minutes;
 a game that gets through starts the next wait back at 5. Only if NBA.com is still silent after the
 30-minute wait does the run stop, with `stopped: game … no answer from …`, and exit 1; the same command
