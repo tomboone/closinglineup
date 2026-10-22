@@ -3,7 +3,7 @@ import json
 import re
 import signal
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import FrameType
 from typing import Any, cast
@@ -20,7 +20,7 @@ from typer.testing import CliRunner
 
 from closinglineup import cli
 from closinglineup.cli import COMMANDS, app
-from closinglineup.clock import Clock
+from closinglineup.clock import Clock, FakeClock
 from closinglineup.db.models import JobRun, LoadLog, PlayerGame
 from closinglineup.load.parquet import ROW_MODELS, ParquetStore
 from closinglineup.scheduler import NIGHTLY, POLL_FINALS, WEEKLY
@@ -267,27 +267,26 @@ def test_fetch_season_exits_1_on_a_failed_endpoint_or_schedule(
     )
 
 
-def test_fetch_season_stops_cleanly_when_nba_com_stops_answering(
+def test_fetch_season_waits_out_nba_com_then_stops_cleanly_if_it_still_does_not_answer(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused@127.0.0.1:1/x")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     timeout = requests.exceptions.Timeout("curl: (28) Operation timed out")
-    get = InterruptedGet(season_routes(), at=2, error=timeout)
-
-    # No retries: the CLI runs on the system clock, which would sleep through the backoff.
-    def fake_session(settings: Settings, clock: Clock) -> NbaSession:
-        session = NbaSession(requests.Session(), RateLimiter(1e6, clock), clock, retries=0)
-        monkeypatch.setattr(session.curl, "get", get)
-        return session
-
-    monkeypatch.setattr(cli, "make_nba_session", fake_session)
+    _route_nba(monkeypatch, InterruptedGet(season_routes(), at=2, error=timeout))
+    # A fake clock, so the backoff and the pauses take no time.
+    clock = FakeClock(datetime(2026, 10, 22, 12, tzinfo=UTC))
+    monkeypatch.setattr(cli, "SystemClock", lambda: clock)
 
     result = runner.invoke(app, ["fetch", "--season", "2026-27", "--from", "2026-10-20"])
 
     assert result.exit_code == 1
     assert result.exception is None or isinstance(result.exception, SystemExit)
-    stopped, resume = result.output.splitlines()
+    *paused, stopped, resume = result.output.splitlines()
+    assert paused == [
+        f"2026-10-20 {FINAL_A}: no answer from NBA.com, trying again in {minutes} min"
+        for minutes in (5, 15, 30)
+    ]
     assert stopped.startswith(f"fetch 2026-27: stopped: game {FINAL_A} of 2026-10-20: no answer")
     assert resume == "fetch 2026-27: run the same command again to resume"
 

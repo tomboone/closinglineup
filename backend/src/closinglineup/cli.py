@@ -192,9 +192,16 @@ def _fetch_season(
     """`fetch --season`: a line per game as it is done, so a long run shows its progress."""
     games = cached = 0
     failed: list[str] = []
+
+    def paused(day: Date, game_id: str, wait: timedelta) -> None:
+        minutes = int(wait.total_seconds() // 60)
+        typer.echo(f"{day} {game_id}: no answer from NBA.com, trying again in {minutes} min")
+
     with make_nba_session(settings, clock) as session:
         try:
-            for game in fetch_season(session, cache, season, start=start, end=end, force=force):
+            for game in fetch_season(
+                session, cache, clock, season, start=start, end=end, force=force, on_pause=paused
+            ):
                 games += 1
                 if not game.results:
                     cached += 1
