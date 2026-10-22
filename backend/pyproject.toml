@@ -33,7 +33,7 @@ extend-exclude = [".claude"]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 exclude = ["**/__pycache__"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"

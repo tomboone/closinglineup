@@ -35,7 +35,7 @@ class RawCache:
 
     def __init__(self, data_dir: Path, clock: Clock | None = None) -> None:
         self.root = data_dir / "raw"
-        self._clock = clock or SystemClock()
+        self.clock = clock or SystemClock()
 
     def path(self, source: str, endpoint: str, key: str) -> Path:
         return self.root / source / endpoint / f"{key}{SUFFIX}"
@@ -64,7 +64,7 @@ class RawCache:
         if path.is_file() and not force:
             return False
         meta: CacheMeta = {
-            "fetched_at": self._clock.now().isoformat(),
+            "fetched_at": self.clock.now().isoformat(),
             "url": url,
             "status": status,
             "params": dict(params or {}),
