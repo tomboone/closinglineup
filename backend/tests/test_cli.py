@@ -30,7 +30,9 @@ from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import TEAMS
 from tests.fakes import RoutedGet, ScriptedGet, fake_response
+from tests.test_backfill import season_routes
 from tests.test_loader import clear_fixture_game
+from tests.test_memberships import UNCOVERED
 from tests.test_nba_stats import ENDPOINTS, GAME_ID, fixture_body, season_fixture_body
 from tests.test_pipeline import DAY, GAME, UNCACHED, cache_fixture_game
 from tests.test_pipeline import SCHEDULE as FIXTURE_SCHEDULE
@@ -204,6 +206,8 @@ def test_fetch_shots_fetches_the_player_for_the_season_type(
         (["--rosters", "--aggregates"], "pass exactly one of"),
         (["--game-id", GAME_ID, "--shots"], "pass exactly one of"),
         (["--shots"], "--shots needs --player-id"),
+        (["--rosters", "--from", "2025-10-23"], "--from and --to go with --season alone"),
+        (["--season", "2025-26", "--from", "2025-10-24", "--to", "2025-10-23"], "after --to"),
     ],
 )
 def test_fetch_without_exactly_one_mode_is_a_usage_error(
@@ -214,6 +218,53 @@ def test_fetch_without_exactly_one_mode_is_a_usage_error(
     assert result.exit_code == 2
     assert message in ANSI_ESCAPE.sub("", result.output)
     assert scripted_nba.calls == []
+
+
+def test_fetch_season_reports_each_game_and_a_rerun_skips_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused@127.0.0.1:1/x")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _route_nba(monkeypatch, RoutedGet(season_routes()))
+    args = ["fetch", "--season", "2026-27", "--from", "2026-10-20"]
+
+    first = runner.invoke(app, args)
+    second = runner.invoke(app, args)
+
+    assert first.exit_code == 0, first.output
+    assert first.output.splitlines() == [
+        f"2026-10-20 {FINAL_A}: fetched",
+        f"2026-10-20 {FINAL_B}: fetched",
+        "fetch 2026-27: 2 final games, 0 already cached, 2 fetched, 0 with failures",
+    ]
+    assert second.output == (
+        "fetch 2026-27: 2 final games, 2 already cached, 0 fetched, 0 with failures\n"
+    )
+
+
+def test_fetch_season_exits_1_on_a_failed_endpoint_or_schedule(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused@127.0.0.1:1/x")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    routes = season_routes()
+    del routes[cdn_game_url(nba_cdn.BOXSCORE, FINAL_B)]
+    _route_nba(monkeypatch, RoutedGet(routes))
+
+    failed = runner.invoke(app, ["fetch", "--season", "2026-27", "--from", "2026-10-20"])
+    no_schedule = runner.invoke(app, ["fetch", "--season", "2025-26"])
+
+    assert failed.exit_code == 1
+    assert failed.output.splitlines()[1:] == [
+        f"boxscore {FINAL_B}: failed: HTTP 404 from {cdn_game_url(nba_cdn.BOXSCORE, FINAL_B)}",
+        f"2026-10-20 {FINAL_B}: 1 failed",
+        "fetch 2026-27: 2 final games, 0 already cached, 2 fetched, 1 with failures",
+    ]
+    assert no_schedule.exit_code == 1
+    # The routed schedule is 2026-27's, which is no 2025-26 schedule.
+    assert no_schedule.output == (
+        "fetch 2025-26: failed: scheduleleaguev2 has no data for 2025-26\n"
+    )
 
 
 def _route_nba(monkeypatch: pytest.MonkeyPatch, get: RoutedGet) -> None:
@@ -361,9 +412,12 @@ def test_parse_exits_1_when_the_schedule_is_not_cached(data_env: Path) -> None:
         ("parse", ["--from", "2025-10-24", "--to", "2025-10-23"], "--from is after --to"),
         ("parse", ["--date", "2025-10-23", "--shots"], "pass exactly one of"),
         ("parse", ["--date", "2025-10-23", "--season", "2025-26"], "--season goes with --shots"),
-        ("load", [], "pass --date, --from/--to, --missing or --shots"),
-        ("load", ["--shots", "--missing"], "--shots takes no dates and no --missing"),
-        ("load", ["--shots", "--date", "2025-10-23"], "--shots takes no dates and no --missing"),
+        ("load", [], "pass --date, --from/--to, --missing, --shots or --memberships"),
+        ("load", ["--shots", "--missing"], "take no dates and no --missing"),
+        ("load", ["--shots", "--date", "2025-10-23"], "take no dates and no --missing"),
+        ("load", ["--memberships", "--missing"], "take no dates and no --missing"),
+        ("load", ["--shots", "--memberships"], "pass --shots or --memberships, not both"),
+        ("load", ["--missing", "--season", "2025-26"], "--season goes with --memberships"),
     ],
 )
 def test_parse_and_load_without_dates_are_usage_errors(
@@ -481,6 +535,23 @@ def test_nightly_date_fetches_parses_and_loads_the_fixture_game(
     assert (run.job, run.status) == (NIGHTLY, "succeeded")
     assert run.detail is not None
     assert run.detail["loaded"]["player_game"] == 28
+    assert run.detail["memberships"] >= 28
+
+
+def test_load_memberships_builds_the_seasons_spans_from_its_loaded_games(
+    load_env: Path, db: sessionmaker[Session]
+) -> None:
+    cache_fixture_game(load_env)
+    runner.invoke(app, ["parse", "--date", "2025-10-23"])
+    assert runner.invoke(app, ["load", "--date", "2025-10-23"]).exit_code == 0
+
+    result = runner.invoke(app, ["load", "--memberships", "--season", "2025-26"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("load roster_membership 2025-26: succeeded, ")
+    with db() as session:
+        uncovered = session.execute(UNCOVERED, {"season": "2025-26"}).scalar_one()
+    assert uncovered == 0
 
 
 def test_load_shots_loads_every_parsed_shot_chart_and_a_rerun_changes_nothing(

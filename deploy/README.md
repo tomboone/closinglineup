@@ -146,6 +146,131 @@ and cdn.nba.com feeds, and a ping to the nightly check):
 docker compose run --rm worker closinglineup nightly --date 2026-10-20
 ```
 
+## 7. Backfill
+
+The nightly job only fetches the day before, so the cache starts with whatever has been played since the
+worker went live. The backfill fills in 2025-26 whole and 2026-27 to date (spec §2): fetch every final
+game, fetch the rosters, then parse and load, then build the roster memberships.
+
+**Fetch the games.** `fetch --season` refreshes the season's schedule from stats.nba.com (the CDN serves
+only the current season's), then fetches every counted final game not yet cached, oldest first, printing a
+line per game:
+
+```sh
+tmux new -s backfill
+docker compose run --rm worker closinglineup fetch --season 2025-26
+docker compose run --rm worker closinglineup fetch --season 2026-27
+```
+
+Each game is eight requests (six stats.nba.com endpoints and two cdn.nba.com feeds; `playbyplayv2` is
+left out, since it only ever fails) at `NBA_RPS`, so about 8 s a game at the default of 1. 2025-26 has
+1,322 counted games, about **3 hours**; 2026-27 a few minutes. Run it in `tmux` (or `screen`) so an SSH
+drop does not stop it. The worker's own jobs keep their own rate limit, so while one runs the two together
+send about twice `NBA_RPS`: start the 2025-26 fetch after the 03:30 nightly run.
+
+It is safe to stop at any point: Ctrl-C, a dropped connection, a reboot. Run the same command again and it
+skips every game already cached, and resumes the game it stopped in at its first endpoint not cached.
+`--from 2026-01-01` (and `--to`) restrict it to a range of game dates. A game with an endpoint that failed
+is listed with the failure, the run carries on, and the command exits 1 at the end; running it again
+retries only what is missing.
+
+**Fetch the rosters** of both seasons (31 requests each). A past season's rosters are as they stood at its
+end, so they fill in player details (birthdate, height, position) but add no memberships:
+
+```sh
+docker compose run --rm worker closinglineup fetch --rosters --season 2025-26
+docker compose run --rm worker closinglineup fetch --rosters --season 2026-27
+```
+
+**Parse and load** each season's dates, then build its roster memberships from the games just loaded.
+Rosters are snapshots, so the memberships of a past season come from its games: a span per run of games
+a player had a box-score line for with one team (`nightly` rebuilds the current season's after each
+load). A date with no games parses to empty files, so the ranges can be generous:
+
+```sh
+docker compose run --rm worker closinglineup parse --from 2025-10-01 --to 2026-06-30
+docker compose run --rm worker closinglineup load --from 2025-10-01 --to 2026-06-30
+docker compose run --rm worker closinglineup load --memberships --season 2025-26
+docker compose run --rm worker closinglineup parse --from 2026-10-01 --to 2026-10-22
+docker compose run --rm worker closinglineup load --from 2026-10-01 --to 2026-10-22
+docker compose run --rm worker closinglineup load --memberships --season 2026-27
+```
+
+`parse` lists any game it could not read (a play-by-play pbpstats needs an override for, say) and exits 1;
+the rest of the date is written. `load --missing` reloads whatever failed to load.
+
+**Check it.** Every final game in the schedule is in `game`:
+
+```sh
+docker compose exec postgres psql -U closinglineup -c \
+  "SELECT season, count(*) FROM game WHERE status = 'final' GROUP BY season ORDER BY season"
+docker compose run --rm -T --no-deps worker python - <<'EOF'
+import json
+from closinglineup.scheduler import final_games_between
+from closinglineup.settings import Settings
+from closinglineup.sources import nba_stats
+from closinglineup.sources.cache import RawCache
+
+cache = RawCache(Settings().data_dir)
+for season in ("2025-26", "2026-27"):
+    schedule = json.loads(cache.get(nba_stats.SOURCE, nba_stats.SCHEDULE_LEAGUE_V2, season) or b"{}")
+    print(season, len(final_games_between(schedule)))
+EOF
+```
+
+The two counts match per season. (2026-27's schedule is as of its last `fetch --season`; a nightly run
+since then adds games to `game`.)
+
+Every player who played has a line in `playergamelogs`, so the `player_game` rows of players who played
+add up to its rows, season type by season type; the DNP rows are on top. Fetch the logs:
+
+```sh
+docker compose run --rm -T --no-deps worker python - <<'EOF'
+from closinglineup.clock import SystemClock
+from closinglineup.settings import Settings
+from closinglineup.sources import nba_stats
+from closinglineup.sources.cache import RawCache
+from closinglineup.sources.nba_http import NbaHttpError, make_nba_session
+
+settings, clock = Settings(), SystemClock()
+cache = RawCache(settings.data_dir, clock)
+with make_nba_session(settings, clock) as session:
+    for season in ("2025-26", "2026-27"):
+        for season_type in nba_stats.SeasonType:
+            try:
+                logs = nba_stats.fetch_player_game_logs(session, cache, season, season_type, force=True)
+            except NbaHttpError as exc:  # a season type not yet played
+                print(season, season_type, 0, exc)
+                continue
+            print(season, season_type, len(logs["resultSets"][0]["rowSet"]))
+EOF
+docker compose exec postgres psql -U closinglineup -c "
+  SELECT g.season, substr(pg.game_id, 3, 1) AS season_type,
+         count(*) FILTER (WHERE pg.dnp_reason IS NULL) AS played,
+         count(*) FILTER (WHERE pg.dnp_reason IS NOT NULL) AS dnp
+  FROM player_game pg JOIN game g USING (game_id)
+  GROUP BY 1, 2 ORDER BY 1, 2"
+```
+
+`played` for season type `2` matches `Regular Season`, `4` matches `Playoffs` and `5` matches `PlayIn`.
+Type `6` is the NBA Cup final, which no `playergamelogs` season type includes. A difference names games to
+look at: one `parse` reported as failed, or one whose box score marks a player who did not get on the
+floor as played.
+
+Every `player_game` row has a roster membership covering its date; this counts the ones that do not, and
+prints 0 for each season:
+
+```sh
+docker compose exec postgres psql -U closinglineup -c "
+  SELECT g.season, count(*) FILTER (WHERE NOT EXISTS (
+    SELECT 1 FROM roster_membership rm
+    WHERE rm.player_id = pg.player_id AND rm.team_id = pg.team_id
+      AND rm.start_date <= g.game_date AND (rm.end_date IS NULL OR rm.end_date >= g.game_date)
+  )) AS uncovered
+  FROM player_game pg JOIN game g USING (game_id)
+  GROUP BY 1 ORDER BY 1"
+```
+
 ## Day-to-day
 
 **Logs.** Every container logs structured JSON to stdout:

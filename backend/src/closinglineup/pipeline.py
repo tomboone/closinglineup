@@ -16,8 +16,12 @@ shot chart is cached (`load.parquet`).
 season's cached player list and team rosters as they are when the date is parsed, each roster's
 memberships open from the day it was fetched (`parse.roster`). The cache keeps one roster per team
 per season, so parsing an earlier date after a newer roster fetch writes that fetch's
-memberships, not the ones of the date; `derive` builds the history (NEU-1869). Reference rows a
-parser cannot read are reported under `REFERENCE` and left out, like a game's.
+memberships, not the ones of the date; the history comes from the season's games once they are
+loaded (`load.memberships`), and `derive` stitches it with transactions (NEU-1869). Reference rows
+a parser cannot read are reported under `REFERENCE` and left out, like a game's.
+
+A date's games come from its season's schedule, whichever cached copy was fetched last:
+cdn.nba.com's, which `nightly` refreshes, or stats.nba.com's, which `fetch --season` does.
 """
 
 import json
@@ -43,7 +47,7 @@ from closinglineup.parse.rows import (
 )
 from closinglineup.parse.schedule import parse_schedule
 from closinglineup.parse.shots import parse_shots
-from closinglineup.season import season_label, season_of_game_id
+from closinglineup.season import season_bounds, season_label, season_of_game_id
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 
@@ -82,10 +86,23 @@ def _payload(cache: RawCache, source: str, endpoint: str, key: str) -> Payload |
     return None if raw is None else json.loads(raw)
 
 
+# Where a season's schedule may be cached, in the same shape: cdn.nba.com's, which `nightly`
+# refreshes for the current season, and stats.nba.com's, which `fetch --season` refreshes for any.
+SCHEDULES = ((nba_cdn.SOURCE, nba_cdn.SCHEDULE), (nba_stats.SOURCE, nba_stats.SCHEDULE_LEAGUE_V2))
+
+
 def _schedule(cache: RawCache, season: str) -> list[GameRow]:
-    payload = _payload(cache, nba_cdn.SOURCE, nba_cdn.SCHEDULE, season)
-    if payload is None:
+    """The season's games, from whichever of its cached schedules was fetched last."""
+    fetched = [
+        (datetime.fromisoformat(meta["fetched_at"]), source, endpoint)
+        for source, endpoint in SCHEDULES
+        if (meta := cache.meta(source, endpoint, season)) is not None
+    ]
+    if not fetched:
         raise NotCachedError(f"no {season} schedule in the raw cache")
+    _, source, endpoint = max(fetched)
+    payload = _payload(cache, source, endpoint, season)
+    assert payload is not None
     return parse_schedule(payload)
 
 
@@ -134,7 +151,13 @@ def _reference_rows(
     cache: RawCache, season: str, tz: tzinfo
 ) -> tuple[list[PlayerRow], list[RosterMembershipRow]]:
     """The season's players and roster memberships, from whatever of its player list and team
-    rosters are cached."""
+    rosters are cached.
+
+    A roster fetched after its season ended, as a backfill fetches last season's, still fills in
+    its players, but has no memberships: it would open them on the day it was fetched, on teams
+    some of its players have since left. That season's memberships come from its games.
+    """
+    _, season_end = season_bounds(season)
     rosters: dict[str, Payload] = {}
     for key in cache.list(nba_stats.SOURCE, nba_stats.COMMON_TEAM_ROSTER):
         if not key.endswith(f"_{season}"):
@@ -146,9 +169,8 @@ def _reference_rows(
     memberships = [
         membership
         for key, roster in rosters.items()
-        for membership in parse_roster(
-            roster, _fetched_on(cache, nba_stats.COMMON_TEAM_ROSTER, key, tz)
-        )
+        if (as_of := _fetched_on(cache, nba_stats.COMMON_TEAM_ROSTER, key, tz)) <= season_end
+        for membership in parse_roster(roster, as_of)
     ]
     all_players = _payload(cache, nba_stats.SOURCE, nba_stats.COMMON_ALL_PLAYERS, season)
     players = parse_players(all_players, rosters.values()) if all_players is not None else []

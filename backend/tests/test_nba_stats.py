@@ -178,6 +178,17 @@ def test_fetch_game_on_a_cached_game_makes_no_requests(
     assert results == [EndpointResult(e, GAME_ID, FetchStatus.CACHED) for e in ENDPOINTS]
 
 
+def test_fetch_game_leaves_out_the_skipped_endpoints(
+    session: NbaSession, cache: RawCache, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    get = _script(session, monkeypatch, *map(fixture_body, WITH_DATA))
+
+    results = nba_stats.fetch_game(session, cache, GAME_ID, skip={"playbyplayv2"})
+
+    assert [url.rsplit("/", 1)[1] for url, _ in get.calls] == WITH_DATA
+    assert results == [EndpointResult(e, GAME_ID, FetchStatus.FETCHED) for e in WITH_DATA]
+
+
 def test_fetch_game_with_force_refetches_every_endpoint(
     session: NbaSession, cache: RawCache, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -257,6 +268,12 @@ SEASON_CASES: list[tuple[str, str, dict[str, str], SeasonFetch]] = [
         f"{GSW}_{SEASON}",
         {"TeamID": str(GSW), "Season": SEASON, "LeagueID": "00"},
         lambda s, c: nba_stats.fetch_common_team_roster(s, c, GSW, SEASON),
+    ),
+    (
+        "scheduleleaguev2",
+        SEASON,
+        {"LeagueID": "00", "Season": SEASON},
+        lambda s, c: nba_stats.fetch_schedule_league_v2(s, c, SEASON),
     ),
     (
         "commonallplayers",
@@ -433,6 +450,16 @@ def test_a_season_wide_response_with_no_rows_is_not_cached(
     with pytest.raises(NbaHttpError, match=f"{endpoint} has no data for {key}"):
         fetch(session, cache)
     assert not cache.exists("nba_stats", endpoint, key)
+
+
+def test_a_schedule_of_another_season_is_not_cached(
+    session: NbaSession, cache: RawCache, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _script(session, monkeypatch, season_fixture_body("scheduleleaguev2"))
+
+    with pytest.raises(NbaHttpError, match="scheduleleaguev2 has no data for 2024-25"):
+        nba_stats.fetch_schedule_league_v2(session, cache, "2024-25")
+    assert not cache.exists("nba_stats", "scheduleleaguev2", "2024-25")
 
 
 def _scoreboard(day: str, *statuses: int) -> bytes:

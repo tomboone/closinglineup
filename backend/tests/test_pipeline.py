@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -203,6 +203,67 @@ def test_a_date_with_no_games_writes_empty_files(tmp_path: Path) -> None:
 def test_a_season_with_no_cached_schedule_raises(tmp_path: Path) -> None:
     with pytest.raises(NotCachedError, match="no 2025-26 schedule in the raw cache"):
         parse_date(RawCache(tmp_path), ParquetStore(tmp_path), DAY, TZ)
+
+
+def test_a_roster_fetched_after_its_season_fills_in_players_but_opens_no_memberships(
+    tmp_path: Path,
+) -> None:
+    cache = cache_fixture_game(tmp_path, rosters=False)
+    late = RawCache(tmp_path, FakeClock(datetime(2026, 10, 22, 12, tzinfo=UTC)))
+    for endpoint, key in [
+        (nba_stats.COMMON_TEAM_ROSTER, f"{GSW}_2025-26"),
+        (nba_stats.COMMON_ALL_PLAYERS, "2025-26"),
+    ]:
+        body = season_fixture_body(endpoint)
+        late.put(nba_stats.SOURCE, endpoint, key, body, url="u", status=200)
+
+    report = parse_date(cache, ParquetStore(tmp_path), DAY, TZ)
+
+    assert (report.rows["player"], report.rows["roster_membership"]) == (PLAYERS, 0)
+    assert REFERENCE not in report.failed
+
+
+def _cache_stats_schedule(data_dir: Path, fetched_at: datetime, schedule: Payload) -> None:
+    """`schedule` as `fetch --season` caches it, from stats.nba.com, at `fetched_at`."""
+    RawCache(data_dir, FakeClock(fetched_at)).put(
+        nba_stats.SOURCE,
+        nba_stats.SCHEDULE_LEAGUE_V2,
+        "2025-26",
+        json.dumps(schedule).encode(),
+        url="u",
+        status=200,
+    )
+
+
+# The schedule with only the fixture game in it.
+ONE_GAME: Payload = json.loads(json.dumps(SCHEDULE))
+ONE_GAME["leagueSchedule"]["gameDates"][0]["games"].pop()
+
+
+def test_a_past_season_parses_from_the_stats_schedule_alone(tmp_path: Path) -> None:
+    cache = cache_fixture_game(tmp_path)
+    cache.path(nba_cdn.SOURCE, nba_cdn.SCHEDULE, "2025-26").unlink()
+    _cache_stats_schedule(tmp_path, ROSTERS_FETCHED, ONE_GAME)
+
+    report = parse_date(cache, ParquetStore(tmp_path), DAY, TZ)
+
+    assert (report.parsed, report.missing, report.rows["game"]) == ([GAME], [], 1)
+
+
+@pytest.mark.parametrize(
+    ("offset", "games"),
+    [(timedelta(hours=1), 1), (-timedelta(hours=1), 2)],
+    ids=["stats-newer", "cdn-newer"],
+)
+def test_a_date_parses_from_whichever_cached_schedule_was_fetched_last(
+    tmp_path: Path, offset: timedelta, games: int
+) -> None:
+    cache = cache_fixture_game(tmp_path)
+    _cache_stats_schedule(tmp_path, ROSTERS_FETCHED + offset, ONE_GAME)
+
+    report = parse_date(cache, ParquetStore(tmp_path), DAY, TZ)
+
+    assert report.rows["game"] == games
 
 
 def test_a_games_date_comes_from_its_seasons_schedule(tmp_path: Path) -> None:

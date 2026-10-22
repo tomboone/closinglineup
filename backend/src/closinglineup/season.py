@@ -10,7 +10,7 @@ are type-2 games that only the `in-season-knockout` subtype tells apart; Cup gro
 regular season.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from enum import StrEnum
 from typing import Protocol
 
@@ -56,6 +56,12 @@ def _label(start: int) -> str:
 
 def season_label(d: date) -> str:
     return _label(season_start_year(d))
+
+
+def season_bounds(season: str) -> tuple[date, date]:
+    """The first and last calendar dates of a season label: `2025-26` → 2025-08-01, 2026-07-31."""
+    start = int(season[:4])
+    return date(start, ROLLOVER_MONTH, 1), date(start + 1, ROLLOVER_MONTH, 1) - timedelta(days=1)
 
 
 def season_of_game_id(game_id: str) -> str:

@@ -1,12 +1,13 @@
 """The worker's jobs, on APScheduler: each runs the functions the CLI does and records a `job_run`
 row as it starts and finishes (spec §3.3, §6.4).
 
-So far `nightly` refreshes the schedule, fetches, parses and loads; derive joins it when it lands.
+So far `nightly` refreshes the schedule, fetches, parses and loads, then rebuilds the season's
+roster memberships from its games; derive joins it when it lands.
 `weekly` re-fetches, parses and loads the season's shot charts.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
@@ -27,6 +28,7 @@ from closinglineup.clock import Clock
 from closinglineup.db.models import Game, JobRun, PlayerGame, RunStatus
 from closinglineup.heartbeat import Heartbeat, JobFamily
 from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures
+from closinglineup.load.memberships import load_participation_spans
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.pipeline import SHOT_TABLE, parse_date, parse_shot_charts
 from closinglineup.season import Phase, is_counted, season_label
@@ -78,18 +80,28 @@ class _Game:
     game_subtype: str
 
 
+def final_games_between(
+    schedule: dict[str, Any], start: date | None = None, end: date | None = None
+) -> list[tuple[date, str]]:
+    """The counted games the schedule lists as final from `start` through `end`, either of them
+    open when None, as (game date, game ID), sorted."""
+    found: list[tuple[date, str]] = []
+    for game_date in schedule["leagueSchedule"]["gameDates"]:
+        day = datetime.strptime(game_date["gameDate"], SCHEDULE_DATE_FORMAT).date()
+        if (start is not None and day < start) or (end is not None and day > end):
+            continue
+        found.extend(
+            (day, game["gameId"])
+            for game in game_date["games"]
+            if game["gameStatus"] == nba_cdn.GAME_FINAL
+            and is_counted(_Game(game["gameId"], game["gameSubtype"]))
+        )
+    return sorted(found)
+
+
 def final_games(schedule: dict[str, Any], day: date) -> set[str]:
     """The counted games the schedule lists as final on `day`."""
-    found: set[str] = set()
-    for game_date in schedule["leagueSchedule"]["gameDates"]:
-        if datetime.strptime(game_date["gameDate"], SCHEDULE_DATE_FORMAT).date() != day:
-            continue
-        for game in game_date["games"]:
-            if game["gameStatus"] == nba_cdn.GAME_FINAL and is_counted(
-                _Game(game["gameId"], game["gameSubtype"])
-            ):
-                found.add(game["gameId"])
-    return found
+    return {game_id for _, game_id in final_games_between(schedule, day, day)}
 
 
 # Left out of "fully cached": stats.nba.com answers `{}` for every game, so it is never cached
@@ -120,19 +132,37 @@ def shot_chart_players(db: sessionmaker[Session], season: str) -> list[tuple[int
         return sorted({(player_id, SHOT_SEASON_TYPES[phase]) for player_id, phase in played})
 
 
-def _fetch_cdn_game(session: NbaSession, cache: RawCache, game_id: str) -> list[EndpointResult]:
+def _fetch_cdn_game(
+    session: NbaSession, cache: RawCache, game_id: str, *, force: bool = False
+) -> list[EndpointResult]:
     """`fetch_game` for the cdn.nba.com feeds: a feed that answers badly is FAILED, not raised."""
     results: list[EndpointResult] = []
     for endpoint, fetch in CDN_GAME_ENDPOINTS.items():
-        cached = cache.exists(nba_cdn.SOURCE, endpoint, game_id)
+        cached = not force and cache.exists(nba_cdn.SOURCE, endpoint, game_id)
         try:
-            fetch(session, cache, game_id)
+            fetch(session, cache, game_id, force=force)
         except NbaHttpError as exc:
             results.append(EndpointResult(endpoint, game_id, FetchStatus.FAILED, str(exc)))
             continue
         status = FetchStatus.CACHED if cached else FetchStatus.FETCHED
         results.append(EndpointResult(endpoint, game_id, status))
     return results
+
+
+def fetch_final_game(
+    session: NbaSession,
+    cache: RawCache,
+    game_id: str,
+    *,
+    force: bool = False,
+    skip: Collection[str] = (),
+) -> list[EndpointResult]:
+    """Every stats.nba.com per-game endpoint of a final game but `skip`, then its cdn.nba.com
+    feeds, each reported as `fetch_game` reports it."""
+    return [
+        *fetch_game(session, cache, game_id, force=force, skip=skip),
+        *_fetch_cdn_game(session, cache, game_id, force=force),
+    ]
 
 
 @dataclass
@@ -160,8 +190,9 @@ class Jobs:
         answers badly is listed in the run's detail and does not fail the job, since
         `playbyplayv2` currently always does (see `nba_stats.fetch_playbyplay_v2`); nor does a
         game a parser cannot read, which `parse_date` leaves out. Each earlier parsed date whose
-        last load of a table failed or never ran is loaded again. A table that fails to load fails
-        the job, and its failed `load_log` row is there for the next run.
+        last load of a table failed or never ran is loaded again, and the season's roster
+        memberships are rebuilt from its loaded games. A table that fails to load fails the job,
+        and its failed `load_log` row is there for the next run.
         """
         return self._run(NIGHTLY, lambda: self._nightly(day), family="nightly")
 
@@ -193,10 +224,7 @@ class Jobs:
             pending = [game_id for game_id in games if not fully_cached(self.cache, game_id)]
             failed: list[Detail] = []
             for game_id in pending:
-                results = [
-                    *fetch_game(session, self.cache, game_id),
-                    *_fetch_cdn_game(session, self.cache, game_id),
-                ]
+                results = fetch_final_game(session, self.cache, game_id)
                 failed.extend(
                     {"endpoint": r.endpoint, "key": r.key, "error": r.error}
                     for r in results
@@ -208,7 +236,8 @@ class Jobs:
         # Self-heals any earlier date a past run left without a successful load (spec §3.2).
         earlier = [d for d in self.store.dates() if d != day]
         healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
-        raise_for_failures([*loaded, *healed])
+        spans = load_participation_spans(self.db, season_label(day))
+        raise_for_failures([*loaded, *healed, spans])
         return {
             "date": day.isoformat(),
             "games": games,
@@ -219,6 +248,7 @@ class Jobs:
             "parse_missing": parsed.missing,
             "loaded": {result.table: result.rows for result in loaded},
             "healed": [f"{result.table} {result.key}" for result in healed],
+            "memberships": spans.rows,
         }
 
     def _weekly(self) -> Detail:

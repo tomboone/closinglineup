@@ -17,11 +17,13 @@ import typer
 import uvicorn
 from sqlalchemy.exc import OperationalError
 
+from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
+from closinglineup.load.memberships import load_participation_spans
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.logging import configure_logging
 from closinglineup.pipeline import (
@@ -36,7 +38,7 @@ from closinglineup.scheduler import Jobs, build_scheduler
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
-from closinglineup.sources.nba_http import make_nba_session
+from closinglineup.sources.nba_http import NbaHttpError, make_nba_session
 from closinglineup.sources.nba_stats import (
     FetchStatus,
     SeasonType,
@@ -78,6 +80,16 @@ def health() -> None:
     typer.echo("health: ok")
 
 
+# Plain assignments, not `type` aliases, which typer cannot read.
+DateOption = Annotated[datetime | None, typer.Option(formats=["%Y-%m-%d"], help="A game date.")]
+FromOption = Annotated[
+    datetime | None, typer.Option("--from", formats=["%Y-%m-%d"], help="First game date.")
+]
+ToOption = Annotated[
+    datetime | None, typer.Option("--to", formats=["%Y-%m-%d"], help="Last game date.")
+]
+
+
 @app.command("fetch", help=COMMANDS["fetch"])
 def fetch(
     game_id: Annotated[
@@ -96,22 +108,40 @@ def fetch(
     ] = False,
     player_id: Annotated[int | None, typer.Option(help="The player whose shots to fetch.")] = None,
     season: Annotated[
-        str | None, typer.Option(help="Season, e.g. 2026-27. Defaults to the current one.")
+        str | None,
+        typer.Option(
+            help="Season, e.g. 2026-27. Defaults to the current one. Alone, fetch every final "
+            "game of the season not yet cached, oldest first."
+        ),
     ] = None,
+    start: FromOption = None,
+    end: ToOption = None,
     season_type: Annotated[SeasonType, typer.Option(help="Season type.")] = (
         SeasonType.REGULAR_SEASON
     ),
     force: Annotated[bool, typer.Option(help="Re-fetch responses already cached.")] = False,
 ) -> None:
     modes = sum([game_id is not None, rosters, shots, aggregates])
-    if modes != 1:
-        raise typer.BadParameter("pass exactly one of --game-id, --rosters, --shots, --aggregates")
+    walk = modes == 0 and season is not None
+    if modes != 1 and not walk:
+        raise typer.BadParameter(
+            "pass exactly one of --game-id, --rosters, --shots, --aggregates, or --season alone"
+        )
     if shots and player_id is None:
         raise typer.BadParameter("--shots needs --player-id")
+    if (start is not None or end is not None) and not walk:
+        raise typer.BadParameter("--from and --to go with --season alone")
+    if start is not None and end is not None and start > end:
+        raise typer.BadParameter("--from is after --to")
     settings = Settings()
     clock = SystemClock()
     cache = RawCache(settings.data_dir, clock)
     season = season or season_label(clock.now().astimezone(settings.tz).date())
+    if walk:
+        first = start.date() if start else None
+        last = end.date() if end else None
+        _fetch_season(settings, clock, cache, season, first, last, force=force)
+        return
     with make_nba_session(settings, clock) as session:
         if game_id is not None:
             results = fetch_game(session, cache, game_id, force=force)
@@ -130,16 +160,6 @@ def fetch(
         raise typer.Exit(1)
 
 
-# Plain assignments, not `type` aliases, which typer cannot read.
-DateOption = Annotated[datetime | None, typer.Option(formats=["%Y-%m-%d"], help="A game date.")]
-FromOption = Annotated[
-    datetime | None, typer.Option("--from", formats=["%Y-%m-%d"], help="First game date.")
-]
-ToOption = Annotated[
-    datetime | None, typer.Option("--to", formats=["%Y-%m-%d"], help="Last game date.")
-]
-
-
 def _days(date: datetime | None, start: datetime | None, end: datetime | None) -> list[Date] | None:
     """The game dates `--date` or `--from`/`--to` name, or None if neither was passed."""
     if date is not None:
@@ -153,6 +173,43 @@ def _days(date: datetime | None, start: datetime | None, end: datetime | None) -
     if start > end:
         raise typer.BadParameter("--from is after --to")
     return [start.date() + timedelta(days=n) for n in range((end - start).days + 1)]
+
+
+def _fetch_season(
+    settings: Settings,
+    clock: Clock,
+    cache: RawCache,
+    season: str,
+    start: Date | None,
+    end: Date | None,
+    *,
+    force: bool,
+) -> None:
+    """`fetch --season`: a line per game as it is done, so a long run shows its progress."""
+    games = cached = 0
+    failed: list[str] = []
+    with make_nba_session(settings, clock) as session:
+        try:
+            for game in fetch_season(session, cache, season, start=start, end=end, force=force):
+                games += 1
+                if not game.results:
+                    cached += 1
+                    continue
+                for result in game.failed:
+                    typer.echo(f"{result.endpoint} {result.key}: failed: {result.error}")
+                outcome = f"{len(game.failed)} failed" if game.failed else "fetched"
+                typer.echo(f"{game.game_date} {game.game_id}: {outcome}")
+                if game.failed:
+                    failed.append(game.game_id)
+        except NbaHttpError as exc:
+            typer.echo(f"fetch {season}: failed: {exc}")
+            raise typer.Exit(1) from None
+    typer.echo(
+        f"fetch {season}: {games} final games, {cached} already cached, "
+        f"{games - cached} fetched, {len(failed)} with failures"
+    )
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command("parse", help=COMMANDS["parse"])
@@ -225,22 +282,39 @@ def load(
         ),
     ] = False,
     shots: Annotated[bool, typer.Option("--shots", help="Load every parsed shot chart.")] = False,
+    memberships: Annotated[
+        bool,
+        typer.Option(
+            "--memberships",
+            help="Rebuild --season's roster memberships from its loaded games.",
+        ),
+    ] = False,
+    season: Annotated[
+        str | None,
+        typer.Option(help="With --memberships: e.g. 2026-27. Defaults to the current one."),
+    ] = None,
 ) -> None:
     days = _days(date, start, end)
-    if shots and (days is not None or missing):
-        raise typer.BadParameter("--shots takes no dates and no --missing")
-    if days is None and not missing and not shots:
-        raise typer.BadParameter("pass --date, --from/--to, --missing or --shots")
+    if shots and memberships:
+        raise typer.BadParameter("pass --shots or --memberships, not both")
+    if (shots or memberships) and (days is not None or missing):
+        raise typer.BadParameter("--shots and --memberships take no dates and no --missing")
+    if days is None and not missing and not shots and not memberships:
+        raise typer.BadParameter("pass --date, --from/--to, --missing, --shots or --memberships")
+    if season is not None and not memberships:
+        raise typer.BadParameter("--season goes with --memberships")
     settings = Settings()
     engine = make_engine(settings)
     db = make_session_factory(engine)
     store = ParquetStore(settings.data_dir)
     try:
-        results: list[LoadResult] = (
-            load_keyed(db, store, SystemClock(), SHOT_TABLE)
-            if shots
-            else load_dates(db, store, SystemClock(), days, missing=missing)
-        )
+        if memberships:
+            season = season or season_label(SystemClock().now().astimezone(settings.tz).date())
+            results: list[LoadResult] = [load_participation_spans(db, season)]
+        elif shots:
+            results = load_keyed(db, store, SystemClock(), SHOT_TABLE)
+        else:
+            results = load_dates(db, store, SystemClock(), days, missing=missing)
     finally:
         engine.dispose()
     for result in results:
