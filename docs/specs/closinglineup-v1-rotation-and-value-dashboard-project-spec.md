@@ -311,7 +311,7 @@ Routes: `/` (league morning page), `/teams/:tricode`, `/players/:id`, `/games/:g
 - Every endpoint has a trimmed recorded fixture under `backend/tests/fixtures/<source>/<endpoint>/`, recorded by `scripts/record_fixtures.py` from kumadrome. Parsers are tested only from fixtures.
 - `parse/pbp.py` is tested on two full fixture games (one with overtime, one with a known PBP ordering quirk) against the stint and possession counts pbpstats emits.
 - Tier rules, events, flags and garbage time are tested on hand-labelled 2025-26 cases in `tests/derive/cases/*.yml` (player, team, date, expected tier, expected flags). At least 30 cases across all five tiers and every flag.
-- Reconciliation: 5-man lineups with ≥ 100 possessions match `leaguedashlineups` net rating within ±0.1 (unfiltered); on/off matches `leagueplayerondetails` within ±0.5.
+- Reconciliation: 5-man lineups with ≥ 100 possessions match `leaguedashlineups` net rating within 3 possessions' worth (3 × 110 / `POSS`; unfiltered); on-court ratings match `leagueplayerondetails` within ±0.5. Possessions are credited as NBA.com credits them, to every lineup and player on the court during each one, which a stint does not (NEU-1899). A flat ±0.1 for lineups asks for exact possession counts, which clock times cannot give where a substitution is logged at the same time as a possession's start or end.
 - API routes have schema tests against a seeded test database. Frontend components have vitest render tests; pages have one smoke test each against mocked API responses.
 - CI gate: `uv run ruff check && ruff format --check && pyright && pytest` for `backend/`; `pnpm lint && pnpm tsc -b && pnpm test` for `frontend/`; both run locally before any push.
 
@@ -339,7 +339,7 @@ NEU-1859, NEU-1892 and NEU-1893 need hands-on kumadrome steps and are not `loop-
 
 - The nightly job completes unattended on ≥ 95% of nights over a 30-day stretch; misses self-heal on the next run.
 - For any team on any 2026-27 date, the team page renders the tier board, closing lineups, top lineups and availability board within 2 s.
-- Derived 5-man lineup net ratings (unfiltered) match `leaguedashlineups` within ±0.1 for lineups with ≥ 100 possessions.
+- Derived 5-man lineup net ratings (unfiltered) match `leaguedashlineups` within 3 possessions' worth for lineups with ≥ 100 possessions (§11).
 - The league page surfaces every rotation event from the prior night with its top three signals.
 - Player time series carry injury and transaction annotations with correct dates.
 - Zero paid data sources; zero public exposure; no Basketball Reference requests.

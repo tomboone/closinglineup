@@ -22,7 +22,7 @@ from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
 from closinglineup.derive.reconcile import (
-    LINEUP_TOLERANCE,
+    LINEUP_TOLERANCE_POSSESSIONS,
     MIN_POSSESSIONS,
     ON_COURT_TOLERANCE,
     MissingResponseError,
@@ -429,7 +429,8 @@ def reconcile_command(
     outside_on_court = sum(not check.within for check in report.on_court)
     typer.echo(
         f"reconcile {season} {season_type.slug}: "
-        f"{len(report.lineups)} lineups, {outside_lineups} outside ±{LINEUP_TOLERANCE}; "
+        f"{len(report.lineups)} lineups, {outside_lineups} outside "
+        f"{LINEUP_TOLERANCE_POSSESSIONS} possessions' worth; "
         f"{len(report.on_court)} players on court, {outside_on_court} outside "
         f"±{ON_COURT_TOLERANCE}"
     )
