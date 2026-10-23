@@ -290,7 +290,7 @@ def current_g_league_assignment(session: Session, player_id: int, day: date) -> 
     if line is not None:
         team_id, at, reason = line
         reported = at.astimezone(EASTERN).date()
-        recalled = session.scalar(
+        newer = session.scalar(
             select(InjuryStatus.id)
             .where(
                 InjuryStatus.team_id == team_id,
@@ -301,7 +301,7 @@ def current_g_league_assignment(session: Session, player_id: int, day: date) -> 
             )
             .limit(1)
         )
-        assigned = reason == ON_ASSIGNMENT and recalled is None
+        assigned = reason == ON_ASSIGNMENT and newer is None
     move = session.execute(
         select(Transaction.date, Transaction.type)
         .where(

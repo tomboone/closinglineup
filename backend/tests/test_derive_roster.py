@@ -469,8 +469,11 @@ def test_every_on_assignment_line_of_the_fixture_report_reads_assigned(
     index = NameIndex(REPORT_PLAYERS, load_aliases())
     rows: list[dict[str, Any]] = injuries.resolve_rows(parse_report(WEEKEND), index, {}, {}).rows
     by_reason: defaultdict[str | None, list[int]] = defaultdict(list)
+    statuses: set[str] = set()
     for row in rows:
         by_reason[row["reason"]].append(row["player_id"])
+        if row["reason"] == ON_ASSIGNMENT:
+            statuses.add(row["status"])
     assigned, two_way = by_reason[ON_ASSIGNMENT], by_reason[TWO_WAY]
     injured = [
         player_id
@@ -478,8 +481,9 @@ def test_every_on_assignment_line_of_the_fixture_report_reads_assigned(
         if reason and reason.startswith("Injury/Illness")
         for player_id in players
     ]
-    # The Questionable and the Available line are among the eight.
+    # A line means assigned whatever its status: one is Questionable, one Available.
     assert len(assigned) == 8 and two_way and injured
+    assert statuses == {"Out", "Questionable", "Available"}
     clear = delete(InjuryStatus).where(
         InjuryStatus.report_datetime == REPORTED, InjuryStatus.source == "pdf"
     )
@@ -540,9 +544,9 @@ def test_espn_rows_are_ignored_whatever_their_age(reports: sessionmaker[Session]
     _report(reports, _at(1, 17), (PLAYER, ON_ASSIGNMENT))
     _report(reports, _at(2, 12), (TEAMMATE, "Ankle"), source="espn")
     _report(reports, _at(3, 17), (TEAMMATE, TWO_WAY))
-    _report(reports, _at(4, 12), (PLAYER, "Knee"), source="espn")
+    _report(reports, _at(4, 12), (PLAYER, ON_ASSIGNMENT), source="espn")
 
-    # Day 2: ESPN's newer row does not recall him. Day 4: nor does it assign him.
+    # Day 2: ESPN's newer row does not recall him. Day 4: nor does it assign him, whatever it says.
     assert _assigned(reports, 2, 3, 4) == [True, False, False]
 
 
@@ -567,4 +571,5 @@ def test_a_transaction_dated_before_the_last_report_line_does_not_override_it(
     with reports.begin() as session:
         session.add_all([_transaction(0, "assign"), _transaction(3, "recall")])
 
+    # Day 0: the transaction alone. Day 1 and day 4: a line newer than every transaction decides.
     assert _assigned(reports, 0, 1, 3, 4) == [True, False, False, True]
