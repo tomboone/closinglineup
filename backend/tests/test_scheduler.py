@@ -233,6 +233,9 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
         "possession": 0,
         "possession_lineup": 0,
     }
+    # The date's local BPM snapshot, over whatever regular-season games the season holds.
+    assert set(detail["bpm"]) == {"season", "games", "players", "changed", "removed"}
+    assert detail["bpm"]["season"] == "2026-27"
     assert ok.call_count == 1
 
 
