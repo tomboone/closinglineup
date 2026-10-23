@@ -27,7 +27,8 @@ class CacheMeta(TypedDict):
 
 
 class RawCache:
-    """`<data_dir>/raw/<source>/<endpoint>/<key>.json`, plus a `<key>.meta.json` sidecar.
+    """`<data_dir>/raw/<source>/<endpoint>/<key>.json`, plus a `<key>.meta.json` sidecar. A
+    response that is not JSON, the injury report's PDF, is kept under its own `suffix`.
 
     `put` writes each file atomically, sidecar first, so a response file that exists is always
     complete and always has its sidecar, and its presence alone makes the key a cache hit.
@@ -37,19 +38,21 @@ class RawCache:
         self.root = data_dir / "raw"
         self.clock = clock or SystemClock()
 
-    def path(self, source: str, endpoint: str, key: str) -> Path:
-        return self.root / source / endpoint / f"{key}{SUFFIX}"
+    def path(self, source: str, endpoint: str, key: str, *, suffix: str = SUFFIX) -> Path:
+        return self.root / source / endpoint / f"{key}{suffix}"
 
-    def exists(self, source: str, endpoint: str, key: str) -> bool:
-        return self.path(source, endpoint, key).is_file()
+    def exists(self, source: str, endpoint: str, key: str, *, suffix: str = SUFFIX) -> bool:
+        return self.path(source, endpoint, key, suffix=suffix).is_file()
 
-    def get(self, source: str, endpoint: str, key: str) -> bytes | None:
-        path = self.path(source, endpoint, key)
+    def get(self, source: str, endpoint: str, key: str, *, suffix: str = SUFFIX) -> bytes | None:
+        path = self.path(source, endpoint, key, suffix=suffix)
         return path.read_bytes() if path.is_file() else None
 
-    def meta(self, source: str, endpoint: str, key: str) -> CacheMeta | None:
+    def meta(
+        self, source: str, endpoint: str, key: str, *, suffix: str = SUFFIX
+    ) -> CacheMeta | None:
         """The sidecar of a cached response, or None if the key is not cached."""
-        path = self.path(source, endpoint, key)
+        path = self.path(source, endpoint, key, suffix=suffix)
         if not path.is_file():
             return None
         meta: CacheMeta = json.loads(path.with_name(f"{key}{META_SUFFIX}").read_bytes())
@@ -66,9 +69,10 @@ class RawCache:
         status: int,
         params: Mapping[str, str] | None = None,
         force: bool = False,
+        suffix: str = SUFFIX,
     ) -> bool:
         """Write `content` unless the key is already cached; `force` overwrites. True if written."""
-        path = self.path(source, endpoint, key)
+        path = self.path(source, endpoint, key, suffix=suffix)
         if path.is_file() and not force:
             return False
         meta: CacheMeta = {
@@ -82,15 +86,15 @@ class RawCache:
         write_atomic(path, content)
         return True
 
-    def list(self, source: str, endpoint: str) -> list[str]:
+    def list(self, source: str, endpoint: str, *, suffix: str = SUFFIX) -> list[str]:
         """The cached keys for one endpoint, sorted."""
         directory = self.root / source / endpoint
         if not directory.is_dir():
             return []
         return sorted(
-            p.name.removesuffix(SUFFIX)
+            p.name.removesuffix(suffix)
             for p in directory.iterdir()
-            if p.name.endswith(SUFFIX) and not p.name.endswith(META_SUFFIX)
+            if p.name.endswith(suffix) and not p.name.endswith(META_SUFFIX)
         )
 
 

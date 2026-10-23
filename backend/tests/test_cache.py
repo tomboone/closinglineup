@@ -77,3 +77,18 @@ def test_put_leaves_no_temp_files(cache: RawCache) -> None:
 
     files = sorted(p.name for p in cache.path("nba_stats", "box", "1").parent.iterdir())
     assert files == ["1.json", "1.meta.json"]
+
+
+def test_a_suffix_keeps_a_non_json_response_beside_its_json_sidecar(
+    cache: RawCache, tmp_path: Path
+) -> None:
+    cache.put("injury", "report", "2026-10-22T1700", b"%PDF-", url=URL, status=200, suffix=".pdf")
+    cache.put("injury", "report", "other", b"{}", url=URL, status=200)
+
+    path = tmp_path / "raw" / "injury" / "report" / "2026-10-22T1700.pdf"
+    assert cache.path("injury", "report", "2026-10-22T1700", suffix=".pdf") == path
+    assert cache.get("injury", "report", "2026-10-22T1700", suffix=".pdf") == b"%PDF-"
+    assert not cache.exists("injury", "report", "2026-10-22T1700")
+    meta = cache.meta("injury", "report", "2026-10-22T1700", suffix=".pdf")
+    assert meta is not None and meta["status"] == 200
+    assert cache.list("injury", "report", suffix=".pdf") == ["2026-10-22T1700"]

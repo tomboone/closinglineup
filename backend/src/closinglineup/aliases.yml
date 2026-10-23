@@ -1,0 +1,6 @@
+# Player names a source spells differently from NBA.com's `player.name`, each mapped to the NBA.com
+# player ID (`closinglineup.names`). Write a name first name first, as the source spells it once
+# turned round from "Last, First"; it is matched with case, accents and punctuation ignored.
+
+# Injury report "Yang, Hansen"; NBA.com "Yang Hansen".
+Hansen Yang: 1642905
