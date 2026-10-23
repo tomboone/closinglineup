@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
 
+from closinglineup import injuries
+
 if TYPE_CHECKING:
     from closinglineup.scheduler import Jobs
 
@@ -52,3 +54,6 @@ def by_name(name: str) -> Overlay:
     except KeyError:
         known = ", ".join(REGISTRY) or "none"
         raise UnknownOverlayError(f"no overlay named {name!r}; registered: {known}") from None
+
+
+register_overlay("injuries", "injuries", injuries.run)
