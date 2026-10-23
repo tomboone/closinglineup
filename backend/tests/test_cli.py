@@ -53,8 +53,19 @@ EXPECTED = [
     "weekly",
     "health",
     "reparse",
+    "reconcile",
 ]
-IMPLEMENTED = {"fetch", "parse", "load", "health", "api", "worker", "nightly", "weekly"}
+IMPLEMENTED = {
+    "fetch",
+    "parse",
+    "load",
+    "health",
+    "api",
+    "worker",
+    "nightly",
+    "weekly",
+    "reconcile",
+}
 STUBS = [command for command in EXPECTED if command not in IMPLEMENTED]
 
 

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from closinglineup import scheduler
 from closinglineup.clock import FakeClock
 from closinglineup.db.models import Game, JobRun, LoadLog, PlayerGame, RunStatus, Shot
+from closinglineup.derive.reconcile import sample_teams
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadError, LoadResult
 from closinglineup.load.parquet import ROW_MODELS, ParquetStore
@@ -28,8 +29,14 @@ from closinglineup.scheduler import (
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
-from closinglineup.sources.nba_http import NbaHttpError, NbaSession, RateLimiter
-from closinglineup.sources.nba_stats import SeasonType
+from closinglineup.sources.nba_http import (
+    NbaHttpError,
+    NbaSession,
+    NbaUnreachableError,
+    RateLimiter,
+)
+from closinglineup.sources.nba_stats import EndpointResult, SeasonType
+from closinglineup.teams import by_nba_team_id
 from tests.fakes import Connect, RoutedGet
 from tests.test_nba_stats import GAME_ID, fixture_body, season_fixture_body
 
@@ -178,8 +185,9 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
     detail = jobs.nightly(DAY)
 
     assert fetched_games(get) == {"stats": {FINAL_A, FINAL_B}, "cdn": {FINAL_A, FINAL_B}}
-    # The schedule, then eight stats.nba.com and two cdn.nba.com requests per game.
-    assert len(get.calls) == 1 + 2 * 10
+    # The schedule, eight stats.nba.com and two cdn.nba.com requests per game, then the lineups
+    # and two teams' on/off for reconciliation.
+    assert len(get.calls) == 1 + 2 * 10 + 3
     [run] = runs(db)
     assert (run.job, run.status, run.started_at, run.finished_at) == (
         NIGHTLY,
@@ -189,11 +197,20 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
     )
     assert run.detail == detail
     assert detail["games"] == detail["fetched"] == [FINAL_A, FINAL_B]
-    # `playbyplayv2`'s recorded `{}` fails it for each game, without failing the job.
+    # `playbyplayv2`'s recorded `{}` fails it for each game, and the unrouted reconciliation
+    # responses fail too, without failing the job.
+    teams = sample_teams(DAY)
     assert [(f["endpoint"], f["key"]) for f in detail["failed"]] == [
         ("playbyplayv2", FINAL_A),
         ("playbyplayv2", FINAL_B),
+        ("leaguedashlineups", "2026-27_regular-season"),
+        *(("leagueplayerondetails", f"{team_id}_2026-27_regular-season") for team_id in teams),
     ]
+    assert detail["reconcile"] == {
+        "season_type": "regular-season",
+        "teams": [by_nba_team_id(team_id).tricode for team_id in teams],
+        "skipped": "leaguedashlineups 2026-27_regular-season failed to refresh",
+    }
     # Every game is served the fixture game's box scores, which the parse step refuses for them.
     assert detail["parsed"] == []
     assert detail["parse_failed"] == {
@@ -211,6 +228,74 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
         "possession": 0,
     }
     assert ok.call_count == 1
+
+
+def test_nightly_logs_a_warning_for_each_reconciliation_row_outside_tolerance(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    on_off = nba_stats.LEAGUE_PLAYER_ON_DETAILS
+    get = RoutedGet(
+        {
+            **nba_routes(SCHEDULE, FINAL_A, FINAL_B),
+            f"{nba_stats.STATS_BASE}/{nba_stats.LEAGUE_DASH_LINEUPS}": season_fixture_body(
+                nba_stats.LEAGUE_DASH_LINEUPS
+            ),
+            # GSW's on/off, served for both teams of the sample.
+            f"{nba_stats.STATS_BASE}/{on_off}": season_fixture_body(on_off),
+        }
+    )
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    with caplog.at_level("WARNING", logger="closinglineup.scheduler"):
+        detail = jobs.nightly(DAY)
+
+    # No game parses, so no stint is loaded and every row NBA.com has is outside tolerance; each
+    # of GSW's 22 players has at least 100 possessions.
+    reconciled = detail["reconcile"]
+    assert reconciled["on_court"] == 2 * 22
+    assert len(reconciled["outside"]) == reconciled["lineups"] + reconciled["on_court"]
+    assert all("games 0 vs" in line for line in reconciled["outside"])
+    warned = [r for r in caplog.records if r.message == "reconciliation outside tolerance"]
+    assert [r.__dict__["check"] for r in warned] == reconciled["outside"]
+    assert [run.status for run in runs(db)] == ["succeeded"]
+
+
+def test_nightly_skips_reconciliation_when_nba_com_does_not_answer_its_refresh(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unreachable(*args: Any, **kwargs: Any) -> list[EndpointResult]:
+        raise NbaUnreachableError("no answer")
+
+    monkeypatch.setattr(scheduler, "fetch_reconciliation", unreachable)
+    # A copy cached earlier, which covers fewer games than tonight's stints.
+    cache = RawCache(tmp_path, clock)
+    lineups = nba_stats.LEAGUE_DASH_LINEUPS
+    body = season_fixture_body(lineups)
+    cache.put(nba_stats.SOURCE, lineups, "2026-27_regular-season", body, url="u", status=200)
+    get = RoutedGet(nba_routes(SCHEDULE, FINAL_A, FINAL_B))
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    detail = jobs.nightly(DAY)
+
+    # The date still loads, and the stale copy is not compared against.
+    assert detail["loaded"]["game"] == 3
+    assert detail["failed"][-1] == {
+        "endpoint": "reconcile",
+        "key": "2026-10-20",
+        "error": "no answer",
+    }
+    assert detail["reconcile"]["skipped"] == "reconcile 2026-10-20 failed to refresh"
+    assert [run.status for run in runs(db)] == ["succeeded"]
 
 
 def test_nightly_loads_again_an_earlier_date_with_no_successful_load(
