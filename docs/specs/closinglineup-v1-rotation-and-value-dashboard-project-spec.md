@@ -183,7 +183,7 @@ The NBA publishes `https://ak-static.cms.nba.com/referee/injury/Injury-Report_<Y
 ### 4.5 Impact metrics (`sources/epm.py`, `sources/darko.py`, `derive/bpm.py`)
 
 - EPM: Dunks & Threes player table, daily, `source='epm'`, with offensive and defensive EPM and minutes. Terms of use checked and recorded in the ticket before scheduling; `EPM_ENABLED` flag.
-- DARKO: the Shiny app's CSV export, daily, `source='darko'`, DPM with O/D split. Availability verified at build time; `DARKO_ENABLED` flag.
+- DARKO: darko.app's CSV download (the leaderboard's or a team page's), daily, `source='darko'`, DPM with O/D split and projected minutes. The Shiny app at apanalytics.shinyapps.io was taken offline in June 2026 and points to darko.app, which publishes no terms of use and no robots.txt (checked 2026-10-23). Availability verified at build time; `DARKO_ENABLED` flag.
 - BPM: Basketball Reference's published BPM 2.0 formula over `player_game` sums and team ratings, computed in `derive`, `source='bpm_local'`, always on.
 
 ### 4.6 Contracts (`sources/spotrac.py`)
