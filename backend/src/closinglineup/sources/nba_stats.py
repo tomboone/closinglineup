@@ -626,6 +626,16 @@ def fetch_league_player_on_details(
     return _fetch(session, cache, request, force=force)
 
 
+def league_dash_lineups_key(season: str, season_type: SeasonType) -> str:
+    """The cache key of a whole-season `leaguedashlineups` pull."""
+    return _league_dash_lineups(season, season_type, 0).key
+
+
+def league_player_on_details_key(team_id: int, season: str, season_type: SeasonType) -> str:
+    """The cache key of a team's `leagueplayerondetails` pull."""
+    return _league_player_on_details(team_id, season, season_type).key
+
+
 def fetch_league_dash_player_stats(
     session: NbaSession,
     cache: RawCache,
@@ -714,5 +724,22 @@ def fetch_aggregates(
         *(_league_dash_player_stats(season, season_type, m) for m in MeasureType),
         *(_league_dash_team_stats(season, season_type, m) for m in MeasureType),
         *(_league_player_on_details(t.nba_team_id, season, season_type) for t in TEAMS),
+    ]
+    return _fetch_each(session, cache, requests, force=force)
+
+
+def fetch_reconciliation(
+    session: NbaSession,
+    cache: RawCache,
+    season: str,
+    season_type: SeasonType,
+    team_ids: Iterable[int],
+    *,
+    force: bool = False,
+) -> list[EndpointResult]:
+    """What reconciling `team_ids` reads: the whole-season lineups, then each team's on/off."""
+    requests = [
+        _league_dash_lineups(season, season_type, 0),
+        *(_league_player_on_details(team_id, season, season_type) for team_id in team_ids),
     ]
     return _fetch_each(session, cache, requests, force=force)

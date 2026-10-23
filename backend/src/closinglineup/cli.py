@@ -21,6 +21,15 @@ from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
+from closinglineup.derive.reconcile import (
+    LINEUP_TOLERANCE,
+    MIN_POSSESSIONS,
+    ON_COURT_TOLERANCE,
+    MissingResponseError,
+    ReconcileError,
+    describe,
+    reconcile,
+)
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
 from closinglineup.load.memberships import load_participation_spans
@@ -45,8 +54,10 @@ from closinglineup.sources.nba_stats import (
     fetch_aggregates,
     fetch_game,
     fetch_player_shots,
+    fetch_reconciliation,
     fetch_rosters,
 )
+from closinglineup.teams import TEAMS, UnknownTeam, by_tricode
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -64,6 +75,7 @@ COMMANDS = {
     "weekly": "Run the weekly job once: re-fetch, parse and load the season's shot charts.",
     "health": "Check that the database answers.",
     "reparse": "Re-parse cached raw responses after a parser change.",
+    "reconcile": "Compare lineup and on-court ratings from stints with NBA.com's.",
 }
 
 
@@ -344,6 +356,87 @@ def load(
         raise typer.Exit(1)
 
 
+def _team_ids(teams: str | None) -> list[int]:
+    """The NBA team IDs of comma-separated tricodes, or of every team if None."""
+    if teams is None:
+        return [team.nba_team_id for team in TEAMS]
+    try:
+        return [by_tricode(code.strip().upper()).nba_team_id for code in teams.split(",")]
+    except UnknownTeam as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+
+@app.command("reconcile", help=COMMANDS["reconcile"])
+def reconcile_command(
+    season: Annotated[
+        str | None, typer.Option(help="Season, e.g. 2025-26. Defaults to the current one.")
+    ] = None,
+    teams: Annotated[
+        str | None, typer.Option(help="Tricodes to reconcile, e.g. BOS,DEN. Defaults to all 30.")
+    ] = None,
+    season_type: Annotated[SeasonType, typer.Option(help="Season type.")] = (
+        SeasonType.REGULAR_SEASON
+    ),
+    min_possessions: Annotated[
+        int, typer.Option(help="Compare only rows NBA.com credits with this many possessions.")
+    ] = MIN_POSSESSIONS,
+    refresh: Annotated[
+        bool, typer.Option("--refresh", help="Re-fetch NBA.com's lineups and on/off first.")
+    ] = False,
+    show_all: Annotated[
+        bool, typer.Option("--all", help="List every row compared, not only those outside.")
+    ] = False,
+) -> None:
+    team_ids = _team_ids(teams)
+    settings = Settings()
+    clock = SystemClock()
+    cache = RawCache(settings.data_dir, clock)
+    season = season or season_label(clock.now().astimezone(settings.tz).date())
+    if refresh:
+        with make_nba_session(settings, clock) as session:
+            try:
+                results = fetch_reconciliation(
+                    session, cache, season, season_type, team_ids, force=True
+                )
+            except NbaUnreachableError as exc:
+                typer.echo(f"reconcile: stopped: {exc}")
+                raise typer.Exit(1) from None
+        for result in results:
+            if result.status is FetchStatus.FAILED:
+                typer.echo(f"{result.endpoint} {result.key}: failed: {result.error}")
+    engine = make_engine(settings)
+    try:
+        report = reconcile(
+            make_session_factory(engine),
+            cache,
+            season,
+            season_type,
+            team_ids,
+            min_possessions=min_possessions,
+        )
+    except MissingResponseError as exc:
+        typer.echo(f"reconcile: {exc}; run it with --refresh, or fetch --aggregates")
+        raise typer.Exit(1) from None
+    except ReconcileError as exc:
+        typer.echo(f"reconcile: {exc}")
+        raise typer.Exit(1) from None
+    finally:
+        engine.dispose()
+    for check in [*report.lineups, *report.on_court] if show_all else report.outside:
+        mark = "ok" if check.within else "OUTSIDE"
+        typer.echo(f"{mark} {describe(check)}")
+    outside_lineups = sum(not check.within for check in report.lineups)
+    outside_on_court = sum(not check.within for check in report.on_court)
+    typer.echo(
+        f"reconcile {season} {season_type.slug}: "
+        f"{len(report.lineups)} lineups, {outside_lineups} outside ±{LINEUP_TOLERANCE}; "
+        f"{len(report.on_court)} players on court, {outside_on_court} outside "
+        f"±{ON_COURT_TOLERANCE}"
+    )
+    if report.outside:
+        raise typer.Exit(1)
+
+
 @contextmanager
 def _open_jobs(settings: Settings, clock: Clock) -> Generator[Jobs]:
     engine = make_engine(settings)
@@ -382,6 +475,12 @@ def nightly(
         typer.echo(f"{failure['endpoint']} {failure['key']}: failed: {failure['error']}")
     for failed_game, error in detail["parse_failed"].items():
         typer.echo(f"parse {failed_game}: failed: {error}")
+    reconciled = detail["reconcile"]
+    if reconciled is not None:
+        if "skipped" in reconciled:
+            typer.echo(f"reconcile: skipped: {reconciled['skipped']}")
+        for line in reconciled.get("outside", []):
+            typer.echo(f"reconcile: outside tolerance: {line}")
     typer.echo(
         f"nightly {day}: {len(detail['games'])} final games, {len(detail['fetched'])} fetched, "
         f"{len(detail['parsed'])} parsed"

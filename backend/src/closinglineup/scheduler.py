@@ -1,8 +1,9 @@
 """The worker's jobs, on APScheduler: each runs the functions the CLI does and records a `job_run`
 row as it starts and finishes (spec §3.3, §6.4).
 
-So far `nightly` refreshes the schedule, fetches, parses and loads, then rebuilds the season's
-roster memberships from its games; derive joins it when it lands.
+So far `nightly` refreshes the schedule, fetches, parses and loads, rebuilds the season's roster
+memberships from its games, then reconciles a sample of two teams' stints with NBA.com's; the
+rest of derive joins it when it lands.
 `weekly` re-fetches, parses and loads the season's shot charts.
 """
 
@@ -26,6 +27,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.clock import Clock
 from closinglineup.db.models import Game, JobRun, PlayerGame, RunStatus
+from closinglineup.derive.reconcile import (
+    ReconcileError,
+    describe,
+    reconcile,
+    sample_teams,
+    season_type_of,
+)
 from closinglineup.heartbeat import Heartbeat, JobFamily
 from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures
 from closinglineup.load.memberships import load_participation_spans
@@ -35,7 +43,7 @@ from closinglineup.season import Phase, is_counted, season_label
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
-from closinglineup.sources.nba_http import NbaHttpError, NbaSession
+from closinglineup.sources.nba_http import NbaHttpError, NbaSession, NbaUnreachableError
 from closinglineup.sources.nba_stats import (
     EndpointResult,
     FetchStatus,
@@ -43,7 +51,9 @@ from closinglineup.sources.nba_stats import (
     SeasonType,
     fetch_game,
     fetch_player_shots,
+    fetch_reconciliation,
 )
+from closinglineup.teams import by_nba_team_id
 
 NIGHTLY = "nightly"
 POLL_FINALS = "poll_finals"
@@ -193,6 +203,11 @@ class Jobs:
         last load of a table failed or never ran is loaded again, and the season's roster
         memberships are rebuilt from its loaded games. A table that fails to load fails the job,
         and its failed `load_log` row is there for the next run.
+
+        Last, two teams' stints, a different two each day (`reconcile.sample_teams`), are
+        reconciled with NBA.com's lineups and on/off, re-fetched for the purpose. A row outside
+        tolerance is logged as a warning and listed in the detail; it does not fail the job, nor
+        does a response that failed to fetch and is not cached.
         """
         return self._run(NIGHTLY, lambda: self._nightly(day), family="nightly")
 
@@ -222,14 +237,27 @@ class Jobs:
             noted = {g for g in self.finals.get(day, set()) if is_counted(_Game(g, ""))}
             games = sorted(final_games(schedule, day) | noted)
             pending = [game_id for game_id in games if not fully_cached(self.cache, game_id)]
-            failed: list[Detail] = []
-            for game_id in pending:
-                results = fetch_final_game(session, self.cache, game_id)
-                failed.extend(
-                    {"endpoint": r.endpoint, "key": r.key, "error": r.error}
-                    for r in results
-                    if r.status is FetchStatus.FAILED
-                )
+            results = [r for g in pending for r in fetch_final_game(session, self.cache, g)]
+            # The season type of the date's games; None for a date with none counted in one.
+            season_type = season_type_of(games[-1]) if games else None
+            teams = sample_teams(day)
+            refresh: list[EndpointResult] = []
+            if season_type is not None:
+                try:
+                    refresh = fetch_reconciliation(
+                        session, self.cache, season_label(day), season_type, teams, force=True
+                    )
+                except NbaUnreachableError as exc:
+                    # The date's games are fetched; reconciliation must not hold back their load.
+                    refresh = [
+                        EndpointResult("reconcile", day.isoformat(), FetchStatus.FAILED, str(exc))
+                    ]
+            results += refresh
+        failed: list[Detail] = [
+            {"endpoint": r.endpoint, "key": r.key, "error": r.error}
+            for r in results
+            if r.status is FetchStatus.FAILED
+        ]
         self.finals.pop(day, None)
         parsed = parse_date(self.cache, self.store, day, self.settings.tz)
         loaded = load_dates(self.db, self.store, self.clock, [day])
@@ -238,6 +266,11 @@ class Jobs:
         healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
         spans = load_participation_spans(self.db, season_label(day))
         raise_for_failures([*loaded, *healed, spans])
+        reconciled = (
+            self._reconcile(season_label(day), season_type, teams, refresh)
+            if season_type is not None
+            else None
+        )
         return {
             "date": day.isoformat(),
             "games": games,
@@ -249,6 +282,37 @@ class Jobs:
             "loaded": {result.table: result.rows for result in loaded},
             "healed": [f"{result.table} {result.key}" for result in healed],
             "memberships": spans.rows,
+            "reconcile": reconciled,
+        }
+
+    def _reconcile(
+        self,
+        season: str,
+        season_type: SeasonType,
+        teams: tuple[int, ...],
+        refresh: list[EndpointResult],
+    ) -> Detail:
+        """Reconcile `teams`, or skip it, with a warning, if `refresh` failed: a copy cached
+        earlier covers fewer games than the stints do, so every row would read as outside."""
+        detail: Detail = {
+            "season_type": season_type.slug,
+            "teams": [by_nba_team_id(team_id).tricode for team_id in teams],
+        }
+        try:
+            if failed := next((r for r in refresh if r.status is FetchStatus.FAILED), None):
+                raise ReconcileError(f"{failed.endpoint} {failed.key} failed to refresh")
+            report = reconcile(self.db, self.cache, season, season_type, teams)
+        except ReconcileError as exc:
+            log.warning("reconciliation skipped", extra={"reason": str(exc)})
+            return {**detail, "skipped": str(exc)}
+        outside = [describe(check) for check in report.outside]
+        for line in outside:
+            log.warning("reconciliation outside tolerance", extra={"check": line})
+        return {
+            **detail,
+            "lineups": len(report.lineups),
+            "on_court": len(report.on_court),
+            "outside": outside,
         }
 
     def _weekly(self) -> Detail:

@@ -154,8 +154,8 @@ One function per endpoint; parameter names follow nba_api's documentation for th
 | `commonteamroster` | `TeamID`, `Season` | roster, contract type hints | daily |
 | `commonallplayers` | `LeagueID=00`, `Season`, `IsOnlyCurrentSeason=0` | player reference | daily |
 | `playergamelogs` | `Season`, `SeasonType` | backfill cross-check | backfill |
-| `leaguedashlineups` | `Season`, `SeasonType`, `MeasureType=Advanced`, `GroupQuantity=5`, `PerMode=Totals` | reconciliation | weekly |
-| `leagueplayerondetails` | `TeamID`, `Season`, `SeasonType`, `MeasureType=Advanced` | reconciliation of on/off | weekly |
+| `leaguedashlineups` | `Season`, `SeasonType`, `MeasureType=Advanced`, `GroupQuantity=5`, `PerMode=Totals` | reconciliation | weekly; re-fetched nightly for the reconcile sample, so it covers the same games as the stints (NEU-1865) |
+| `leagueplayerondetails` | `TeamID`, `Season`, `SeasonType`, `MeasureType=Advanced` | reconciliation of on-court ratings: it lists only On rows (NEU-1865) | weekly; nightly for the reconcile sample's two teams |
 | `leaguedashplayerstats`, `leaguedashteamstats` | `Season`, `SeasonType`, `MeasureType` | cross-checks | weekly |
 
 pbpstats runs its `live` loaders in file mode over cdn.nba.com's live play-by-play (§4.2), since its `stats_nba` loaders need `playbyplayv2`. The exact layout (`pbp/live_<game_id>.json` and `overrides/missing_period_starters.json`) was verified against the pinned pbpstats 1.3.11 in NEU-1857 and is recorded in `parse/pbp.py`'s docstring. `parse.pbp.materialize` writes the file from the raw cache.
