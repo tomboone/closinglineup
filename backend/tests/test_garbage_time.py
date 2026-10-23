@@ -20,6 +20,7 @@ from closinglineup.parse.rows import StintRow
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn
 from closinglineup.sources.cache import RawCache
+from tests.test_cli import ANSI_ESCAPE
 from tests.test_pbp import FEED_2026_27_GAME, GAMES, OVERTIME_GAME, QUIRK_GAME, RECONCILE_GAME
 from tests.test_pbp import FIXTURES as PBP_FIXTURES
 
@@ -304,4 +305,4 @@ def test_derive_needs_dates() -> None:
     result = CliRunner().invoke(app, ["derive"])
 
     assert result.exit_code == 2
-    assert "pass --date or --from/--to" in result.output
+    assert "pass --date or --from/--to" in ANSI_ESCAPE.sub("", result.output)
