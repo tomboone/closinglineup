@@ -18,10 +18,14 @@ from closinglineup.derive.reconcile import sample_teams
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadError, LoadResult
 from closinglineup.load.parquet import ROW_MODELS, ParquetStore
+from closinglineup.overlays import Overlay, UnknownOverlayError, register_overlay
 from closinglineup.scheduler import (
+    DAILY_OVERLAYS,
+    INJURIES,
     NIGHTLY,
     POLL_FINALS,
     WEEKLY,
+    JobFailedError,
     Jobs,
     build_scheduler,
     shot_chart_players,
@@ -37,7 +41,7 @@ from closinglineup.sources.nba_http import (
 )
 from closinglineup.sources.nba_stats import EndpointResult, SeasonType
 from closinglineup.teams import by_nba_team_id
-from tests.fakes import Connect, RoutedGet
+from tests.fakes import Connect, FakeOverlay, RoutedGet
 from tests.test_nba_stats import GAME_ID, fixture_body, season_fixture_body
 
 CDN_FIXTURES = Path(__file__).parent / "fixtures" / "cdn"
@@ -467,7 +471,7 @@ def test_worker_registers_every_job_with_the_spec_triggers(
 
     scheduled = cast(list[Any], scheduler.get_jobs())  # pyright: ignore[reportUnknownMemberType]
     registered = {job.id: job for job in scheduled}
-    assert sorted(registered) == [NIGHTLY, POLL_FINALS, WEEKLY]
+    assert sorted(registered) == sorted([NIGHTLY, POLL_FINALS, WEEKLY, INJURIES, DAILY_OVERLAYS])
     for job in registered.values():
         assert (job.max_instances, job.coalesce, job.misfire_grace_time) == (1, True, None)
     tz = settings.tz
@@ -488,6 +492,14 @@ def test_worker_registers_every_job_with_the_spec_triggers(
     assert _fire_times(registered[WEEKLY].trigger, noon, fortnight) == [
         datetime(2026, 10, 26, 4, 30, tzinfo=tz),
         datetime(2026, 11, 2, 4, 30, tzinfo=tz),
+    ]
+    midnight = datetime(2026, 10, 22, tzinfo=tz)
+    next_midnight = midnight + timedelta(days=1)
+    assert _fire_times(registered[INJURIES].trigger, midnight, next_midnight) == [
+        datetime(2026, 10, 22, h, m, tzinfo=tz) for h, m in [(10, 0), (13, 0), (16, 0), (18, 30)]
+    ]
+    assert _fire_times(registered[DAILY_OVERLAYS].trigger, midnight, next_midnight) == [
+        datetime(2026, 10, 22, 9, 0, tzinfo=tz)
     ]
 
 
@@ -603,10 +615,11 @@ def test_weekly_refetches_parses_and_loads_the_seasons_shot_charts(
     curry = [params for _, params in get.calls if params and params["PlayerID"] == str(CURRY)]
     # Re-fetched each week, since the cache would otherwise keep the first week's shots.
     assert [(p["Season"], p["SeasonType"]) for p in curry] == [("2026-27", "Regular Season")] * 2
-    assert first["season"] == "2026-27"
-    assert first["shot_charts"] == first["fetched"] == players
-    assert (first["failed"], first["parse_failed"]) == ([], {})
-    assert (second["changed"], second["removed"]) == (0, 0)
+    shots = first["ran"]["shots"]
+    assert shots["season"] == "2026-27"
+    assert shots["shot_charts"] == shots["fetched"] == players
+    assert (shots["failed"], shots["parse_failed"]) == ([], {})
+    assert (second["ran"]["shots"]["changed"], second["ran"]["shots"]["removed"]) == (0, 0)
     assert key in jobs.store.keys("shot")
     with db() as session:
         loaded = session.scalars(select(Shot).where(Shot.game_id == REGULAR)).all()
@@ -617,22 +630,173 @@ def test_weekly_refetches_parses_and_loads_the_seasons_shot_charts(
 
 
 @respx.mock
-def test_weekly_fails_when_every_shot_chart_fails_to_fetch(
+def test_weekly_fails_when_every_shot_chart_fails_to_fetch_and_still_runs_its_overlays(
     settings: Settings,
     clock: FakeClock,
     tmp_path: Path,
     db: sessionmaker[Session],
     http: httpx.Client,
+    registry: dict[str, Overlay],
 ) -> None:
     _seed_played(db, [(REGULAR, CURRY, 2000)])
+    contracts = FakeOverlay()
+    register_overlay("contracts", "weekly", contracts)
     fail = respx.post(f"{WEEKLY_URL}/fail").respond(200)
     jobs = make_jobs(
         settings, clock, tmp_path, db, RoutedGet({}), Heartbeat({"weekly": WEEKLY_URL}, http)
     )
 
-    with pytest.raises(NbaHttpError, match="shot charts failed to fetch"):
+    with pytest.raises(JobFailedError, match=r"shots: NbaHttpError: .* shot charts failed"):
         jobs.weekly()
 
     [run] = runs(db)
     assert (run.job, run.status) == (WEEKLY, "failed")
+    assert run.detail is not None
+    assert run.detail["ran"] == {"contracts": {"rows": 3}}
+    assert list(run.detail["failed"]) == ["shots"]
+    # Today in New York, 03:30 on 2026-10-21.
+    assert contracts.calls == [(jobs, date(2026, 10, 21))]
     assert fail.call_count == 1
+
+
+DAILY_URL = "https://hc-ping.com/daily-123"
+
+
+@respx.mock
+def test_daily_overlays_runs_each_daily_overlay_once_and_pings_daily(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    registry: dict[str, Overlay],
+) -> None:
+    transactions, contracts, injury_report = FakeOverlay(), FakeOverlay(), FakeOverlay()
+    register_overlay("transactions", "daily", transactions)
+    register_overlay("contracts", "weekly", contracts)
+    register_overlay("injury_report", "injuries", injury_report)
+    ok = respx.get(DAILY_URL).respond(200)
+    jobs = make_jobs(
+        settings, clock, tmp_path, db, RoutedGet({}), Heartbeat({"daily": DAILY_URL}, http)
+    )
+
+    detail = jobs.daily_overlays(DAY)
+
+    assert transactions.calls == [(jobs, DAY)]
+    assert contracts.calls == injury_report.calls == []
+    assert detail == {"date": "2026-10-20", "ran": {"transactions": {"rows": 3}}, "failed": {}}
+    [run] = runs(db)
+    assert (run.job, run.status, run.detail) == (DAILY_OVERLAYS, "succeeded", detail)
+    assert ok.call_count == 1
+
+
+@respx.mock
+def test_an_overlay_that_raises_fails_the_job_without_stopping_the_others(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    registry: dict[str, Overlay],
+) -> None:
+    epm, darko = FakeOverlay(RuntimeError("table moved")), FakeOverlay()
+    register_overlay("epm", "daily", epm)
+    register_overlay("darko", "daily", darko)
+    ok = respx.get(DAILY_URL).respond(200)
+    fail = respx.post(f"{DAILY_URL}/fail").respond(200)
+    jobs = make_jobs(
+        settings, clock, tmp_path, db, RoutedGet({}), Heartbeat({"daily": DAILY_URL}, http)
+    )
+
+    with pytest.raises(JobFailedError):
+        jobs.daily_overlays(DAY)
+
+    assert len(epm.calls) == len(darko.calls) == 1
+    reason = "1 of 2 failed: epm: RuntimeError: table moved"
+    [run] = runs(db)
+    assert (run.job, run.status) == (DAILY_OVERLAYS, "failed")
+    assert run.detail == {
+        "error": reason,
+        "date": "2026-10-20",
+        "ran": {"darko": {"rows": 3}},
+        "failed": {"epm": "RuntimeError: table moved"},
+    }
+    assert fail.call_count == 1
+    assert fail.calls.last.request.content == reason.encode()
+    assert ok.call_count == 0
+
+
+@respx.mock
+def test_only_the_last_injuries_run_of_the_day_pings_daily(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    registry: dict[str, Overlay],
+) -> None:
+    injury_report = FakeOverlay()
+    register_overlay("injury_report", "injuries", injury_report)
+    ok = respx.get(DAILY_URL).respond(200)
+    jobs = make_jobs(
+        settings, clock, tmp_path, db, RoutedGet({}), Heartbeat({"daily": DAILY_URL}, http)
+    )
+    tz = settings.tz
+
+    pings: list[int] = []
+    for hour, minute in [(10, 0), (13, 0), (16, 0), (18, 30)]:
+        clock.advance(datetime(2026, 10, 21, hour, minute, tzinfo=tz) - clock.now())
+        jobs.injuries_now()
+        pings.append(ok.call_count)
+
+    assert pings == [0, 0, 0, 1]
+    assert [day for _, day in injury_report.calls] == [date(2026, 10, 21)] * 4
+    assert [(run.job, run.status) for run in runs(db)] == [(INJURIES, "succeeded")] * 4
+
+
+@respx.mock
+def test_an_earlier_injuries_run_that_fails_pings_fail(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    registry: dict[str, Overlay],
+) -> None:
+    register_overlay("injury_report", "injuries", FakeOverlay(RuntimeError("no report")))
+    fail = respx.post(f"{DAILY_URL}/fail").respond(200)
+    jobs = make_jobs(
+        settings, clock, tmp_path, db, RoutedGet({}), Heartbeat({"daily": DAILY_URL}, http)
+    )
+
+    with pytest.raises(JobFailedError):
+        jobs.injuries(DAY, last=False)
+
+    assert fail.call_count == 1
+    assert [(run.job, run.status) for run in runs(db)] == [(INJURIES, "failed")]
+
+
+@respx.mock
+def test_overlay_runs_one_overlay_by_name_with_no_heartbeat(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    registry: dict[str, Overlay],
+) -> None:
+    transactions, epm = FakeOverlay(), FakeOverlay()
+    register_overlay("transactions", "daily", transactions)
+    register_overlay("epm", "daily", epm)
+    ok = respx.get(DAILY_URL).respond(200)
+    jobs = make_jobs(
+        settings, clock, tmp_path, db, RoutedGet({}), Heartbeat({"daily": DAILY_URL}, http)
+    )
+
+    detail = jobs.overlay("epm", DAY)
+    with pytest.raises(UnknownOverlayError):
+        jobs.overlay("darko", DAY)
+
+    assert (detail, epm.calls, transactions.calls) == ({"rows": 3}, [(jobs, DAY)], [])
+    assert [(run.job, run.status) for run in runs(db)] == [("overlay:epm", "succeeded")]
+    assert ok.call_count == 0

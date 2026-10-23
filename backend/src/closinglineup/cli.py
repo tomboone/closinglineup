@@ -35,6 +35,7 @@ from closinglineup.load.loader import LoadResult, load_dates, load_keyed
 from closinglineup.load.memberships import load_participation_spans
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.logging import configure_logging
+from closinglineup.overlays import UnknownOverlayError, by_name
 from closinglineup.pipeline import (
     SHOT_TABLE,
     NotCachedError,
@@ -68,7 +69,7 @@ COMMANDS = {
     "parse": "Parse cached raw responses into parquet rows.",
     "load": "Load parquet rows into Postgres.",
     "derive": "Refresh windows and write rotation state, events and flags.",
-    "overlays": "Fetch injuries, transactions, impact metrics and contracts.",
+    "overlays": "Run one overlay by name: injuries, transactions, impact metrics or contracts.",
     "api": "Serve the API and the built frontend.",
     "worker": "Run the job scheduler.",
     "nightly": "Run the nightly job once: refresh the schedule, fetch, parse and load a date.",
@@ -497,14 +498,42 @@ def weekly() -> None:
         except Exception as exc:
             typer.echo(f"weekly: failed: {type(exc).__name__}: {exc}", err=True)
             raise typer.Exit(1) from None
-    for failure in detail["failed"]:
+    shots = detail["ran"]["shots"]
+    for failure in shots["failed"]:
         typer.echo(f"shotchartdetail {failure['key']}: failed: {failure['error']}")
-    for key, error in detail["parse_failed"].items():
+    for key, error in shots["parse_failed"].items():
         typer.echo(f"parse shots {key}: failed: {error}")
     typer.echo(
-        f"weekly {detail['season']}: {detail['shot_charts']} shot charts, "
-        f"{detail['fetched']} fetched, {detail['rows']} shots loaded"
+        f"weekly {shots['season']}: {shots['shot_charts']} shot charts, "
+        f"{shots['fetched']} fetched, {shots['rows']} shots loaded"
     )
+    for name in detail["ran"]:
+        if name != "shots":
+            typer.echo(f"weekly: overlay {name}: succeeded")
+
+
+@app.command("overlays", help=COMMANDS["overlays"])
+def overlays(
+    name: Annotated[str, typer.Argument(help="The overlay to run.")],
+    date: Annotated[
+        datetime | None,
+        typer.Option(formats=["%Y-%m-%d"], help="The date to run it for. Defaults to today in TZ."),
+    ] = None,
+) -> None:
+    try:
+        by_name(name)
+    except UnknownOverlayError as exc:
+        raise typer.BadParameter(str(exc), param_hint="NAME") from None
+    settings = Settings()
+    clock = SystemClock()
+    day = date.date() if date else clock.now().astimezone(settings.tz).date()
+    with _open_jobs(settings, clock) as jobs:
+        try:
+            jobs.overlay(name, day)
+        except Exception as exc:
+            typer.echo(f"overlays {name} {day}: failed: {type(exc).__name__}: {exc}", err=True)
+            raise typer.Exit(1) from None
+    typer.echo(f"overlays {name} {day}: succeeded")
 
 
 @app.command("worker", help=COMMANDS["worker"])

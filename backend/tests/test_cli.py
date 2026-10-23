@@ -23,13 +23,14 @@ from closinglineup.cli import COMMANDS, app
 from closinglineup.clock import Clock, FakeClock
 from closinglineup.db.models import JobRun, LoadLog, PlayerGame
 from closinglineup.load.parquet import ROW_MODELS, ParquetStore
-from closinglineup.scheduler import NIGHTLY, POLL_FINALS, WEEKLY
+from closinglineup.overlays import Overlay, register_overlay
+from closinglineup.scheduler import DAILY_OVERLAYS, INJURIES, NIGHTLY, POLL_FINALS, WEEKLY
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import TEAMS
-from tests.fakes import Connect, RoutedGet, ScriptedGet, fake_response
+from tests.fakes import Connect, FakeOverlay, RoutedGet, ScriptedGet, fake_response
 from tests.test_backfill import InterruptedGet, season_routes
 from tests.test_loader import clear_fixture_game
 from tests.test_memberships import UNCOVERED
@@ -65,6 +66,7 @@ IMPLEMENTED = {
     "nightly",
     "weekly",
     "reconcile",
+    "overlays",
 }
 STUBS = [command for command in EXPECTED if command not in IMPLEMENTED]
 
@@ -335,6 +337,39 @@ def test_nightly_date_fetches_that_dates_final_games_and_records_the_run(
 
 
 @pytest.mark.usefixtures("nightly_env")
+def test_overlays_runs_one_overlay_for_the_date_and_records_the_run(
+    db: sessionmaker[Session], registry: dict[str, Overlay]
+) -> None:
+    epm, darko = FakeOverlay(), FakeOverlay(RuntimeError("app down"))
+    register_overlay("epm", "daily", epm)
+    register_overlay("darko", "daily", darko)
+
+    ran = runner.invoke(app, ["overlays", "epm", "--date", "2026-10-20"])
+    failed = runner.invoke(app, ["overlays", "darko", "--date", "2026-10-20"])
+
+    assert ran.exit_code == 0, ran.output
+    assert ran.output.splitlines()[-1] == "overlays epm 2026-10-20: succeeded"
+    assert [day for _, day in epm.calls] == [date(2026, 10, 20)]
+    assert failed.exit_code == 1
+    assert "overlays darko 2026-10-20: failed: RuntimeError: app down" in failed.output
+    with db() as session:
+        runs = session.scalars(select(JobRun).order_by(JobRun.id))
+        assert [(run.job, run.status) for run in runs] == [
+            ("overlay:epm", "succeeded"),
+            ("overlay:darko", "failed"),
+        ]
+
+
+def test_overlays_rejects_an_unregistered_name(registry: dict[str, Overlay]) -> None:
+    register_overlay("epm", "daily", FakeOverlay())
+
+    result = runner.invoke(app, ["overlays", "darko"])
+
+    assert result.exit_code == 2
+    assert "no overlay named 'darko'; registered: epm" in ANSI_ESCAPE.sub("", result.output)
+
+
+@pytest.mark.usefixtures("nightly_env")
 def test_nightly_exits_1_when_the_job_fails(
     monkeypatch: pytest.MonkeyPatch, db: sessionmaker[Session]
 ) -> None:
@@ -378,7 +413,7 @@ def test_worker_runs_the_scheduler_with_every_job_until_sigterm(
     result = runner.invoke(app, ["worker"])
 
     assert result.exit_code == 0, result.output
-    assert calls == [[NIGHTLY, POLL_FINALS, WEEKLY], "shutdown"]
+    assert calls == [sorted([NIGHTLY, POLL_FINALS, WEEKLY, INJURIES, DAILY_OVERLAYS]), "shutdown"]
     assert set(handlers) == {signal.SIGTERM, signal.SIGINT}
 
 

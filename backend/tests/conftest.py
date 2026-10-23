@@ -5,7 +5,9 @@ import pytest
 from sqlalchemy import Engine, create_engine, delete
 from sqlalchemy.orm import Session, sessionmaker
 
+from closinglineup import overlays
 from closinglineup.db.models import JobRun
+from closinglineup.overlays import Overlay
 from tests.test_migrations import alembic
 
 
@@ -35,3 +37,11 @@ def db(database_url: str) -> Iterator[sessionmaker[Session]]:
         yield sessions
     finally:
         engine.dispose()
+
+
+@pytest.fixture
+def registry(monkeypatch: pytest.MonkeyPatch) -> dict[str, Overlay]:
+    """An empty overlay registry in place of the real one, for the test to register fakes in."""
+    fresh: dict[str, Overlay] = {}
+    monkeypatch.setattr(overlays, "REGISTRY", fresh)
+    return fresh

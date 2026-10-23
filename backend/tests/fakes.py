@@ -1,8 +1,12 @@
-"""Stand-ins for curl_cffi, so sources can be tested without the network."""
+"""Stand-ins for curl_cffi, so sources can be tested without the network, and for overlays."""
 
 from collections.abc import Callable, Mapping
+from datetime import date
+from typing import Any
 
 from curl_cffi import requests
+
+from closinglineup.scheduler import Jobs
 
 
 def fake_response(status: int, body: bytes = b"") -> requests.Response:
@@ -53,3 +57,20 @@ class Connect:
         curl.get = self.get  # pyright: ignore[reportAttributeAccessIssue]
         self.opened.append(curl)
         return curl
+
+
+class FakeOverlay:
+    """An overlay that records each run and returns `detail`, or raises `error`."""
+
+    def __init__(
+        self, error: Exception | None = None, detail: dict[str, Any] | None = None
+    ) -> None:
+        self.error = error
+        self.detail = detail if detail is not None else {"rows": 3}
+        self.calls: list[tuple[Jobs, date]] = []
+
+    def __call__(self, jobs: Jobs, day: date) -> dict[str, Any]:
+        self.calls.append((jobs, day))
+        if self.error is not None:
+            raise self.error
+        return self.detail
