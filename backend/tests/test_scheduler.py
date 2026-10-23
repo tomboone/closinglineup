@@ -226,6 +226,7 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
         "matchup": 0,
         "stint": 0,
         "possession": 0,
+        "possession_lineup": 0,
     }
     assert ok.call_count == 1
 

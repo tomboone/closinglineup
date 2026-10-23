@@ -8,9 +8,9 @@ values changed, so reloading an unchanged file writes nothing, `updated_at` incl
 A load deletes only from the tables in `REPLACE_SCOPES`, whose natural keys a re-parse can move:
 a stint's start or a possession's number shifts when an override changes how pbpstats reads a
 game, and a shot can be credited to another player. Their files replace what was loaded before,
-within the scope of the rows they hold: every game a stint or possession file covers, and every
-player and season type a shot file covers. A row in that scope the file no longer holds is
-deleted. Every other table keeps a row its file no longer holds.
+within the scope of the rows they hold: every game a stint, possession or possession lineup file
+covers, and every player and season type a shot file covers. A row in that scope the file no
+longer holds is deleted. Every other table keeps a row its file no longer holds.
 
 A date's load that fails rolls back whole and records its `load_log` row as failed, which
 `load_dates` with `missing` picks up on the next run. `load_log` is keyed by (table, game date,
@@ -45,6 +45,7 @@ NATURAL_KEYS: dict[str, tuple[str, ...]] = {
     "matchup": ("game_id", "off_player_id", "def_player_id"),
     "stint": ("game_id", "team_id", "period", "start_sec"),
     "possession": ("game_id", "period", "number"),
+    "possession_lineup": ("game_id", "period", "number", "team_id", "lineup_key"),
     "shot": ("game_id", "event_num"),
 }
 
@@ -59,6 +60,7 @@ type Columns = Callable[[str], ColumnElement[Any]]
 REPLACE_SCOPES: dict[str, Callable[[Columns], tuple[ColumnElement[Any], ...]]] = {
     "stint": lambda c: (c("game_id"),),
     "possession": lambda c: (c("game_id"),),
+    "possession_lineup": lambda c: (c("game_id"),),
     "shot": lambda c: (c("player_id"), func.substr(c("game_id"), 1, SEASON_TYPE_PREFIX)),
 }
 
@@ -106,15 +108,19 @@ def _upsert(
     updated = [name for name in columns if name not in natural]
     staged = table(staging, *(column(name, target.c[name].type) for name in columns))
     stmt = insert(target).from_select(columns, select(*staged.c))
-    stmt = stmt.on_conflict_do_update(
-        index_elements=natural,
-        set_={**{name: stmt.excluded[name] for name in updated}, "updated_at": func.now()},
-        where=tuple_(*(target.c[name] for name in updated)).is_distinct_from(
-            tuple_(*(stmt.excluded[name] for name in updated))
-        ),
-    )
+    if updated:
+        stmt = stmt.on_conflict_do_update(
+            index_elements=natural,
+            set_={**{name: stmt.excluded[name] for name in updated}, "updated_at": func.now()},
+            where=tuple_(*(target.c[name] for name in updated)).is_distinct_from(
+                tuple_(*(stmt.excluded[name] for name in updated))
+            ),
+        )
+    else:
+        # Every column is the key (`possession_lineup`): a row already there is unchanged.
+        stmt = stmt.on_conflict_do_nothing(index_elements=natural)
     # Counted from RETURNING: a Core INSERT through psycopg reports a `rowcount` of -1. Rows the
-    # WHERE skips are not returned.
+    # WHERE or DO NOTHING skips are not returned.
     changed = len(session.execute(stmt.returning(target.c[natural[0]])).all())
 
     removed = 0

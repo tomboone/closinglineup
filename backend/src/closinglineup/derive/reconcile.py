@@ -8,16 +8,18 @@ included, since NBA.com counts every possession.
 
 Ratings are per 100 possessions: offense over the team's own possessions, defense over the
 opponent's, as NBA.com computes them. Possessions are credited as NBA.com credits them, which is
-not how a stint counts them (NEU-1899): every possession pbpstats emits, counted or not, goes to
-each lineup and each player on the court for any of its time, so one a substitution splits counts
-for both lineups. A stint's `possessions` stay pbpstats' counted ones, credited once, for the
-dashboard's own ratings (spec §7.3). Points are the stints'.
+not how a stint counts them (NEU-1899): to every five on the court for any part of one, so one a
+substitution splits counts for both, and at a substitution logged at the instant one starts or
+ends, as its events there decide (NEU-1900). `parse.pbp` emits those fives as `possession_lineup`
+rows, and a player has the possession if any of them holds him. A stint's `possessions` stay
+pbpstats' counted ones, credited once, for the dashboard's own ratings (spec §7.3). Points are the
+stints', a free throw's at its foul, which is where NBA.com credits them too.
 
 Only the lineups and players NBA.com credits with at least `MIN_POSSESSIONS` (its `POSS`) are
 compared, and only on net rating, which NBA.com rounds to 0.1. A player is within ±0.5. A lineup
-is within `LINEUP_TOLERANCE_POSSESSIONS` possessions' worth of net rating: a substitution logged at
-the same clock time as a possession's start or end can fall on either side of it, which the clock
-cannot tell, and one possession moves a lineup's rating by about 110 / `POSS`.
+is within `LINEUP_TOLERANCE_POSSESSIONS` possessions' worth of net rating: the events at a
+substitution do not settle every possession there as NBA.com does, and one possession moves a
+lineup's rating by about 110 / `POSS`.
 
 `leagueplayerondetails` lists only the On rows, so the on/off check is each player's on-court
 net rating.
@@ -41,8 +43,8 @@ from typing import Any, Literal, Self
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from closinglineup.db.models import Possession, Stint
-from closinglineup.parse.rows import PossessionRow, StintRow
+from closinglineup.db.models import Possession, PossessionLineup, Stint
+from closinglineup.parse.rows import PossessionLineupRow, PossessionRow, StintRow
 from closinglineup.sources import nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_stats import SeasonType
@@ -191,51 +193,31 @@ class Report:
 
 
 def tallies(
-    stints: Iterable[StintRow], possessions: Iterable[PossessionRow]
+    stints: Iterable[StintRow],
+    possessions: Iterable[PossessionRow],
+    possession_lineups: Iterable[PossessionLineupRow],
 ) -> tuple[dict[Key, Tally], dict[Key, Tally]]:
     """Each lineup's totals and each player's on-court totals, per team: the stints' points, and
-    every possession credited to each lineup and player on the court for any of its time."""
+    the possessions NBA.com credits to each lineup, and to each player in any of them."""
     lineups: defaultdict[Key, Tally] = defaultdict(Tally)
     players: defaultdict[Key, Tally] = defaultdict(Tally)
-    by_period: defaultdict[tuple[str, int, int], list[StintRow]] = defaultdict(list)
-    teams: defaultdict[str, set[int]] = defaultdict(set)
     for stint in stints:
         points = Totals(pts_for=stint.pts_for, pts_against=stint.pts_against)
         lineups[(stint.team_id, stint.lineup_key)].add(stint.game_id, points)
         for player in stint.lineup_key.split("-"):
             players[(stint.team_id, player)].add(stint.game_id, points)
-        by_period[(stint.game_id, stint.period, stint.team_id)].append(stint)
-        teams[stint.game_id].add(stint.team_id)
-    for possession in possessions:
-        for team_id in teams[possession.game_id]:
-            on_court = _on_court(
-                possession, by_period[(possession.game_id, possession.period, team_id)]
-            )
-            offense = team_id == possession.offense_team_id
-            credit = Totals(possessions=1) if offense else Totals(opp_possessions=1)
-            for key in on_court:
-                lineups[(team_id, key)].add(possession.game_id, credit)
-            for player in {player for key in on_court for player in key.split("-")}:
-                players[(team_id, player)].add(possession.game_id, credit)
+    offense = {(p.game_id, p.period, p.number): p.offense_team_id for p in possessions}
+    on_court: defaultdict[tuple[str, int, int, int], set[str]] = defaultdict(set)
+    for row in possession_lineups:
+        on_court[(row.game_id, row.period, row.number, row.team_id)].add(row.lineup_key)
+    for (game_id, period, number, team_id), keys in on_court.items():
+        on_offense = team_id == offense[(game_id, period, number)]
+        credit = Totals(possessions=1) if on_offense else Totals(opp_possessions=1)
+        for key in keys:
+            lineups[(team_id, key)].add(game_id, credit)
+        for player in {player for key in keys for player in key.split("-")}:
+            players[(team_id, player)].add(game_id, credit)
     return dict(lineups), dict(players)
-
-
-def _on_court(possession: PossessionRow, stints: list[StintRow]) -> set[str]:
-    """The lineups of `stints`, one team's in the possession's period, on the court for any of
-    its time. One with no time goes to the lineup on the court just before it: at a substitution
-    logged at that instant, the outgoing one."""
-    found = {
-        s.lineup_key
-        for s in stints
-        if s.start_sec < possession.end_sec and s.end_sec > possession.start_sec
-    }
-    if found or not stints:
-        return found
-    before = [s for s in stints if s.start_sec < possession.end_sec]
-    nearest = (
-        max(before, key=lambda s: s.start_sec) if before else min(stints, key=lambda s: s.start_sec)
-    )
-    return {nearest.lineup_key}
 
 
 def _rows(payload: Payload) -> list[dict[str, Any]]:
@@ -328,9 +310,9 @@ def top_games(tally: Tally, target: float, limit: int = TOP_GAMES) -> tuple[str,
 
 def season_rows(
     db: sessionmaker[Session], season: str, season_type: SeasonType, team_ids: Iterable[int]
-) -> tuple[list[StintRow], list[PossessionRow]]:
-    """Every stint and possession of the games `team_ids` played in the season type, both
-    teams'."""
+) -> tuple[list[StintRow], list[PossessionRow], list[PossessionLineupRow]]:
+    """Every stint, possession and possession lineup of the games `team_ids` played in the
+    season type, both teams'."""
     # `0022500001`: league `00`, season type, then the season's two-digit start year.
     prefix = f"00{SEASON_TYPE_DIGITS[season_type]}{season[2:4]}"
     games = (
@@ -351,10 +333,21 @@ def season_rows(
                 select(*_columns(Possession, PossessionRow)).where(Possession.game_id.in_(games))
             ).mappings()
         ]
-    return stints, possessions
+        possession_lineups = [
+            PossessionLineupRow(**row)
+            for row in session.execute(
+                select(*_columns(PossessionLineup, PossessionLineupRow)).where(
+                    PossessionLineup.game_id.in_(games)
+                )
+            ).mappings()
+        ]
+    return stints, possessions, possession_lineups
 
 
-def _columns(model: type[Stint | Possession], row: type[StintRow | PossessionRow]) -> list[Any]:
+def _columns(
+    model: type[Stint | Possession | PossessionLineup],
+    row: type[StintRow | PossessionRow | PossessionLineupRow],
+) -> list[Any]:
     return [model.__table__.c[name] for name in row.model_fields]
 
 

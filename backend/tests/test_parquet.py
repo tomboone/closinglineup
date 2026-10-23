@@ -11,7 +11,14 @@ from closinglineup.load.parquet import ROW_MODELS, ParquetSchemaError, ParquetSt
 from closinglineup.parse.box import parse_box
 from closinglineup.parse.matchups import parse_matchups
 from closinglineup.parse.roster import parse_players, parse_roster
-from closinglineup.parse.rows import GameRow, PossessionRow, Row, ShotRow, StintRow
+from closinglineup.parse.rows import (
+    GameRow,
+    PossessionLineupRow,
+    PossessionRow,
+    Row,
+    ShotRow,
+    StintRow,
+)
 from closinglineup.parse.schedule import parse_schedule
 from closinglineup.parse.shots import parse_shots
 
@@ -73,6 +80,12 @@ def _rows() -> dict[str, list[Row]]:
                 counted=True,
             )
             for number, start_type in [(1, "Off Deadball"), (2, None)]
+        ],
+        "possession_lineup": [
+            PossessionLineupRow(
+                game_id=GAME, period=1, number=1, team_id=1610612744, lineup_key=lineup_key
+            )
+            for lineup_key in ["1-2-3-4-5", "1-2-3-4-6"]
         ],
     }
 

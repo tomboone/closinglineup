@@ -3,11 +3,12 @@ commands run it (spec §3.2).
 
 `parse_date` reads the date's games from the season's cached schedule, runs the box score and
 matchup parsers over each game whose traditional box score is cached, then pbpstats over its live
-play-by-play for its stints and possessions, and rewrites the date's parquet file for every
-table, whole. A game a parser cannot read is reported and left out, so one bad payload does not
-hold back the rest of the date; a final game with no cached box score is reported as missing. A
-game whose box score parses but whose play-by-play does not (it is not cached, or pbpstats needs
-an override for it) keeps its box rows and is reported as failed, with no stints or possessions.
+play-by-play for its stints, possessions and possession lineups, and rewrites the date's parquet
+file for every table, whole. A game a parser cannot read is reported and left out, so one bad
+payload does not hold back the rest of the date; a final game with no cached box score is
+reported as missing. A game whose box score parses but whose play-by-play does not (it is not
+cached, or pbpstats needs an override for it) keeps its box rows and is reported as failed, with
+no stints, possessions or possession lineups.
 
 `parse_shot_charts` parses cached shot charts into `shot` files, one per shot chart, keyed as the
 shot chart is cached (`load.parquet`).
@@ -40,6 +41,7 @@ from closinglineup.parse.rows import (
     ParseError,
     PlayerGameRow,
     PlayerRow,
+    PossessionLineupRow,
     PossessionRow,
     RosterMembershipRow,
     Row,
@@ -133,11 +135,11 @@ def _game_rows(
     return box, matchups
 
 
-def _pbp_rows(cache: RawCache, game_id: str) -> tuple[list[StintRow], list[PossessionRow]]:
-    """The game's stints and possessions, from pbpstats over its cached live play-by-play."""
+def _pbp_rows(cache: RawCache, game_id: str) -> pbp.GameRows:
+    """The game's stints, possessions and possession lineups, from pbpstats over its cached live
+    play-by-play."""
     pbp.materialize(cache, game_id)
-    data_dir = cache.root.parent
-    return pbp.stints_for_game(data_dir, game_id), pbp.possessions_for_game(data_dir, game_id)
+    return pbp.rows_for_game(cache.root.parent, game_id)
 
 
 def _fetched_on(cache: RawCache, endpoint: str, key: str, tz: tzinfo) -> date:
@@ -190,6 +192,7 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
     matchup_rows: list[MatchupRow] = []
     stint_rows: list[StintRow] = []
     possession_rows: list[PossessionRow] = []
+    possession_lineup_rows: list[PossessionLineupRow] = []
     for game in games:
         traditional = _payload(
             cache, nba_stats.SOURCE, nba_stats.BOXSCORE_TRADITIONAL_V3, game.game_id
@@ -207,14 +210,15 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         matchup_rows.extend(matchups)
         report.parsed.append(game.game_id)
         try:
-            stints, possessions = _pbp_rows(cache, game.game_id)
+            pbp_rows = _pbp_rows(cache, game.game_id)
         # `PbpError`, a play-by-play that is not cached (`FileNotFoundError`), or whatever else
         # pbpstats raises on a feed it cannot read, which it does not document. It is reported.
         except Exception as exc:
             report.failed[game.game_id] = f"play-by-play: {type(exc).__name__}: {exc}"
             continue
-        stint_rows.extend(stints)
-        possession_rows.extend(possessions)
+        stint_rows.extend(pbp_rows.stints)
+        possession_rows.extend(pbp_rows.possessions)
+        possession_lineup_rows.extend(pbp_rows.possession_lineups)
 
     players: list[PlayerRow] = []
     memberships: list[RosterMembershipRow] = []
@@ -230,6 +234,7 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         "matchup": [*matchup_rows],
         "stint": [*stint_rows],
         "possession": [*possession_rows],
+        "possession_lineup": [*possession_lineup_rows],
     }
     for table, rows in tables.items():
         store.write_rows(table, day, rows)

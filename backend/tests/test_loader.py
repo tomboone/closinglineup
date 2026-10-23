@@ -15,6 +15,7 @@ from closinglineup.db.models import (
     Matchup,
     PlayerGame,
     Possession,
+    PossessionLineup,
     RunStatus,
     Shot,
     Stint,
@@ -58,7 +59,7 @@ def clear_fixture_game(db: sessionmaker[Session]) -> None:
     upsert, so a leftover row only reads as unchanged."""
     games = (GAME, UNCACHED)
     with db.begin() as session:
-        for model in (Stint, Possession, Shot):
+        for model in (Stint, Possession, PossessionLineup, Shot):
             session.execute(delete(model).where(model.game_id.in_(games)))
         session.execute(delete(Matchup).where(Matchup.game_id.in_(games)))
         session.execute(delete(PlayerGame).where(PlayerGame.game_id.in_(games)))

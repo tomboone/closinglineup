@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
 from closinglineup.cli import app
-from closinglineup.db.models import Game, Possession, Stint
+from closinglineup.db.models import Game, Possession, PossessionLineup, Stint
 from closinglineup.derive import reconcile
 from closinglineup.derive.reconcile import (
     Check,
@@ -29,49 +29,57 @@ from closinglineup.derive.reconcile import (
     top_games,
 )
 from closinglineup.parse import pbp
-from closinglineup.parse.rows import PossessionRow, StintRow
+from closinglineup.parse.rows import PossessionLineupRow, PossessionRow, StintRow
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_stats import SeasonType
 from closinglineup.teams import TEAMS
 from tests.test_nba_stats import season_fixture_body
 from tests.test_pbp import FIXTURES as PBP_FIXTURES
-from tests.test_pbp import GAMES, GSW, GSW_OVERTIME_FIVE, OVERTIME_GAME
+from tests.test_pbp import (
+    GAMES,
+    GSW,
+    GSW_OVERTIME_FIVE,
+    OVERTIME_GAME,
+    QUIRK_GAME,
+    RECONCILE_GAME,
+)
 
 runner = CliRunner()
 
 type Payload = dict[str, Any]
-type GameRows = tuple[list[StintRow], list[PossessionRow]]
 
 DEN = 1610612743
 OVERTIME_FIVE = "-".join(str(p) for p in GSW_OVERTIME_FIVE)
-# NBA.com's `leaguedashlineups` for each team of the overtime game, on its date alone.
-GAME_LINEUPS = (
-    Path(__file__).parent / "fixtures" / "reconcile" / f"{OVERTIME_GAME}_leaguedashlineups.json"
-)
+# NBA.com's `leaguedashlineups` and `leagueplayerondetails` for each team of each of these games,
+# on its date alone.
+RECORDED_GAMES = (OVERTIME_GAME, QUIRK_GAME, RECONCILE_GAME)
+RECORDED = Path(__file__).parent / "fixtures" / "reconcile"
 
 
 @pytest.fixture(scope="module")
-def fixture_rows(tmp_path_factory: pytest.TempPathFactory) -> dict[str, GameRows]:
-    """Every fixture game's stint and possession rows, as `parse.pbp` emits them."""
+def fixture_rows(tmp_path_factory: pytest.TempPathFactory) -> dict[str, pbp.GameRows]:
+    """Every fixture game's rows, as `parse.pbp` emits them."""
     cache = RawCache(tmp_path_factory.mktemp("data"))
-    rows: dict[str, GameRows] = {}
+    rows: dict[str, pbp.GameRows] = {}
     for game_id in GAMES:
         body = (PBP_FIXTURES / nba_cdn.PLAYBYPLAY / f"{game_id}.json").read_bytes()
         cache.put(nba_cdn.SOURCE, nba_cdn.PLAYBYPLAY, game_id, body, url="u", status=200)
         pbp.materialize(cache, game_id)
-        data_dir = cache.root.parent
-        rows[game_id] = (
-            pbp.stints_for_game(data_dir, game_id),
-            pbp.possessions_for_game(data_dir, game_id),
-        )
+        rows[game_id] = pbp.rows_for_game(cache.root.parent, game_id)
     return rows
 
 
+def _tallies(
+    rows: pbp.GameRows,
+) -> tuple[dict[tuple[int, str], Tally], dict[tuple[int, str], Tally]]:
+    return tallies(rows.stints, rows.possessions, rows.possession_lineups)
+
+
 def test_the_overtime_fives_totals_match_the_hand_count(
-    fixture_rows: dict[str, GameRows],
+    fixture_rows: dict[str, pbp.GameRows],
 ) -> None:
-    lineups, _ = tallies(*fixture_rows[OVERTIME_GAME])
+    lineups, _ = _tallies(fixture_rows[OVERTIME_GAME])
 
     tally = lineups[(GSW, OVERTIME_FIVE)]
     # Counted by hand from the play-by-play. 3:50 to 0:25.7 of the fourth, 109-116 to 117-120:
@@ -85,34 +93,45 @@ def test_the_overtime_fives_totals_match_the_hand_count(
     assert tally.total.def_rating == pytest.approx(100.0)
 
 
-def _game_lineups() -> dict[tuple[int, str], NbaRatings]:
-    payloads: dict[str, Payload] = json.loads(GAME_LINEUPS.read_text())
-    return {(n.team_id, n.key): n for p in payloads.values() for n in nba_lineups(p)}
+def _recorded(game_id: str, endpoint: str) -> dict[tuple[int, str], NbaRatings]:
+    """NBA.com's rows for the game, from its `{team_id: response}` fixture."""
+    payloads: dict[str, Payload] = json.loads((RECORDED / f"{game_id}_{endpoint}.json").read_text())
+    read = nba_lineups if endpoint == nba_stats.LEAGUE_DASH_LINEUPS else nba_on_court
+    return {(n.team_id, n.key): n for p in payloads.values() for n in read(p)}
 
 
-def test_the_overtime_games_lineups_match_nba_coms_possessions_but_at_two_substitutions(
-    fixture_rows: dict[str, GameRows],
+@pytest.mark.parametrize("game_id", RECORDED_GAMES)
+def test_every_five_has_nba_coms_possessions_and_ratings_in_the_recorded_games(
+    fixture_rows: dict[str, pbp.GameRows], game_id: str
 ) -> None:
-    lineups, _ = tallies(*fixture_rows[OVERTIME_GAME])
-    nba = _game_lineups()
+    lineups, _ = _tallies(fixture_rows[game_id])
+    nba = _recorded(game_id, nba_stats.LEAGUE_DASH_LINEUPS)
 
-    differ = {
-        key: (tally.total.possessions, nba[key].possessions)
-        for key, tally in lineups.items()
-        if key in nba and tally.total.possessions != nba[key].possessions
+    ours = {key: lineups.get(key, Tally()).total for key in nba}
+
+    assert {key: t.possessions for key, t in ours.items()} == {
+        key: n.possessions for key, n in nba.items()
+    }
+    # Both ways, so the stints' points and the opponent's possessions too: a free throw's
+    # points go to the five on the court at its foul, as NBA.com credits them.
+    for key, n in nba.items():
+        assert (ours[key].off_rating or 0.0) == pytest.approx(n.off_rating, abs=0.05), key
+        assert (ours[key].def_rating or 0.0) == pytest.approx(n.def_rating, abs=0.05), key
+
+
+@pytest.mark.parametrize("game_id", RECORDED_GAMES)
+def test_every_player_has_nba_coms_on_court_possessions_in_the_recorded_games(
+    fixture_rows: dict[str, pbp.GameRows], game_id: str
+) -> None:
+    _, players = _tallies(fixture_rows[game_id])
+    nba = _recorded(game_id, nba_stats.LEAGUE_PLAYER_ON_DETAILS)
+
+    assert {key: players[key].total.possessions for key in nba} == {
+        key: n.possessions for key, n in nba.items()
     }
 
-    assert len(nba) == 25
-    assert set(nba) <= set(lineups)
-    # Each is one DEN possession at a substitution logged at the same clock time as the
-    # possession's start or end, which the clock cannot place on either side of it.
-    assert differ == {
-        (DEN, "202685-203501-1627750-1628971-1631212"): (19, 20),
-        (DEN, "203932-203999-1627750-1629661-1631128"): (50, 51),
-    }
 
-
-def test_a_possession_counts_for_every_lineup_and_player_on_the_court_during_it() -> None:
+def test_a_possession_counts_once_for_each_five_it_lists_and_each_player_in_any() -> None:
     def stint(start: float, end: float, team_id: int, key: str, pf: int, pa: int) -> StintRow:
         return StintRow(
             game_id=OVERTIME_GAME,
@@ -127,21 +146,28 @@ def test_a_possession_counts_for_every_lineup_and_player_on_the_court_during_it(
             pts_against=pa,
         )
 
-    def possession(number: int, offense: int, start: float, end: float) -> PossessionRow:
+    def possession(number: int, offense: int) -> PossessionRow:
         return PossessionRow(
             game_id=OVERTIME_GAME,
             period=1,
             number=number,
             offense_team_id=offense,
-            start_sec=start,
-            end_sec=end,
+            start_sec=0,
+            end_sec=0,
             start_score_margin=0,
             has_timeout=False,
             previous_has_timeout=False,
             end_type="FieldGoal",
-            # Not counted by pbpstats, as at the end of a period: NBA.com counts it all the same.
-            counted=number != 2,
+            counted=True,
         )
+
+    def credited(number: int, team_id: int, *keys: str) -> list[PossessionLineupRow]:
+        return [
+            PossessionLineupRow(
+                game_id=OVERTIME_GAME, period=1, number=number, team_id=team_id, lineup_key=key
+            )
+            for key in keys
+        ]
 
     # GSW's 1-5 then 1-4 and 6, against one DEN five throughout.
     first, second, den = "1-2-3-4-5", "1-2-3-4-6", "11-12-13-14-15"
@@ -151,23 +177,26 @@ def test_a_possession_counts_for_every_lineup_and_player_on_the_court_during_it(
         stint(10, 20, GSW, second, 0, 3),
         stint(10, 20, DEN, den, 3, 0),
     ]
-    possessions = [
-        possession(1, GSW, 0, 5),
-        # Split by the substitution at 10 s.
-        possession(2, GSW, 5, 15),
-        possession(3, DEN, 15, 20),
-        # No time at all, at the substitution: the five on the court as it ends has it.
-        possession(4, GSW, 10, 10),
+    possessions = [possession(1, GSW), possession(2, GSW), possession(3, DEN), possession(4, GSW)]
+    lineups = [
+        *credited(1, GSW, first),
+        *credited(1, DEN, den),
+        # Split by the substitution.
+        *credited(2, GSW, first, second),
+        *credited(2, DEN, den),
+        *credited(3, GSW, second),
+        *credited(3, DEN, den),
+        # Possession 4 is one NBA.com does not count, so it has no fives at all.
     ]
 
-    lineups, players = tallies(stints, possessions)
+    lineup_totals, players = tallies(stints, possessions, lineups)
 
-    assert lineups[(GSW, first)].total == Totals(3, 0, 2, 0)
-    assert lineups[(GSW, second)].total == Totals(1, 1, 0, 3)
-    assert lineups[(DEN, den)].total == Totals(1, 3, 3, 2)
+    assert lineup_totals[(GSW, first)].total == Totals(2, 0, 2, 0)
+    assert lineup_totals[(GSW, second)].total == Totals(1, 1, 0, 3)
+    assert lineup_totals[(DEN, den)].total == Totals(1, 2, 3, 2)
     # Possession 2 counts once for the four who played both sides of the substitution.
-    assert players[(GSW, "1")].total == Totals(3, 1, 2, 3)
-    assert players[(GSW, "5")].total == Totals(3, 0, 2, 0)
+    assert players[(GSW, "1")].total == Totals(2, 1, 2, 3)
+    assert players[(GSW, "5")].total == Totals(2, 0, 2, 0)
     assert players[(GSW, "6")].total == Totals(1, 1, 0, 3)
 
 
@@ -363,9 +392,16 @@ def _possession_row(game_id: str, number: int, offense: int, start_sec: float) -
     )
 
 
+def _possession_lineup(game_id: str, number: int, team_id: int, key: str) -> PossessionLineup:
+    return PossessionLineup(
+        game_id=game_id, period=1, number=number, team_id=team_id, lineup_key=key
+    )
+
+
 def _clear(db: sessionmaker[Session]) -> None:
     games = (REGULAR_GAME, PLAYOFF_GAME)
     with db.begin() as session:
+        session.execute(delete(PossessionLineup).where(PossessionLineup.game_id.in_(games)))
         session.execute(delete(Possession).where(Possession.game_id.in_(games)))
         session.execute(delete(Stint).where(Stint.game_id.in_(games)))
         session.execute(delete(Game).where(Game.game_id.in_(games)))
@@ -412,6 +448,23 @@ def stints(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 _possession_row(PLAYOFF_GAME, 2, DEN, 4.0),
             ]
         )
+        session.flush()
+        session.add_all(
+            [
+                *(_possession_lineup(REGULAR_GAME, n + 1, GSW, GSW_FIVE) for n in range(29)),
+                *(
+                    _possession_lineup(
+                        REGULAR_GAME, n + 1, DEN, DEN_FIVE if n < 15 else DEN_OTHER_FIVE
+                    )
+                    for n in range(29)
+                ),
+                *(
+                    _possession_lineup(PLAYOFF_GAME, number, team_id, key)
+                    for number in (1, 2)
+                    for team_id, key in ((GSW, GSW_FIVE), (DEN, DEN_FIVE))
+                ),
+            ]
+        )
     try:
         yield db
     finally:
@@ -421,7 +474,9 @@ def stints(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
 def test_season_rows_reads_both_teams_rows_of_the_season_types_games(
     stints: sessionmaker[Session],
 ) -> None:
-    found, possessions = season_rows(stints, SEASON, SeasonType.REGULAR_SEASON, [GSW])
+    found, possessions, possession_lineups = season_rows(
+        stints, SEASON, SeasonType.REGULAR_SEASON, [GSW]
+    )
 
     assert sorted((s.team_id, s.start_sec) for s in found) == [
         (DEN, 0.0),
@@ -431,9 +486,14 @@ def test_season_rows_reads_both_teams_rows_of_the_season_types_games(
     ]
     assert len(possessions) == 29
     assert {p.game_id for p in possessions} == {REGULAR_GAME}
-    playoff_stints, playoff_possessions = season_rows(stints, SEASON, SeasonType.PLAYOFFS, [DEN])
+    assert len(possession_lineups) == 58
+    assert {p.game_id for p in possession_lineups} == {REGULAR_GAME}
+    playoff_stints, playoff_possessions, playoff_lineups = season_rows(
+        stints, SEASON, SeasonType.PLAYOFFS, [DEN]
+    )
     assert {s.game_id for s in playoff_stints} == {PLAYOFF_GAME}
     assert [p.number for p in sorted(playoff_possessions, key=lambda p: p.number)] == [1, 2]
+    assert {p.game_id for p in playoff_lineups} == {PLAYOFF_GAME}
 
 
 def _result_set(endpoint: str, rows: list[dict[str, Any]]) -> bytes:
