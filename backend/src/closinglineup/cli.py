@@ -48,6 +48,7 @@ from closinglineup.scheduler import Jobs, build_scheduler
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.espn_injuries import make_client as make_espn_client
 from closinglineup.sources.nba_http import NbaHttpError, NbaUnreachableError, make_nba_session
 from closinglineup.sources.nba_stats import (
     FetchStatus,
@@ -450,6 +451,7 @@ def _open_jobs(settings: Settings, clock: Clock) -> Generator[Jobs]:
                 cache=RawCache(settings.data_dir, clock),
                 store=ParquetStore(settings.data_dir),
                 nba=lambda: make_nba_session(settings, clock),
+                espn=make_espn_client,
                 db=make_session_factory(engine),
                 heartbeat=Heartbeat.from_settings(settings, http),
             )

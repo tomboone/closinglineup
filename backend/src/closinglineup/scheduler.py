@@ -15,6 +15,7 @@ from datetime import date, datetime, time, timedelta, tzinfo
 from functools import partial
 from typing import Any
 
+import httpx
 from apscheduler.executors.pool import (  # pyright: ignore[reportMissingTypeStubs]
     ThreadPoolExecutor,
 )
@@ -196,7 +197,8 @@ def fetch_final_game(
 class Jobs:
     """Every job, with what they share; the worker schedules them and the CLI runs them once.
 
-    `nba` opens a fresh `NbaSession` for each run, which the run closes.
+    `nba` opens a fresh `NbaSession` for each run, which the run closes; `espn` likewise a fresh
+    client for ESPN, which only the injuries fallback uses.
     """
 
     settings: Settings
@@ -204,6 +206,7 @@ class Jobs:
     cache: RawCache
     store: ParquetStore
     nba: Callable[[], NbaSession]
+    espn: Callable[[], httpx.Client]
     db: sessionmaker[Session]
     heartbeat: Heartbeat
     # Games `poll_finals` has seen go final, by game date, until `nightly` has run for the date.
