@@ -25,8 +25,10 @@ from closinglineup.derive.bpm import (
 from closinglineup.impact import ImpactSnapshotRow
 
 FIXTURES = Path(__file__).parent / "fixtures" / "bref"
-# Basketball Reference's listed positions on the five-point scale.
+# Basketball Reference's listed positions on the five-point scale, and as NBA.com lists them,
+# which is the prior `season_lines` has (`listed_position`).
 BREF_POSITIONS = {"PG": 1.0, "SG": 2.0, "SF": 3.0, "PF": 4.0, "C": 5.0}
+NBA_POSITIONS = {"PG": "G", "SG": "G", "SF": "F", "PF": "F", "C": "C"}
 BOX = ("fg", "fga", "fta", "orb", "drb", "tov")
 
 # The 2016-17 Cavaliers, the worked example in the BPM 2.0 calculator sheet linked from
@@ -84,13 +86,15 @@ def test_the_sheets_cavaliers_are_reproduced() -> None:
     # The team's BPMs, weighted by share of the minutes, sum to its rating: its net rating per
     # 100 possessions (the sheet's +3.0, to the rounding of the points) and the lead's effect.
     margin = CLE_PTS - CLE_OPP_PTS
-    rating = sum(r.bpm * r.minutes / CLE_MINUTES for r in results)
-    assert rating == pytest.approx(margin / CLE_POSSESSIONS * 100 + 0.175 * margin / 82 / 2)
+    team_total = sum(r.bpm * r.minutes / CLE_MINUTES for r in results)
+    assert team_total == pytest.approx(margin / CLE_POSSESSIONS * 100 + 0.175 * margin / 82 / 2)
 
 
-def _bref_season() -> tuple[list[PlayerLine], dict[int, TeamLine], dict[str, dict[str, str]]]:
+def _bref_season(
+    *, coarse: bool = False
+) -> tuple[list[PlayerLine], dict[int, TeamLine], dict[str, dict[str, str]]]:
     """The 2025-26 fixture as lines, with each team's possessions estimated from its totals, and
-    the published rows by player-team."""
+    the published rows by player-team; `coarse` lists each player as NBA.com would."""
     with (FIXTURES / "2025-26_teams.csv").open() as handle:
         team_rows = list(csv.DictReader(handle))
     with (FIXTURES / "2025-26_players.csv").open() as handle:
@@ -115,7 +119,7 @@ def _bref_season() -> tuple[list[PlayerLine], dict[int, TeamLine], dict[str, dic
             i,
             team_ids[row["team"]],
             float(row["mp"]),
-            BREF_POSITIONS[row["pos"]],
+            listed_position(NBA_POSITIONS[row["pos"]]) if coarse else BREF_POSITIONS[row["pos"]],
             int(row["pts"]),
             int(row["fga"]),
             int(row["fg3"]),
@@ -170,8 +174,9 @@ def test_five_published_2025_26_values_are_within_a_point() -> None:
         assert result.bpm == pytest.approx(value, abs=1.0), name
 
 
-def test_every_regular_is_within_a_point_and_the_league_averages_to_zero() -> None:
-    lines, teams, published = _bref_season()
+@pytest.mark.parametrize("coarse", [False, True], ids=["bref_positions", "nba_positions"])
+def test_every_regular_is_within_a_point_and_the_league_averages_to_zero(coarse: bool) -> None:
+    lines, teams, published = _bref_season(coarse=coarse)
     keys = list(published)
 
     results = compute(lines, teams)
@@ -303,7 +308,8 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """GSW and DEN's games: a regular-season game on DAY and the day after, a playoff game that
     day too, one scheduled two days on, and one on DAY with rows for GSW only. Five players a
     side, 48 minutes each, scoring 10 through 14 (GSW) and 15 through 19 (DEN), but in the first
-    game BRIEF takes 30 seconds from the fifth Warrior; the first Warrior is listed at center."""
+    game BRIEF takes 30 seconds from the fifth Warrior; the first Warrior is listed at center. The
+    second game's schedule score, 70-90, is not its players' 60-85."""
     _clear(db)
     with db.begin() as session:
         for game_id, (day, phase, status) in GAMES.items():
@@ -316,6 +322,8 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                     home_team_id=GSW,
                     away_team_id=DEN,
                     status=status,
+                    home_score=70 if game_id == NEXT else None,
+                    away_score=90 if game_id == NEXT else None,
                     home_b2b=False,
                     away_b2b=False,
                 )
@@ -356,8 +364,10 @@ def test_season_lines_sum_the_regular_season_games_final_through_the_date(
     assert center == PlayerLine(WARRIORS[0], GSW, 48.0, 5.0, 10, 12, 1, 4, 1, 4, 3, 1, 1, 2, 2)
     assert {line.listed_position for line in lines if line.player_id != WARRIORS[0]} == {3.0}
     assert [line.minutes for line in lines if line.team_id == GSW] == [48.0] * 4 + [47.5, 0.5]
-    # The next day adds the second regular-season game, not the playoff game.
-    assert later_teams[GSW] == TeamLine(GSW, 2, 96.0, 2 * estimate, 120, 170)
+    # The next day adds the second regular-season game, not the playoff game, scored as the
+    # schedule has it.
+    assert later_teams[GSW] == TeamLine(GSW, 2, 96.0, 2 * estimate, 130, 175)
+    assert later_teams[DEN] == TeamLine(DEN, 2, 96.0, 2 * estimate, 175, 130)
     assert next(line for line in later if line.player_id == NUGGETS[0]).pts == 30
 
 

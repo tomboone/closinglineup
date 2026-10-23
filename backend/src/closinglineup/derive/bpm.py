@@ -12,7 +12,8 @@ The calculation, per team over the regular-season games final through the snapsh
 
 1. Every stat is per 100 team possessions with the player on the floor: his share of the team's
    minutes times its possessions, estimated from the box score as Basketball Reference does
-   (`possessions`).
+   (`possessions`). The team's points for and against are each game's final score (`game`), its
+   players' sums where a score is missing.
 2. His position (1.0, a point guard, to 5.0, a center) and offensive role (1.0, a creator, to 5.0,
    a receiver) are regressed from his shares of the team's rebounds, steals, fouls, assists and
    blocks, and of its assists and "threshold points", the points above a shooting efficiency 0.33
@@ -55,8 +56,9 @@ from closinglineup.season import season_label
 SOURCE: ImpactSource = "bpm_local"
 # A player has a row once he has played this many minutes.
 MIN_MINUTES = 1.0
-# Regular-season game IDs: `00`, then season type 2 (`season`). The Cup final, type 6, is left out,
-# as it is from the league's regular-season totals.
+# Regular-season game IDs: `00`, then season type 2 (`season`). Not `game.phase`: the Cup
+# quarterfinals and semifinals are `cup_knockout` but count in the league's regular-season totals,
+# and the Cup final, type 6, does not.
 REGULAR_SEASON_PREFIX = "002"
 
 
@@ -293,17 +295,19 @@ def _team_bpm(lines: Sequence[PlayerLine], team: TeamLine, league_ortg: float) -
     def share_of(value: float, team_value: float, share: float) -> float:
         return value / (team_value * share) if team_value else 0.0
 
-    shares: list[float] = []
+    # The player's share of the team's floor time: his minutes over the team's, so a team's
+    # shares sum to five. Not the glossary's minutes share, which is of the five together.
+    floor_shares: list[float] = []
     positions: list[float] = []
     roles: list[float] = []
     per100s: list[dict[str, float]] = []
     for line, box in zip(played, boxes, strict=True):
-        share = line.minutes / team.minutes
+        floor_share = line.minutes / team.minutes
         tsa = box["fga"] + FTA_WEIGHT * box["fta"]
         threshold = box["pts"] - (pts_per_tsa - THRESHOLD_BELOW_TEAM) * tsa
-        pct = {stat: share_of(box[stat], totals[stat], share) for stat in STATS}
-        pct_trb = share_of(box["orb"] + box["drb"], team_trb, share)
-        pct_threshold = share_of(threshold, team_threshold, share)
+        pct = {stat: share_of(box[stat], totals[stat], floor_share) for stat in STATS}
+        pct_trb = share_of(box["orb"] + box["drb"], team_trb, floor_share)
+        pct_threshold = share_of(threshold, team_threshold, floor_share)
         p0, p_trb, p_stl, p_pf, p_ast, p_blk = POSITION_REGRESSION
         position = (
             p0
@@ -315,11 +319,11 @@ def _team_bpm(lines: Sequence[PlayerLine], team: TeamLine, league_ortg: float) -
         )
         r0, r_ast, r_threshold = ROLE_REGRESSION
         role = r0 + r_ast * pct["ast"] + r_threshold * pct_threshold
-        on_floor = team.possessions * share
+        on_floor = team.possessions * floor_share
         per100 = {stat: box[stat] * 100 / on_floor for stat in STATS}
         adjusted_pts = box["pts"] - (pts_per_tsa - BASELINE_PTS_PER_TSA) * tsa
         per100["pts"] = adjusted_pts * 100 / on_floor
-        shares.append(share)
+        floor_shares.append(floor_share)
         positions.append(_with_prior(position, line.minutes, line.listed_position))
         roles.append(_with_prior(role, line.minutes, ROLE_PRIOR))
         per100s.append(per100)
@@ -338,9 +342,11 @@ def _team_bpm(lines: Sequence[PlayerLine], team: TeamLine, league_ortg: float) -
     lead_bonus = LEAD_EFFECT / 2 * (margin / team.games / 2)
     net_rating = margin / team.possessions * 100 + lead_bonus
     off_rating = team.pts / team.possessions * 100 - league_ortg + lead_bonus / 2
-    # Shares sum to five, so a fifth of the gap added to each player closes it.
-    adjustment = (net_rating - sum(b * s for (b, _), s in zip(raw, shares, strict=True))) / 5
-    off_adjustment = (off_rating - sum(o * s for (_, o), s in zip(raw, shares, strict=True))) / 5
+    # The shares sum to five, so a fifth of the gap added to each player closes it.
+    team_bpm = sum(b * s for (b, _), s in zip(raw, floor_shares, strict=True))
+    team_obpm = sum(o * s for (_, o), s in zip(raw, floor_shares, strict=True))
+    adjustment = (net_rating - team_bpm) / 5
+    off_adjustment = (off_rating - team_obpm) / 5
     return [
         PlayerBpm(
             line.player_id,
@@ -458,7 +464,7 @@ def season_lines(
     left out: its possessions cannot be estimated, and the team's minutes would not cover its
     players'."""
     rows = session.execute(
-        select(PlayerGame, Player.position)
+        select(PlayerGame, Player.position, Game.home_team_id, Game.home_score, Game.away_score)
         .join(Game, Game.game_id == PlayerGame.game_id)
         .outerjoin(Player, Player.nba_player_id == PlayerGame.player_id)
         .where(
@@ -473,10 +479,16 @@ def season_lines(
     games: dict[str, dict[int, list[tuple[PlayerGame, str | None]]]] = defaultdict(
         lambda: defaultdict(list)
     )
-    for row, position in rows:
+    # Each game's final score by team, where the schedule gave one; else its players' points.
+    scores: dict[str, dict[int, int]] = {}
+    for row, position, home_team_id, home_score, away_score in rows:
         games[row.game_id][row.team_id].append((row, position))
+        if home_score is not None and away_score is not None:
+            scores.setdefault(row.game_id, {home_team_id: home_score})
+            if row.team_id != home_team_id:
+                scores[row.game_id][row.team_id] = away_score
     teams: dict[int, _TeamSums] = defaultdict(_TeamSums)
-    for sides in games.values():
+    for game_id, sides in games.items():
         if len(sides) != 2:
             continue
         boxes: dict[int, _Sums] = {}
@@ -485,6 +497,7 @@ def season_lines(
             for row, _ in team_rows:
                 box.add(row)
             boxes[team_id] = box
+        score = scores.get(game_id, {})
         for team_id, team_rows in sides.items():
             (opp_id,) = set(boxes) - {team_id}
             team = teams[team_id]
@@ -492,8 +505,8 @@ def season_lines(
             # Five players' seconds make the game clock's minutes.
             team.minutes += boxes[team_id].seconds / 300
             team.possessions += possessions(boxes[team_id].box, boxes[opp_id].box)
-            team.pts += boxes[team_id].pts
-            team.opp_pts += boxes[opp_id].pts
+            team.pts += score.get(team_id, boxes[team_id].pts)
+            team.opp_pts += score.get(opp_id, boxes[opp_id].pts)
             for row, position in team_rows:
                 player = team.players.setdefault(row.player_id, _Sums(position=position))
                 player.add(row)
