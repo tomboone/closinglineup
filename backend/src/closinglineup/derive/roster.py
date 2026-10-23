@@ -29,15 +29,20 @@ a game or roster opened has what the roster's `HOW_ACQUIRED` names, else the con
 player's last span if that was on the same team, else `standard`. Its `source` is
 what opened it: `transaction`, `player_game` or `commonteamroster`.
 
-G League assignments and recalls do not move a player off his team. NBA.com's player-movement feed
-has none (`sources.transactions`), so `current_g_league_assignment` is False for every player until
-a source of them lands.
+G League assignments and recalls do not move a player off his team. `current_g_league_assignment`
+reads them from the official injury report (`injury_status`, `source='pdf'`), which lists a player
+on assignment as `G League - On Assignment` whatever his status: his latest line on or before the
+day says whether he is assigned, and a newer report with any line for his team that omits him means
+he is recalled, since a report lists every unavailable player of each team whose game it covers.
+ESPN's fallback rows are ignored, as their reasons are body parts, not roster status. NBA.com's
+player-movement feed carries no `assign` / `recall` rows (`sources.transactions`); should one
+appear, it decides from its date on, over a report line of that date or earlier.
 """
 
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta, tzinfo
+from datetime import date, datetime, time, timedelta, tzinfo
 from enum import IntEnum
 from typing import NamedTuple, cast
 
@@ -45,13 +50,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from closinglineup.db.models import Base, Game, PlayerGame, RunStatus, Transaction
+from closinglineup.db.models import Base, Game, InjuryStatus, PlayerGame, RunStatus, Transaction
 from closinglineup.db.replace import replace_rows
+from closinglineup.injuries import PDF_SOURCE
 from closinglineup.load.loader import NATURAL_KEYS, LoadResult
 from closinglineup.parse.roster import PARTICIPATION_SOURCE, ROSTER_SOURCE, contract_type
 from closinglineup.parse.rows import ContractType, RosterMembershipRow
 from closinglineup.pipeline import PAYLOAD_ERRORS, roster_snapshots
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.injury_pdf import EASTERN
 from closinglineup.sources.transactions import TransactionRow, TransactionType
 
 TABLE = "roster_membership"
@@ -63,6 +70,8 @@ ONE_DAY = timedelta(days=1)
 # The transaction types that put a player on `to_team_id` with the contract its description names.
 JOIN_TYPES = frozenset({"sign", "two_way_sign", "two_way_convert"})
 ASSIGN, RECALL = "assign", "recall"
+# The injury report's reason for a player on G League assignment, as the parser stores it.
+ON_ASSIGNMENT = "G League - On Assignment"
 
 
 class _Kind(IntEnum):
@@ -257,10 +266,44 @@ def rebuild_roster_membership(db: sessionmaker[Session], cache: RawCache, tz: tz
 
 
 def current_g_league_assignment(session: Session, player_id: int, day: date) -> bool:
-    """Whether the player's latest G League assignment on or before `day` has not been followed by
-    a recall. An assignment and a recall on the same day read as recalled."""
-    latest = session.scalars(
-        select(Transaction.type)
+    """Whether the player is on G League assignment on `day`, from the official injury report: his
+    latest `source='pdf'` line for a game on or before `day`, reported by the end of `day` in
+    Eastern time, says `G League - On Assignment`, and no newer such report has a line for his
+    team, which would list him if he were still unavailable. A day his team does not play carries
+    the last report's state over. An `assign` / `recall` transaction dated on or after that line's
+    Eastern date, or with no line, decides instead; an assignment and a recall on the same day
+    read as recalled."""
+    end = datetime.combine(day + ONE_DAY, time(), EASTERN)
+    line = session.execute(
+        select(InjuryStatus.team_id, InjuryStatus.report_datetime, InjuryStatus.reason)
+        .where(
+            InjuryStatus.player_id == player_id,
+            InjuryStatus.source == PDF_SOURCE,
+            InjuryStatus.game_date <= day,
+            InjuryStatus.report_datetime < end,
+        )
+        .order_by(InjuryStatus.report_datetime.desc(), InjuryStatus.game_date.desc())
+        .limit(1)
+    ).first()
+    assigned = False
+    reported: date | None = None
+    if line is not None:
+        team_id, at, reason = line
+        reported = at.astimezone(EASTERN).date()
+        newer = session.scalar(
+            select(InjuryStatus.id)
+            .where(
+                InjuryStatus.team_id == team_id,
+                InjuryStatus.source == PDF_SOURCE,
+                InjuryStatus.game_date <= day,
+                InjuryStatus.report_datetime > at,
+                InjuryStatus.report_datetime < end,
+            )
+            .limit(1)
+        )
+        assigned = reason == ON_ASSIGNMENT and newer is None
+    move = session.execute(
+        select(Transaction.date, Transaction.type)
         .where(
             Transaction.player_id == player_id,
             Transaction.type.in_((ASSIGN, RECALL)),
@@ -269,7 +312,9 @@ def current_g_league_assignment(session: Session, player_id: int, day: date) -> 
         .order_by(Transaction.date.desc(), (Transaction.type == RECALL).desc())
         .limit(1)
     ).first()
-    return latest == ASSIGN
+    if move is not None and (reported is None or move.date >= reported):
+        return move.type == ASSIGN
+    return assigned
 
 
 def _transactions(session: Session) -> list[TransactionRow]:
