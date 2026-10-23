@@ -25,6 +25,7 @@ from closinglineup.parse.rows import (
     MatchupRow,
     PlayerGameRow,
     PlayerRow,
+    PossessionLineupRow,
     PossessionRow,
     RosterMembershipRow,
     Row,
@@ -45,6 +46,7 @@ ROW_MODELS: dict[str, type[Row]] = {
     "matchup": MatchupRow,
     "stint": StintRow,
     "possession": PossessionRow,
+    "possession_lineup": PossessionLineupRow,
 }
 # Every table whose files are keyed by the raw cache key of the response they are parsed from.
 KEYED_ROW_MODELS: dict[str, type[Row]] = {"shot": ShotRow}

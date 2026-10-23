@@ -159,6 +159,20 @@ class PossessionRow(Row):
     counted: bool
 
 
+class PossessionLineupRow(Row):
+    """One five NBA.com credits with a possession, on offense or defense (`possession_lineup`).
+
+    A possession a substitution splits has a row for each team's five on either side of it; one
+    NBA.com does not count at all has none. Reconciliation sums these (NEU-1900).
+    """
+
+    game_id: GameId
+    period: int
+    number: int
+    team_id: int
+    lineup_key: str
+
+
 class ShotRow(Row):
     """One field-goal attempt from `shotchartdetail` (`shot`).
 

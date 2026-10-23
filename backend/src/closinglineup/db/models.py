@@ -268,6 +268,21 @@ class Possession(Timestamps, Base):
     counted: Mapped[bool]
 
 
+class PossessionLineup(Timestamps, Base):
+    """One five NBA.com credits with a possession, as `parse.pbp.PossessionLineupRow` emits it;
+    read only by reconciliation (NEU-1900)."""
+
+    __tablename__ = "possession_lineup"
+    __table_args__ = (UniqueConstraint("game_id", "period", "number", "team_id", "lineup_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    game_id: Mapped[str] = mapped_column(ForeignKey("game.game_id"))
+    period: Mapped[int]
+    number: Mapped[int]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    lineup_key: Mapped[str] = mapped_column(String)
+
+
 class Shot(Timestamps, Base):
     """One field-goal attempt from `shotchartdetail`. `event_num` is its `GAME_EVENT_ID`, not in
     spec §6.2: it is the shot's natural key, which a reload upserts on."""

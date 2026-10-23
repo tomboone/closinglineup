@@ -20,7 +20,10 @@ QUIRK_GAME = "0022500064"
 # OKC at SAS, in the 2026-27 feed: player-less actions have no `personId`, and a rebound is
 # listed before its shot.
 FEED_2026_27_GAME = "0022600003"
-GAMES = (OVERTIME_GAME, QUIRK_GAME, FEED_2026_27_GAME)
+# ATL at NOP, which reconciliation matches to NBA.com's per-game possessions: clock overlap alone
+# misses a steal and a foul logged before a substitution at a possession's start (NEU-1900).
+RECONCILE_GAME = "0022500270"
+GAMES = (OVERTIME_GAME, QUIRK_GAME, FEED_2026_27_GAME, RECONCILE_GAME)
 
 GSW = 1610612744
 # GSW's five for all of overtime in the overtime game.
@@ -244,6 +247,41 @@ def test_stints_cover_each_period_once_from_both_sides(data_dir: Path, game_id: 
     assert len(views) == len(stints)
     for period, start, lineup, opp_lineup in views:
         assert (period, start, opp_lineup, lineup) in views
+
+
+@pytest.mark.parametrize("game_id", GAMES)
+def test_rows_for_game_reads_pbpstats_once_for_what_the_others_read(
+    data_dir: Path, game_id: str
+) -> None:
+    rows = pbp.rows_for_game(data_dir, game_id)
+
+    assert rows.stints == pbp.stints_for_game(data_dir, game_id)
+    assert rows.possessions == pbp.possessions_for_game(data_dir, game_id)
+
+
+@pytest.mark.parametrize("game_id", GAMES)
+def test_every_possession_has_a_five_of_each_team_but_those_nba_com_does_not_count(
+    data_dir: Path, game_id: str
+) -> None:
+    rows = pbp.rows_for_game(data_dir, game_id)
+
+    teams = {stint.team_id for stint in rows.stints}
+    credited: dict[tuple[int, int], set[int]] = {}
+    for row in rows.possession_lineups:
+        credited.setdefault((row.period, row.number), set()).add(row.team_id)
+        assert len(row.lineup_key.split("-")) == 5
+    uncounted = 0
+    for p in rows.possessions:
+        instant = p.start_sec == p.end_sec
+        if instant and (
+            (p.end_type == "EndOfPeriod" and not p.counted) or p.end_type == "Substitution"
+        ):
+            uncounted += 1
+            assert (p.period, p.number) not in credited
+        else:
+            assert credited[(p.period, p.number)] == teams
+    # A possession a substitution splits has a row for each team's five on either side of it.
+    assert len(rows.possession_lineups) > 2 * (len(rows.possessions) - uncounted)
 
 
 def test_overtime_is_a_fifth_period(data_dir: Path) -> None:

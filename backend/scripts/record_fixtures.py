@@ -184,7 +184,7 @@ def record_stats(options: Options) -> None:
 # on 2025-11-26, whose substitutions logged between free throws and end-of-quarter heave are the
 # ordering quirks the stint builder has to handle; and OKC at SAS on 2026-10-20, in the 2026-27
 # feed, whose player-less actions have no `personId` and whose actions are out of order.
-PBP_GAME_IDS = (STATS_GAME_ID, "0022500064", "0022600003")
+PBP_GAME_IDS = (STATS_GAME_ID, "0022500064", "0022600003", "0022500270")
 PBP_FIXTURES = "pbp"
 
 

@@ -20,6 +20,7 @@ DATA_TABLES = {
     "player_game",
     "stint",
     "possession",
+    "possession_lineup",
     "shot",
     "matchup",
 }

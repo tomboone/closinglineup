@@ -58,7 +58,7 @@ A continuous span within one period during which the same ten players were on th
 _Avoid_: lineup segment, shift
 
 **Lineup**:
-A set of five teammates on the floor together, identified by their sorted player IDs. Lineup results are sums over stints. Reconciliation alone credits possessions as NBA.com does: each one to every lineup on the floor for any of it, so one a substitution splits counts for both (NEU-1899).
+A set of five teammates on the floor together, identified by their sorted player IDs. Lineup results are sums over stints. Reconciliation alone credits possessions as NBA.com does: each one to every lineup on the floor for any of it, so one a substitution splits counts for both (NEU-1899), and at a substitution logged at the instant one starts or ends, to the lineups on the floor for the events there (NEU-1900). These are its **possession lineups**.
 
 **Possession**:
 One team's offensive possession as pbpstats emits it, with how it started, how it ended and the score margin.

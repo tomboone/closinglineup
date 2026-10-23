@@ -113,9 +113,11 @@ def test_a_date_is_parsed_into_a_file_per_table(tmp_path: Path) -> None:
         "matchup": store.read("matchup", DAY).num_rows,
         "stint": store.read("stint", DAY).num_rows,
         "possession": store.read("possession", DAY).num_rows,
+        "possession_lineup": store.read("possession_lineup", DAY).num_rows,
     }
-    assert min(report.rows["matchup"], report.rows["stint"], report.rows["possession"]) > 0
-    for table in ("player_game", "stint", "possession"):
+    pbp_tables = ("stint", "possession", "possession_lineup")
+    assert min(report.rows[table] for table in ("matchup", *pbp_tables)) > 0
+    for table in ("player_game", *pbp_tables):
         assert set(store.read(table, DAY).column("game_id").to_pylist()) == {GAME}
 
 
@@ -132,6 +134,7 @@ def test_a_game_without_its_play_by_play_keeps_its_box_rows_and_is_reported(
     )
     assert report.rows["player_game"] == PLAYER_GAMES
     assert report.rows["stint"] == report.rows["possession"] == 0
+    assert report.rows["possession_lineup"] == 0
 
 
 def test_a_roster_opens_on_the_day_it_was_fetched_in_tz(tmp_path: Path) -> None:
