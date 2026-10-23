@@ -93,6 +93,79 @@ def test_materialize_installs_the_committed_overrides(cache: RawCache) -> None:
         assert (overrides / name).read_bytes() == (pbp.OVERRIDES_SOURCE / name).read_bytes()
 
 
+def _commit_action_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overrides: dict[str, Any]
+) -> RawCache:
+    """A cache holding the overtime game, materialized against `overrides` as the committed
+    action overrides."""
+    committed = tmp_path / "committed"
+    committed.mkdir()
+    (committed / "missing_period_starters.json").write_text("{}")
+    (committed / pbp.ACTION_OVERRIDES).write_text(json.dumps(overrides))
+    monkeypatch.setattr(pbp, "OVERRIDES_SOURCE", committed)
+    cache = RawCache(tmp_path / "data")
+    _cache_pbp(cache, OVERTIME_GAME, _fixture(nba_cdn.PLAYBYPLAY, OVERTIME_GAME))
+    return cache
+
+
+def _materialized_actions(path: Path) -> dict[int, Payload]:
+    return {a["actionNumber"]: a for a in json.loads(path.read_text())["game"]["actions"]}
+
+
+def test_an_action_override_changes_that_action_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _fixture(nba_cdn.PLAYBYPLAY, OVERTIME_GAME)["game"]["actions"]
+    target = next(a for a in raw if a["actionType"] == "rebound")
+    number = target["actionNumber"]
+    overrides = {OVERTIME_GAME: {str(number): {"clock": "PT00M01.00S"}}}
+    cache = _commit_action_overrides(tmp_path, monkeypatch, overrides)
+
+    actions = _materialized_actions(pbp.materialize(cache, OVERTIME_GAME))
+
+    expected = {a["actionNumber"]: a for a in raw if a["actionType"] != "game"}
+    assert actions[number] == {**target, "clock": "PT00M01.00S"}
+    assert {n: a for n, a in actions.items() if n != number} == {
+        n: a for n, a in expected.items() if n != number
+    }
+
+
+def test_a_feed_with_no_action_override_passes_through_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    overrides = {QUIRK_GAME: {"2": {"clock": "PT00M01.00S"}}}
+    cache = _commit_action_overrides(tmp_path, monkeypatch, overrides)
+
+    path = pbp.materialize(cache, OVERTIME_GAME)
+
+    raw = _fixture(nba_cdn.PLAYBYPLAY, OVERTIME_GAME)["game"]["actions"]
+    assert json.loads(path.read_text())["game"]["actions"] == [
+        a for a in raw if a["actionType"] != "game"
+    ]
+
+
+def test_an_action_override_for_an_action_not_in_the_feed_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    overrides = {OVERTIME_GAME: {"99999": {"clock": "PT00M01.00S"}}}
+    cache = _commit_action_overrides(tmp_path, monkeypatch, overrides)
+
+    with pytest.raises(pbp.PbpError, match="99999"):
+        pbp.materialize(cache, OVERTIME_GAME)
+
+
+def test_the_committed_action_overrides_name_known_fields() -> None:
+    overrides = json.loads((pbp.OVERRIDES_SOURCE / pbp.ACTION_OVERRIDES).read_text())
+    raw = _fixture(nba_cdn.PLAYBYPLAY, OVERTIME_GAME)["game"]["actions"]
+    fields = {key for action in raw for key in action}
+
+    assert overrides
+    for game in overrides.values():
+        for changes in game.values():
+            assert changes
+            assert set(changes) <= fields
+
+
 def test_materialize_needs_the_cached_play_by_play(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match=OVERTIME_GAME):
         pbp.materialize(RawCache(tmp_path), OVERTIME_GAME)
@@ -238,6 +311,7 @@ def test_missing_period_starters_override_is_read(
     committed.mkdir()
     override = {OVERTIME_GAME: {"5": {str(GSW): GSW_OVERTIME_FIVE}}}
     (committed / "missing_period_starters.json").write_text(json.dumps(override))
+    (committed / pbp.ACTION_OVERRIDES).write_text("{}")
     monkeypatch.setattr(pbp, "OVERRIDES_SOURCE", committed)
     data_dir = tmp_path / "data"
     cache = RawCache(data_dir)
