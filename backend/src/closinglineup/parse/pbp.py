@@ -65,9 +65,10 @@ it decides by the events there, not the clock. Matched on NBA.com's per-game `le
 and `leagueplayerondetails` for 32 games of 2025-26, a possession counts for each team's fives:
 
 - on the floor while the clock runs in it;
-- on the floor at the events that open it at its starting instant, up to the team's first
-  substitution or a timeout there, and at the defensive rebound that won it, if the team's
-  substitution there comes before any timeout;
+- if it has time on it, on the floor at the events that open it at its starting instant, up to
+  the team's first substitution or a timeout there, and at the rebound that won it (a rebound
+  ends a possession only when it is defensive), if the team's substitution there comes before
+  any timeout;
 - on the floor at any rebound in it, a missed free throw's included;
 - on the floor at its ending event.
 
