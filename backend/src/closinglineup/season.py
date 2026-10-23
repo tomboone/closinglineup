@@ -54,6 +54,11 @@ def _label(start: int) -> str:
     return f"{start}-{(start + 1) % 100:02d}"
 
 
+def espn_season(d: date) -> int:
+    """ESPN names a season by the year it ends: 2027 for 2026-27."""
+    return season_start_year(d) + 1
+
+
 def season_label(d: date) -> str:
     return _label(season_start_year(d))
 

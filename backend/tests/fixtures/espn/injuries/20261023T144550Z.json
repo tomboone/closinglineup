@@ -1,0 +1,2667 @@
+{
+ "injuries": [
+  {
+   "displayName": "Atlanta Hawks",
+   "id": "1",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Mouhamed Gueye",
+      "firstName": "Mouhamed",
+      "lastName": "Gueye",
+      "team": {
+       "abbreviation": "ATL",
+       "displayName": "Atlanta Hawks",
+       "id": "1"
+      }
+     },
+     "date": "2026-10-19T19:38Z",
+     "details": {
+      "detail": "Fracture",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-20",
+      "side": "Left",
+      "type": "Foot"
+     },
+     "id": "-58751",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Henri Veesaar",
+      "firstName": "Henri",
+      "lastName": "Veesaar",
+      "team": {
+       "abbreviation": "ATL",
+       "displayName": "Atlanta Hawks",
+       "id": "1"
+      }
+     },
+     "date": "2026-09-21T19:50Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "OFS",
+       "description": "OFS"
+      },
+      "location": "Leg",
+      "returnDate": "2027-07-01",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "-57577",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Boston Celtics",
+   "id": "2",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Devin Carter",
+      "firstName": "Devin",
+      "lastName": "Carter",
+      "team": {
+       "abbreviation": "BOS",
+       "displayName": "Boston Celtics",
+       "id": "2"
+      }
+     },
+     "date": "2026-10-18T14:49Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Other",
+      "returnDate": "2026-11-08",
+      "type": "Illness"
+     },
+     "id": "535118",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Brooklyn Nets",
+   "id": "17",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Tyler Bilodeau",
+      "firstName": "Tyler",
+      "lastName": "Bilodeau",
+      "team": {
+       "abbreviation": "BKN",
+       "displayName": "Brooklyn Nets",
+       "id": "17"
+      }
+     },
+     "date": "2026-10-22T03:39Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Arm",
+      "returnDate": "2026-10-24",
+      "side": "Not Specified",
+      "type": "Shoulder"
+     },
+     "id": "-59156",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Charlotte Hornets",
+   "id": "30",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Grant Williams",
+      "firstName": "Grant",
+      "lastName": "Williams",
+      "team": {
+       "abbreviation": "CHA",
+       "displayName": "Charlotte Hornets",
+       "id": "30"
+      }
+     },
+     "date": "2026-10-22T21:10Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Right",
+      "type": "Hamstring"
+     },
+     "id": "535601",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Coby White",
+      "firstName": "Coby",
+      "lastName": "White",
+      "team": {
+       "abbreviation": "CHA",
+       "displayName": "Charlotte Hornets",
+       "id": "30"
+      }
+     },
+     "date": "2026-10-22T21:07Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Left",
+      "type": "Calf"
+     },
+     "id": "535599",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Kon Knueppel",
+      "firstName": "Kon",
+      "lastName": "Knueppel",
+      "team": {
+       "abbreviation": "CHA",
+       "displayName": "Charlotte Hornets",
+       "id": "30"
+      }
+     },
+     "date": "2026-10-22T21:05Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Left",
+      "type": "Hamstring"
+     },
+     "id": "535598",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Kylan Boswell",
+      "firstName": "Kylan",
+      "lastName": "Boswell",
+      "team": {
+       "abbreviation": "CHA",
+       "displayName": "Charlotte Hornets",
+       "id": "30"
+      }
+     },
+     "date": "2026-10-20T20:55Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-02",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "535247",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Chicago Bulls",
+   "id": "4",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Dailyn Swain",
+      "firstName": "Dailyn",
+      "lastName": "Swain",
+      "team": {
+       "abbreviation": "CHI",
+       "displayName": "Chicago Bulls",
+       "id": "4"
+      }
+     },
+     "date": "2026-10-22T20:11Z",
+     "details": {
+      "detail": "Not Specified",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Other",
+      "returnDate": "2026-10-23",
+      "side": "Not Specified",
+      "type": "Illness"
+     },
+     "id": "535577",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jordan Hawkins",
+      "firstName": "Jordan",
+      "lastName": "Hawkins",
+      "team": {
+       "abbreviation": "CHI",
+       "displayName": "Chicago Bulls",
+       "id": "4"
+      }
+     },
+     "date": "2026-10-22T20:09Z",
+     "details": {
+      "detail": "Not Specified",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Other",
+      "returnDate": "2026-10-23",
+      "side": "Not Specified",
+      "type": "Illness"
+     },
+     "id": "535575",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Zach Collins",
+      "firstName": "Zach",
+      "lastName": "Collins",
+      "team": {
+       "abbreviation": "CHI",
+       "displayName": "Chicago Bulls",
+       "id": "4"
+      }
+     },
+     "date": "2026-10-22T20:07Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "type": "Quadriceps"
+     },
+     "id": "535574",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Tobe Awaka",
+      "firstName": "Tobe",
+      "lastName": "Awaka",
+      "team": {
+       "abbreviation": "CHI",
+       "displayName": "Chicago Bulls",
+       "id": "4"
+      }
+     },
+     "date": "2026-10-22T20:05Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "535573",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Josh Giddey",
+      "firstName": "Josh",
+      "lastName": "Giddey",
+      "team": {
+       "abbreviation": "CHI",
+       "displayName": "Chicago Bulls",
+       "id": "4"
+      }
+     },
+     "date": "2026-10-22T20:04Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Arm",
+      "returnDate": "2026-10-23",
+      "type": "Wrist"
+     },
+     "id": "535572",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Nic Claxton",
+      "firstName": "Nic",
+      "lastName": "Claxton",
+      "team": {
+       "abbreviation": "CHI",
+       "displayName": "Chicago Bulls",
+       "id": "4"
+      }
+     },
+     "date": "2026-10-19T17:38Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-04",
+      "side": "Not Specified",
+      "type": "Hamstring"
+     },
+     "id": "535149",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Dallas Mavericks",
+   "id": "6",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Jett Howard",
+      "firstName": "Jett",
+      "lastName": "Howard",
+      "team": {
+       "abbreviation": "DAL",
+       "displayName": "Dallas Mavericks",
+       "id": "6"
+      }
+     },
+     "date": "2026-10-22T20:15Z",
+     "details": {
+      "detail": "Soreness",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Right",
+      "type": "Calf"
+     },
+     "id": "535582",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Caleb Martin",
+      "firstName": "Caleb",
+      "lastName": "Martin",
+      "team": {
+       "abbreviation": "DAL",
+       "displayName": "Dallas Mavericks",
+       "id": "6"
+      }
+     },
+     "date": "2026-10-22T20:15Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Arm",
+      "returnDate": "2026-10-24",
+      "side": "Right",
+      "type": "Thumb"
+     },
+     "id": "535581",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Santi Aldama",
+      "firstName": "Santi",
+      "lastName": "Aldama",
+      "team": {
+       "abbreviation": "DAL",
+       "displayName": "Dallas Mavericks",
+       "id": "6"
+      }
+     },
+     "date": "2026-10-22T20:13Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "535580",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Tarik Biberovic",
+      "firstName": "Tarik",
+      "lastName": "Biberovic",
+      "team": {
+       "abbreviation": "DAL",
+       "displayName": "Dallas Mavericks",
+       "id": "6"
+      }
+     },
+     "date": "2026-10-22T20:12Z",
+     "details": {
+      "detail": "Inflammation",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Right",
+      "type": "Heel"
+     },
+     "id": "535578",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Dereck Lively II",
+      "firstName": "Dereck",
+      "lastName": "Lively II",
+      "team": {
+       "abbreviation": "DAL",
+       "displayName": "Dallas Mavericks",
+       "id": "6"
+      }
+     },
+     "date": "2026-10-22T20:10Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-26",
+      "side": "Right",
+      "type": "Foot"
+     },
+     "id": "535576",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Denver Nuggets",
+   "id": "7",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Spencer Jones",
+      "firstName": "Spencer",
+      "lastName": "Jones",
+      "team": {
+       "abbreviation": "DEN",
+       "displayName": "Denver Nuggets",
+       "id": "7"
+      }
+     },
+     "date": "2026-10-23T05:19Z",
+     "details": {
+      "detail": "Not Specified",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Not Specified",
+      "type": "Hamstring"
+     },
+     "id": "-59404",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Cameron Johnson",
+      "firstName": "Cameron",
+      "lastName": "Johnson",
+      "team": {
+       "abbreviation": "DEN",
+       "displayName": "Denver Nuggets",
+       "id": "7"
+      }
+     },
+     "date": "2026-10-23T04:24Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Right",
+      "type": "Ankle"
+     },
+     "id": "535636",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Julian Strawther",
+      "firstName": "Julian",
+      "lastName": "Strawther",
+      "team": {
+       "abbreviation": "DEN",
+       "displayName": "Denver Nuggets",
+       "id": "7"
+      }
+     },
+     "date": "2026-10-17T00:52Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-29",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "534858",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Detroit Pistons",
+   "id": "8",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Taurean Prince",
+      "firstName": "Taurean",
+      "lastName": "Prince",
+      "team": {
+       "abbreviation": "DET",
+       "displayName": "Detroit Pistons",
+       "id": "8"
+      }
+     },
+     "date": "2026-10-22T19:04Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Other",
+      "returnDate": "2026-10-23",
+      "type": "Personal"
+     },
+     "id": "535560",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Golden State Warriors",
+   "id": "9",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Charles Bassey",
+      "firstName": "Charles",
+      "lastName": "Bassey",
+      "team": {
+       "abbreviation": "GS",
+       "displayName": "Golden State Warriors",
+       "id": "9"
+      }
+     },
+     "date": "2026-10-23T00:12Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "type": "Knee"
+     },
+     "id": "535628",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Brandin Podziemski",
+      "firstName": "Brandin",
+      "lastName": "Podziemski",
+      "team": {
+       "abbreviation": "GS",
+       "displayName": "Golden State Warriors",
+       "id": "9"
+      }
+     },
+     "date": "2026-10-23T00:04Z",
+     "details": {
+      "detail": "Soreness",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Torso",
+      "returnDate": "2026-10-23",
+      "type": "Back"
+     },
+     "id": "535623",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Kristaps Porzingis",
+      "firstName": "Kristaps",
+      "lastName": "Porzingis",
+      "team": {
+       "abbreviation": "GS",
+       "displayName": "Golden State Warriors",
+       "id": "9"
+      }
+     },
+     "date": "2026-10-21T18:27Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Other",
+      "returnDate": "2026-12-01",
+      "type": "Illness"
+     },
+     "id": "535362",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Moses Moody",
+      "firstName": "Moses",
+      "lastName": "Moody",
+      "team": {
+       "abbreviation": "GS",
+       "displayName": "Golden State Warriors",
+       "id": "9"
+      }
+     },
+     "date": "2026-10-16T16:14Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-12-01",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "534700",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jimmy Butler III",
+      "firstName": "Jimmy",
+      "lastName": "Butler III",
+      "team": {
+       "abbreviation": "GS",
+       "displayName": "Golden State Warriors",
+       "id": "9"
+      }
+     },
+     "date": "2026-10-16T16:11Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2027-01-02",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "534699",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Houston Rockets",
+   "id": "10",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Steven Adams",
+      "firstName": "Steven",
+      "lastName": "Adams",
+      "team": {
+       "abbreviation": "HOU",
+       "displayName": "Houston Rockets",
+       "id": "10"
+      }
+     },
+     "date": "2026-10-22T21:12Z",
+     "details": {
+      "detail": "Soreness",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Right",
+      "type": "Calf"
+     },
+     "id": "535602",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Reed Sheppard",
+      "firstName": "Reed",
+      "lastName": "Sheppard",
+      "team": {
+       "abbreviation": "HOU",
+       "displayName": "Houston Rockets",
+       "id": "10"
+      }
+     },
+     "date": "2026-10-22T21:09Z",
+     "details": {
+      "detail": "Bruise",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "535600",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Indiana Pacers",
+   "id": "11",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Ben Sheppard",
+      "firstName": "Ben",
+      "lastName": "Sheppard",
+      "team": {
+       "abbreviation": "IND",
+       "displayName": "Indiana Pacers",
+       "id": "11"
+      }
+     },
+     "date": "2026-10-22T20:54Z",
+     "details": {
+      "detail": "Soreness",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "535594",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Aaron Nesmith",
+      "firstName": "Aaron",
+      "lastName": "Nesmith",
+      "team": {
+       "abbreviation": "IND",
+       "displayName": "Indiana Pacers",
+       "id": "11"
+      }
+     },
+     "date": "2026-10-22T20:50Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Hamstring"
+     },
+     "id": "535591",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "T.J. McConnell",
+      "firstName": "T.J.",
+      "lastName": "McConnell",
+      "team": {
+       "abbreviation": "IND",
+       "displayName": "Indiana Pacers",
+       "id": "11"
+      }
+     },
+     "date": "2026-10-22T20:49Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-25",
+      "side": "Right",
+      "type": "Hamstring"
+     },
+     "id": "535590",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Johnny Furphy",
+      "firstName": "Johnny",
+      "lastName": "Furphy",
+      "team": {
+       "abbreviation": "IND",
+       "displayName": "Indiana Pacers",
+       "id": "11"
+      }
+     },
+     "date": "2026-02-09T21:43Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2027-01-02",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "518463",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "LA Clippers",
+   "id": "12",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Bradley Beal",
+      "firstName": "Bradley",
+      "lastName": "Beal",
+      "team": {
+       "abbreviation": "LAC",
+       "displayName": "LA Clippers",
+       "id": "12"
+      }
+     },
+     "date": "2026-10-15T01:03Z",
+     "details": {
+      "detail": "Inflammation",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-08",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "534472",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Max Strus",
+      "firstName": "Max",
+      "lastName": "Strus",
+      "team": {
+       "abbreviation": "LAC",
+       "displayName": "LA Clippers",
+       "id": "12"
+      }
+     },
+     "date": "2026-10-05T22:21Z",
+     "details": {
+      "detail": "Plantar Fasciitis",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-08",
+      "side": "Right",
+      "type": "Foot"
+     },
+     "id": "533234",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Yanic Konan Niederhauser",
+      "firstName": "Yanic Konan",
+      "lastName": "Niederhauser",
+      "team": {
+       "abbreviation": "LAC",
+       "displayName": "LA Clippers",
+       "id": "12"
+      }
+     },
+     "date": "2026-09-28T18:07Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-08",
+      "side": "Right",
+      "type": "Foot"
+     },
+     "id": "532876",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Brandon Ingram",
+      "firstName": "Brandon",
+      "lastName": "Ingram",
+      "team": {
+       "abbreviation": "TOR",
+       "displayName": "Toronto Raptors",
+       "id": "28"
+      }
+     },
+     "date": "2026-09-28T18:01Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-08",
+      "side": "Right",
+      "type": "Heel"
+     },
+     "id": "532875",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jordan Miller",
+      "firstName": "Jordan",
+      "lastName": "Miller",
+      "team": {
+       "abbreviation": "LAC",
+       "displayName": "LA Clippers",
+       "id": "12"
+      }
+     },
+     "date": "2026-08-26T20:04Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Arm",
+      "returnDate": "2027-03-02",
+      "side": "Left",
+      "type": "Shoulder"
+     },
+     "id": "532401",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Los Angeles Lakers",
+   "id": "13",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Adou Thiero",
+      "firstName": "Adou",
+      "lastName": "Thiero",
+      "team": {
+       "abbreviation": "LAL",
+       "displayName": "Los Angeles Lakers",
+       "id": "13"
+      }
+     },
+     "date": "2026-10-23T00:10Z",
+     "details": {
+      "detail": "Inflammation",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-25",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "-59342",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Cameron Carr",
+      "firstName": "Cameron",
+      "lastName": "Carr",
+      "team": {
+       "abbreviation": "LAL",
+       "displayName": "Los Angeles Lakers",
+       "id": "13"
+      }
+     },
+     "date": "2026-10-23T00:10Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Torso",
+      "returnDate": "2026-10-25",
+      "side": "Right",
+      "type": "Oblique"
+     },
+     "id": "535627",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jake LaRavia",
+      "firstName": "Jake",
+      "lastName": "LaRavia",
+      "team": {
+       "abbreviation": "LAL",
+       "displayName": "Los Angeles Lakers",
+       "id": "13"
+      }
+     },
+     "date": "2026-10-23T00:10Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Right",
+      "type": "Ankle"
+     },
+     "id": "535626",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Memphis Grizzlies",
+   "id": "29",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Cedric Coward",
+      "firstName": "Cedric",
+      "lastName": "Coward",
+      "team": {
+       "abbreviation": "MEM",
+       "displayName": "Memphis Grizzlies",
+       "id": "29"
+      }
+     },
+     "date": "2026-10-23T00:21Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Arm",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Wrist"
+     },
+     "id": "535630",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Isaiah Stewart",
+      "firstName": "Isaiah",
+      "lastName": "Stewart",
+      "team": {
+       "abbreviation": "MEM",
+       "displayName": "Memphis Grizzlies",
+       "id": "29"
+      }
+     },
+     "date": "2026-10-23T00:16Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Ankle"
+     },
+     "id": "535629",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Minnesota Timberwolves",
+   "id": "16",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Donte DiVincenzo",
+      "firstName": "Donte",
+      "lastName": "DiVincenzo",
+      "team": {
+       "abbreviation": "MIN",
+       "displayName": "Minnesota Timberwolves",
+       "id": "16"
+      }
+     },
+     "date": "2026-10-05T20:53Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2027-04-02",
+      "side": "Right",
+      "type": "Achilles"
+     },
+     "id": "533214",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Oklahoma City Thunder",
+   "id": "25",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Nikola Topic",
+      "firstName": "Nikola",
+      "lastName": "Topic",
+      "team": {
+       "abbreviation": "OKC",
+       "displayName": "Oklahoma City Thunder",
+       "id": "25"
+      }
+     },
+     "date": "2026-10-21T22:13Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Torso",
+      "returnDate": "2026-10-26",
+      "side": "Not Specified",
+      "type": "Back"
+     },
+     "id": "535379",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Thomas Sorber",
+      "firstName": "Thomas",
+      "lastName": "Sorber",
+      "team": {
+       "abbreviation": "OKC",
+       "displayName": "Oklahoma City Thunder",
+       "id": "25"
+      }
+     },
+     "date": "2026-10-21T22:08Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-26",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "535377",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Otega Oweh",
+      "firstName": "Otega",
+      "lastName": "Oweh",
+      "team": {
+       "abbreviation": "OKC",
+       "displayName": "Oklahoma City Thunder",
+       "id": "25"
+      }
+     },
+     "date": "2026-10-15T01:22Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OFS",
+       "description": "OFS"
+      },
+      "location": "Leg",
+      "returnDate": "2027-07-01",
+      "side": "Right",
+      "type": "Achilles"
+     },
+     "id": "534476",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Orlando Magic",
+   "id": "19",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Anthony Black",
+      "firstName": "Anthony",
+      "lastName": "Black",
+      "team": {
+       "abbreviation": "ORL",
+       "displayName": "Orlando Magic",
+       "id": "19"
+      }
+     },
+     "date": "2026-10-22T20:21Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-25",
+      "side": "Right",
+      "type": "Ankle"
+     },
+     "id": "535584",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jonathan Isaac",
+      "firstName": "Jonathan",
+      "lastName": "Isaac",
+      "team": {
+       "abbreviation": "ORL",
+       "displayName": "Orlando Magic",
+       "id": "19"
+      }
+     },
+     "date": "2026-10-22T20:19Z",
+     "details": {
+      "detail": "Not Specified",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-25",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "535583",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Noah Penda",
+      "firstName": "Noah",
+      "lastName": "Penda",
+      "team": {
+       "abbreviation": "ORL",
+       "displayName": "Orlando Magic",
+       "id": "19"
+      }
+     },
+     "date": "2026-10-17T22:19Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-18",
+      "side": "Right",
+      "type": "Hamstring"
+     },
+     "id": "535097",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Izaiyah Nelson",
+      "firstName": "Izaiyah",
+      "lastName": "Nelson",
+      "team": {
+       "abbreviation": "ORL",
+       "displayName": "Orlando Magic",
+       "id": "19"
+      }
+     },
+     "date": "2026-09-28T21:33Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-18",
+      "side": "Left",
+      "type": "Ankle"
+     },
+     "id": "-57605",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Philadelphia 76ers",
+   "id": "20",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Joel Embiid",
+      "firstName": "Joel",
+      "lastName": "Embiid",
+      "team": {
+       "abbreviation": "PHI",
+       "displayName": "Philadelphia 76ers",
+       "id": "20"
+      }
+     },
+     "date": "2026-10-23T14:03Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Other",
+      "returnDate": "2026-10-24",
+      "type": "Rest"
+     },
+     "id": "-59430",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Tacko Fall",
+      "firstName": "Tacko",
+      "lastName": "Fall",
+      "team": {
+       "abbreviation": "PHI",
+       "displayName": "Philadelphia 76ers",
+       "id": "20"
+      }
+     },
+     "date": "2026-10-23T05:21Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Left",
+      "type": "Quadriceps"
+     },
+     "id": "-59411",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Dean Wade",
+      "firstName": "Dean",
+      "lastName": "Wade",
+      "team": {
+       "abbreviation": "PHI",
+       "displayName": "Philadelphia 76ers",
+       "id": "20"
+      }
+     },
+     "date": "2026-10-23T05:20Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Left",
+      "type": "Ankle"
+     },
+     "id": "-59409",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Dominick Barlow",
+      "firstName": "Dominick",
+      "lastName": "Barlow",
+      "team": {
+       "abbreviation": "PHI",
+       "displayName": "Philadelphia 76ers",
+       "id": "20"
+      }
+     },
+     "date": "2026-10-19T21:07Z",
+     "details": {
+      "detail": "Fracture",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Torso",
+      "returnDate": "2026-11-02",
+      "side": "Not Specified",
+      "type": "Back"
+     },
+     "id": "535173",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Ariel Hukporti",
+      "firstName": "Ariel",
+      "lastName": "Hukporti",
+      "team": {
+       "abbreviation": "PHI",
+       "displayName": "Philadelphia 76ers",
+       "id": "20"
+      }
+     },
+     "date": "2026-10-06T19:17Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OFS",
+       "description": "OFS"
+      },
+      "location": "Leg",
+      "returnDate": "2027-10-01",
+      "side": "Right",
+      "type": "Achilles"
+     },
+     "id": "533362",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Phoenix Suns",
+   "id": "21",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Luke Kennard",
+      "firstName": "Luke",
+      "lastName": "Kennard",
+      "team": {
+       "abbreviation": "PHX",
+       "displayName": "Phoenix Suns",
+       "id": "21"
+      }
+     },
+     "date": "2026-10-23T14:03Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "-59431",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Oso Ighodaro",
+      "firstName": "Oso",
+      "lastName": "Ighodaro",
+      "team": {
+       "abbreviation": "PHX",
+       "displayName": "Phoenix Suns",
+       "id": "21"
+      }
+     },
+     "date": "2026-10-22T04:52Z",
+     "details": {
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Torso",
+      "returnDate": "2026-10-24",
+      "side": "Right",
+      "type": "Hip"
+     },
+     "id": "535472",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Mark Williams",
+      "firstName": "Mark",
+      "lastName": "Williams",
+      "team": {
+       "abbreviation": "PHX",
+       "displayName": "Phoenix Suns",
+       "id": "21"
+      }
+     },
+     "date": "2026-09-11T16:03Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Arm",
+      "returnDate": "2027-02-03",
+      "side": "Left",
+      "type": "Shoulder"
+     },
+     "id": "532554",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Portland Trail Blazers",
+   "id": "22",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Branden Carlson",
+      "firstName": "Branden",
+      "lastName": "Carlson",
+      "team": {
+       "abbreviation": "POR",
+       "displayName": "Portland Trail Blazers",
+       "id": "22"
+      }
+     },
+     "date": "2026-10-22T23:48Z",
+     "details": {
+      "detail": "Concussion",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Head",
+      "returnDate": "2026-10-27",
+      "side": "Not Specified",
+      "type": "Concussion"
+     },
+     "id": "535620",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Chris Youngblood",
+      "firstName": "Chris",
+      "lastName": "Youngblood",
+      "team": {
+       "abbreviation": "POR",
+       "displayName": "Portland Trail Blazers",
+       "id": "22"
+      }
+     },
+     "date": "2026-10-22T23:48Z",
+     "details": {
+      "detail": "Soreness",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-27",
+      "side": "Left",
+      "type": "Ankle"
+     },
+     "id": "535619",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Shaedon Sharpe",
+      "firstName": "Shaedon",
+      "lastName": "Sharpe",
+      "team": {
+       "abbreviation": "POR",
+       "displayName": "Portland Trail Blazers",
+       "id": "22"
+      }
+     },
+     "date": "2026-08-24T20:23Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2027-03-02",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "532395",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Sacramento Kings",
+   "id": "23",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Malik Monk",
+      "firstName": "Malik",
+      "lastName": "Monk",
+      "team": {
+       "abbreviation": "SAC",
+       "displayName": "Sacramento Kings",
+       "id": "23"
+      }
+     },
+     "date": "2026-10-22T23:49Z",
+     "details": {
+      "detail": "Soreness",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Ankle"
+     },
+     "id": "535621",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Ben Simmons",
+      "firstName": "Ben",
+      "lastName": "Simmons",
+      "team": {
+       "abbreviation": "SAC",
+       "displayName": "Sacramento Kings",
+       "id": "23"
+      }
+     },
+     "date": "2026-10-21T04:22Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OFS",
+       "description": "OFS"
+      },
+      "location": "Leg",
+      "returnDate": "2027-10-01",
+      "side": "Right",
+      "type": "Achilles"
+     },
+     "id": "535308",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Dylan Cardwell",
+      "firstName": "Dylan",
+      "lastName": "Cardwell",
+      "team": {
+       "abbreviation": "SAC",
+       "displayName": "Sacramento Kings",
+       "id": "23"
+      }
+     },
+     "date": "2026-10-15T14:40Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-02",
+      "side": "Left",
+      "type": "Calf"
+     },
+     "id": "534546",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Maxime Raynaud",
+      "firstName": "Maxime",
+      "lastName": "Raynaud",
+      "team": {
+       "abbreviation": "SAC",
+       "displayName": "Sacramento Kings",
+       "id": "23"
+      }
+     },
+     "date": "2026-10-15T14:36Z",
+     "details": {
+      "detail": "Dislocated",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-02",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "534545",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "San Antonio Spurs",
+   "id": "24",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "De'Aaron Fox",
+      "firstName": "De'Aaron",
+      "lastName": "Fox",
+      "team": {
+       "abbreviation": "SA",
+       "displayName": "San Antonio Spurs",
+       "id": "24"
+      }
+     },
+     "date": "2026-10-22T22:11Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Arm",
+      "returnDate": "2026-10-23",
+      "side": "Right",
+      "type": "Wrist"
+     },
+     "id": "535614",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Keldon Johnson",
+      "firstName": "Keldon",
+      "lastName": "Johnson",
+      "team": {
+       "abbreviation": "SA",
+       "displayName": "San Antonio Spurs",
+       "id": "24"
+      }
+     },
+     "date": "2026-10-22T22:05Z",
+     "details": {
+      "detail": "Laceration",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Head",
+      "returnDate": "2026-10-23",
+      "type": "Mouth"
+     },
+     "id": "535613",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Tobias Harris",
+      "firstName": "Tobias",
+      "lastName": "Harris",
+      "team": {
+       "abbreviation": "SA",
+       "displayName": "San Antonio Spurs",
+       "id": "24"
+      }
+     },
+     "date": "2026-10-22T22:03Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Left",
+      "type": "Calf"
+     },
+     "id": "535612",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jayden Quaintance",
+      "firstName": "Jayden",
+      "lastName": "Quaintance",
+      "team": {
+       "abbreviation": "SA",
+       "displayName": "San Antonio Spurs",
+       "id": "24"
+      }
+     },
+     "date": "2026-10-05T21:43Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-12-03",
+      "side": "Right",
+      "type": "Knee"
+     },
+     "id": "533226",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Toronto Raptors",
+   "id": "28",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Nate Bittle",
+      "firstName": "Nate",
+      "lastName": "Bittle",
+      "team": {
+       "abbreviation": "TOR",
+       "displayName": "Toronto Raptors",
+       "id": "28"
+      }
+     },
+     "date": "2026-10-20T18:05Z",
+     "details": {
+      "detail": "Fracture",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-28",
+      "side": "Right",
+      "type": "Foot"
+     },
+     "id": "535212",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Utah Jazz",
+   "id": "26",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Trey Alexander",
+      "firstName": "Trey",
+      "lastName": "Alexander",
+      "team": {
+       "abbreviation": "UTAH",
+       "displayName": "Utah Jazz",
+       "id": "26"
+      }
+     },
+     "date": "2026-10-22T23:02Z",
+     "details": {
+      "detail": "Bruise",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-25",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "-59319",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Tony Bradley",
+      "firstName": "Tony",
+      "lastName": "Bradley",
+      "team": {
+       "abbreviation": "UTAH",
+       "displayName": "Utah Jazz",
+       "id": "26"
+      }
+     },
+     "date": "2026-10-22T23:02Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-23",
+      "side": "Left",
+      "type": "Quadriceps"
+     },
+     "id": "535617",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jusuf Nurkic",
+      "firstName": "Jusuf",
+      "lastName": "Nurkic",
+      "team": {
+       "abbreviation": "UTAH",
+       "displayName": "Utah Jazz",
+       "id": "26"
+      }
+     },
+     "date": "2026-10-07T23:07Z",
+     "details": {
+      "detail": "Strain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-11-04",
+      "side": "Right",
+      "type": "Foot"
+     },
+     "id": "533498",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  },
+  {
+   "displayName": "Washington Wizards",
+   "id": "27",
+   "injuries": [
+    {
+     "athlete": {
+      "displayName": "Felix Okpara",
+      "firstName": "Felix",
+      "lastName": "Okpara",
+      "team": {
+       "abbreviation": "WSH",
+       "displayName": "Washington Wizards",
+       "id": "27"
+      }
+     },
+     "date": "2026-10-22T20:48Z",
+     "details": {
+      "detail": "Not Specified",
+      "fantasyStatus": {
+       "abbreviation": "GTD",
+       "description": "GTD"
+      },
+      "location": "Other",
+      "returnDate": "2026-10-23",
+      "side": "Not Specified",
+      "type": "Illness"
+     },
+     "id": "535589",
+     "status": "Day-To-Day",
+     "type": {
+      "abbreviation": "DD",
+      "description": "day-to-day",
+      "id": "6",
+      "name": "INJURY_STATUS_DAYTODAY"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "AJ Dybantsa",
+      "firstName": "AJ",
+      "lastName": "Dybantsa",
+      "team": {
+       "abbreviation": "WSH",
+       "displayName": "Washington Wizards",
+       "id": "27"
+      }
+     },
+     "date": "2026-10-22T16:22Z",
+     "details": {
+      "detail": "Sprain",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2026-10-24",
+      "side": "Left",
+      "type": "Ankle"
+     },
+     "id": "535510",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Tristan Vukcevic",
+      "firstName": "Tristan",
+      "lastName": "Vukcevic",
+      "team": {
+       "abbreviation": "WSH",
+       "displayName": "Washington Wizards",
+       "id": "27"
+      }
+     },
+     "date": "2026-10-01T19:11Z",
+     "details": {
+      "detail": "Pinched Nerve",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Torso",
+      "returnDate": "2026-11-02",
+      "side": "Left",
+      "type": "Hip"
+     },
+     "id": "533019",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    },
+    {
+     "athlete": {
+      "displayName": "Jamir Watkins",
+      "firstName": "Jamir",
+      "lastName": "Watkins",
+      "team": {
+       "abbreviation": "WSH",
+       "displayName": "Washington Wizards",
+       "id": "27"
+      }
+     },
+     "date": "2026-07-30T20:11Z",
+     "details": {
+      "detail": "Surgery",
+      "fantasyStatus": {
+       "abbreviation": "OUT",
+       "description": "OUT"
+      },
+      "location": "Leg",
+      "returnDate": "2027-04-02",
+      "side": "Left",
+      "type": "Knee"
+     },
+     "id": "-57028",
+     "status": "Out",
+     "type": {
+      "abbreviation": "O",
+      "description": "out",
+      "id": "4",
+      "name": "INJURY_STATUS_OUT"
+     }
+    }
+   ]
+  }
+ ],
+ "season": {
+  "displayName": "2026-27",
+  "name": "Regular Season",
+  "type": 2,
+  "year": 2027
+ },
+ "status": "success",
+ "timestamp": "2026-10-23T14:45:50Z"
+}

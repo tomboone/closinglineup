@@ -169,6 +169,7 @@ def make_jobs(
         cache=RawCache(tmp_path, clock),
         store=ParquetStore(tmp_path),
         nba=nba,
+        espn=httpx.Client,
         db=db,
         heartbeat=heartbeat,
     )
