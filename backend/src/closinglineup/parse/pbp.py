@@ -10,7 +10,7 @@ stats.nba.com's `playbyplayv2`, which its `stats_nba` loaders read, answers `{}`
 File layout, as pbpstats 1.3.11 (`PBPSTATS_VERSION`) reads it under `DATA_DIR/pbpstats/`:
 
     pbp/live_<game_id>.json       `raw/cdn/playbyplay/<game_id>.json`, copied by `materialize`
-                                  less its `game` actions (below)
+                                  less its `game` actions, with the 2026-27 fixes (below)
     overrides/missing_period_starters.json
                                   {game_id: {period: {team_id: [five player IDs]}}}, for a period
                                   whose starters pbpstats cannot infer from its events
@@ -40,6 +40,15 @@ Ordering quirks handled here, seen in 2025-26 feeds:
   `Possession.offense_team_id` reads the first event, so it names the wrong team for some
   period-opening possessions. A possession's offense is taken from its ending event instead,
   which is also what pbpstats's own possession counting reads.
+
+And in 2026-27 feeds, which pbpstats 1.3.11 cannot read as they come (NEU-1897):
+
+- An action with no player (period start and end, timeouts, team rebounds and turnovers) has no
+  `personId`, where 2025-26 feeds sent 0. pbpstats reads it into `player1_id` and fails at the
+  first period start, so `materialize` gives such actions `personId` 0.
+- `actions` is not always in `orderNumber` order: a rebound can be listed just before the shot
+  it names. pbpstats finds a rebound's shot by walking back through the events before it, and
+  fails when it is not there, so `materialize` sorts the actions by `orderNumber`.
 """
 
 import json
@@ -136,7 +145,7 @@ def install_overrides(data_dir: Path) -> None:
 
 def materialize(cache: RawCache, game_id: str) -> Path:
     """Copy the game's cached live play-by-play into pbpstats's layout, less its `game`
-    actions; return the file written.
+    actions, each with a `personId` and in `orderNumber` order; return the file written.
 
     The overrides are installed alongside, so pbpstats never reads a stale set.
     """
@@ -146,7 +155,10 @@ def materialize(cache: RawCache, game_id: str) -> Path:
         raise FileNotFoundError(f"game {game_id} has no cached play-by-play at {path}")
     payload: dict[str, Any] = json.loads(content)
     game: dict[str, Any] = payload["game"]
-    actions: list[dict[str, Any]] = [a for a in game["actions"] if a["actionType"] != GAME_ACTION]
+    actions: list[dict[str, Any]] = sorted(
+        ({"personId": 0, **a} for a in game["actions"] if a["actionType"] != GAME_ACTION),
+        key=lambda a: a["orderNumber"],
+    )
     payload = {**payload, "game": {**game, "actions": actions}}
     data_dir = cache.root.parent
     install_overrides(data_dir)

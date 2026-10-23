@@ -17,7 +17,10 @@ FIXTURES = Path(__file__).parent / "fixtures" / "pbp"
 OVERTIME_GAME = "0022500006"
 # MIN at OKC, with substitutions logged between free throws and an end-of-quarter heave.
 QUIRK_GAME = "0022500064"
-GAMES = (OVERTIME_GAME, QUIRK_GAME)
+# OKC at SAS, in the 2026-27 feed: player-less actions have no `personId`, and a rebound is
+# listed before its shot.
+FEED_2026_27_GAME = "0022600003"
+GAMES = (OVERTIME_GAME, QUIRK_GAME, FEED_2026_27_GAME)
 
 GSW = 1610612744
 # GSW's five for all of overtime in the overtime game.
@@ -64,6 +67,22 @@ def test_materialize_writes_the_live_feed_where_pbpstats_reads_it(cache: RawCach
     raw = _fixture(nba_cdn.PLAYBYPLAY, OVERTIME_GAME)["game"]["actions"]
     assert actions == [a for a in raw if a["actionType"] != "game"]
     assert len(actions) == len(raw) - 1
+
+
+def test_materialize_fills_in_person_id_and_restores_order_number_order(cache: RawCache) -> None:
+    raw = _fixture(nba_cdn.PLAYBYPLAY, FEED_2026_27_GAME)["game"]["actions"]
+    assert any("personId" not in a for a in raw)
+
+    path = pbp.materialize(cache, FEED_2026_27_GAME)
+
+    actions = json.loads(path.read_text())["game"]["actions"]
+    assert all("personId" in a for a in actions)
+    assert [a["personId"] for a in actions if a["actionType"] == "period"] == [0] * 8
+    orders = [a["orderNumber"] for a in actions]
+    assert orders == sorted(orders)
+    numbers = [a["actionNumber"] for a in actions]
+    # The rebound of a missed three with 21.1 seconds left in the third.
+    assert numbers.index(598) < numbers.index(599)
 
 
 def test_materialize_installs_the_committed_overrides(cache: RawCache) -> None:
