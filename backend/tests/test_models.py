@@ -1,10 +1,17 @@
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from closinglineup.db.models import Game, PlayerGame
+from closinglineup.db.models import (
+    Contract,
+    Game,
+    ImpactSnapshot,
+    InjuryStatus,
+    PlayerGame,
+    Transaction,
+)
 
 # Never a real game ID, so the rows these tests add cannot collide with loaded data. Each test's
 # session closes without committing, so nothing they add persists.
@@ -82,4 +89,64 @@ def test_player_game_rejects_an_unlisted_dnp_reason(db: sessionmaker[Session]) -
         session.flush()
         session.add(_dnp("rest"))
         with pytest.raises(IntegrityError, match="ck_player_game_dnp_reason"):
+            session.flush()
+
+
+def _injury(status: str) -> InjuryStatus:
+    return InjuryStatus(
+        report_datetime=datetime(2025, 10, 21, 21, 30, tzinfo=UTC),
+        game_date=date(2025, 10, 21),
+        player_id=JAYSON_TATUM,
+        team_id=BOS,
+        status=status,
+        reason="Injury/Illness - Right Achilles; Repair",
+        source="pdf",
+    )
+
+
+def _impact(source: str) -> ImpactSnapshot:
+    return ImpactSnapshot(date=date(2025, 10, 21), player_id=JAYSON_TATUM, source=source, value=3.1)
+
+
+def test_a_snapshot_of_each_kind_with_listed_values_loads(db: sessionmaker[Session]) -> None:
+    with db() as session:
+        session.add_all(
+            [
+                _injury("Out"),
+                _impact("bpm_local"),
+                Transaction(
+                    date=date(2025, 7, 6),
+                    type="assign",
+                    player_id=JAYSON_TATUM,
+                    from_team_id=BOS,
+                    detail="Assigned to Maine Celtics",
+                ),
+                Contract(
+                    player_id=JAYSON_TATUM,
+                    team_id=BOS,
+                    season="2025-26",
+                    salary=54_126_450,
+                    guaranteed=54_126_450,
+                    option_type="player",
+                    two_way=False,
+                    as_of_date=date(2025, 10, 20),
+                    source="spotrac",
+                ),
+            ]
+        )
+        session.flush()
+
+
+def test_injury_status_rejects_an_unlisted_status(db: sessionmaker[Session]) -> None:
+    with db() as session:
+        # ESPN's own status, which the overlay maps to Questionable (spec §4.3).
+        session.add(_injury("Day-To-Day"))
+        with pytest.raises(IntegrityError, match="ck_injury_status_status"):
+            session.flush()
+
+
+def test_impact_snapshot_rejects_an_unlisted_source(db: sessionmaker[Session]) -> None:
+    with db() as session:
+        session.add(_impact("raptor"))
+        with pytest.raises(IntegrityError, match="ck_impact_snapshot_source"):
             session.flush()

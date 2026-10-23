@@ -4,13 +4,15 @@ row as it starts and finishes (spec §3.3, §6.4).
 So far `nightly` refreshes the schedule, fetches, parses and loads, rebuilds the season's roster
 memberships from its games, then reconciles a sample of two teams' stints with NBA.com's; the
 rest of derive joins it when it lands.
-`weekly` re-fetches, parses and loads the season's shot charts.
+`weekly` re-fetches, parses and loads the season's shot charts, then runs the weekly overlays;
+`injuries` and `daily_overlays` run theirs (`closinglineup.overlays`).
 """
 
 import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, tzinfo
+from datetime import date, datetime, time, timedelta, tzinfo
+from functools import partial
 from typing import Any
 
 from apscheduler.executors.pool import (  # pyright: ignore[reportMissingTypeStubs]
@@ -38,6 +40,7 @@ from closinglineup.heartbeat import Heartbeat, JobFamily
 from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures
 from closinglineup.load.memberships import load_participation_spans
 from closinglineup.load.parquet import ParquetStore
+from closinglineup.overlays import OverlayFamily, by_name, overlays_in
 from closinglineup.pipeline import SHOT_TABLE, parse_date, parse_shot_charts
 from closinglineup.season import Phase, is_counted, season_label
 from closinglineup.settings import Settings
@@ -58,6 +61,10 @@ from closinglineup.teams import by_nba_team_id
 NIGHTLY = "nightly"
 POLL_FINALS = "poll_finals"
 WEEKLY = "weekly"
+INJURIES = "injuries"
+DAILY_OVERLAYS = "daily_overlays"
+# `injuries`' last run of the day, the only one whose success pings the daily heartbeat.
+LAST_INJURIES_RUN = time(18, 30)
 
 # The season type each game phase's shots are charted under. The Cup quarterfinals and semifinals
 # are regular-season games; the final (season type 6) is in no season type `shotchartdetail` is
@@ -80,8 +87,18 @@ CDN_GAME_ENDPOINTS: dict[str, GameFetch] = {
 }
 
 type Detail = dict[str, Any]
+type Step = tuple[str, Callable[[], Detail]]
 
 log = logging.getLogger(__name__)
+
+
+class JobFailedError(Exception):
+    """A job that ran every step but some failed; `detail`, with what each step did, is recorded
+    beside the error."""
+
+    def __init__(self, message: str, detail: Detail) -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,19 +230,50 @@ class Jobs:
 
     def nightly_yesterday(self) -> Detail:
         """`nightly` for yesterday in `TZ`, as the worker runs it at 03:30."""
-        today = self.clock.now().astimezone(self.settings.tz).date()
+        today = self._local_now().date()
         return self.nightly(today - timedelta(days=1))
 
     def weekly(self) -> Detail:
         """Re-fetch the shot chart of every player who has played this season, in each season
-        type he has played in, then parse and load them (spec §3.3).
+        type he has played in, then parse and load them (spec §3.3); then run the weekly
+        overlays. Each of those steps runs whether or not the one before it failed, and any that
+        failed fails the job.
 
-        A shot chart that fails to fetch or parse is listed in the run's detail and does not fail
-        the job; whatever was loaded from it before stays. Every shot chart failing to fetch fails
-        the job, as does a shot file that fails to load: one with a shot in a game that has no
+        A shot chart that fails to fetch or parse is listed in the step's detail and does not fail
+        it; whatever was loaded from it before stays. Every shot chart failing to fetch fails the
+        step, as does a shot file that fails to load: one with a shot in a game that has no
         `game` row yet, for instance.
         """
         return self._run(WEEKLY, self._weekly, family="weekly")
+
+    def injuries(self, day: date, *, last: bool = True) -> Detail:
+        """Run the `injuries` overlays for `day`, each in isolation; any that failed fails the job
+        and pings the daily heartbeat's `/fail`. Only the day's `last` run pings it on success,
+        so the check fails if the day's reports never landed."""
+        return self._run(
+            INJURIES,
+            lambda: self._overlays("injuries", day),
+            family="daily",
+            ping_success=last,
+        )
+
+    def injuries_now(self) -> Detail:
+        """`injuries` for today in `TZ`, as the worker runs it; the 18:30 run is the last."""
+        now = self._local_now()
+        return self.injuries(now.date(), last=now.time() >= LAST_INJURIES_RUN)
+
+    def daily_overlays(self, day: date) -> Detail:
+        """Run the `daily` overlays for `day`, each in isolation; any that failed fails the job."""
+        return self._run(DAILY_OVERLAYS, lambda: self._overlays("daily", day), family="daily")
+
+    def daily_overlays_today(self) -> Detail:
+        """`daily_overlays` for today in `TZ`, as the worker runs it at 09:00."""
+        return self.daily_overlays(self._local_now().date())
+
+    def overlay(self, name: str, day: date) -> Detail:
+        """Run the overlay registered as `name` once, for `day`, with no heartbeat."""
+        overlay = by_name(name)
+        return self._run(f"overlay:{name}", lambda: overlay.run(self, day))
 
     def poll_finals(self) -> Detail:
         """Note the games today's scoreboard shows final, for `nightly` to fetch."""
@@ -315,8 +363,39 @@ class Jobs:
             "outside": outside,
         }
 
+    def _local_now(self) -> datetime:
+        return self.clock.now().astimezone(self.settings.tz)
+
+    def _overlay_steps(self, family: OverlayFamily, day: date) -> list[Step]:
+        return [(overlay.name, partial(overlay.run, self, day)) for overlay in overlays_in(family)]
+
+    def _overlays(self, family: OverlayFamily, day: date) -> Detail:
+        return self._steps(self._overlay_steps(family, day), {"date": day.isoformat()})
+
+    def _steps(self, steps: list[Step], detail: Detail) -> Detail:
+        """Run each step in turn, in isolation: one that raises is logged and listed under
+        `failed`, and the rest still run. Any that failed fails the job (`JobFailedError`)."""
+        ran: dict[str, Detail] = {}
+        failed: dict[str, str] = {}
+        for name, step in steps:
+            try:
+                ran[name] = step()
+            except Exception as exc:
+                log.exception("job step failed", extra={"step": name})
+                failed[name] = f"{type(exc).__name__}: {exc}"
+        detail = {**detail, "ran": ran, "failed": failed}
+        if failed:
+            summary = "; ".join(f"{name}: {error}" for name, error in failed.items())
+            raise JobFailedError(f"{len(failed)} of {len(steps)} failed: {summary}", detail)
+        return detail
+
     def _weekly(self) -> Detail:
-        season = season_label(self.clock.now().astimezone(self.settings.tz).date())
+        # One reading of the clock, so the shots and the overlays agree on the date.
+        today = self._local_now().date()
+        shots = partial(self._shots, season_label(today))
+        return self._steps([("shots", shots), *self._overlay_steps("weekly", today)], {})
+
+    def _shots(self, season: str) -> Detail:
         players = shot_chart_players(self.db, season)
         with self.nba() as session:
             results = [
@@ -357,11 +436,20 @@ class Jobs:
         self.finals.setdefault(day, set()).update(finals)
         return {"date": day.isoformat(), "finals": sorted(finals)}
 
-    def _run(self, job: str, body: Callable[[], Detail], family: JobFamily | None = None) -> Detail:
-        """Run `body` between its `job_run` row's start and finish, and ping `family`'s heartbeat.
+    def _run(
+        self,
+        job: str,
+        body: Callable[[], Detail],
+        family: JobFamily | None = None,
+        *,
+        ping_success: bool = True,
+    ) -> Detail:
+        """Run `body` between its `job_run` row's start and finish, and ping `family`'s heartbeat,
+        on success only if `ping_success`.
 
         Anything `body` raises marks the run failed, pings `/fail` with the exception summary, and
-        is re-raised, so APScheduler logs it and the CLI exits 1.
+        is re-raised, so APScheduler logs it and the CLI exits 1. A `JobFailedError`'s detail is
+        recorded beside the error.
         """
         run_id: int | None = None
         try:
@@ -369,13 +457,14 @@ class Jobs:
             detail = body()
             self._finish(run_id, RunStatus.SUCCEEDED, detail)
         except Exception as exc:
-            reason = f"{type(exc).__name__}: {exc}"
+            failed = exc.detail if isinstance(exc, JobFailedError) else {}
+            reason = str(exc) if isinstance(exc, JobFailedError) else f"{type(exc).__name__}: {exc}"
             if family is not None:
                 self.heartbeat.ping(family, fail=True, reason=reason)
             if run_id is not None:
-                self._record_failure(job, run_id, reason)
+                self._record_failure(job, run_id, {"error": reason, **failed})
             raise
-        if family is not None:
+        if family is not None and ping_success:
             self.heartbeat.ping(family)
         log.info("job succeeded", extra={"job": job})
         return detail
@@ -393,10 +482,10 @@ class Jobs:
             run.finished_at = self.clock.now()
             run.detail = detail
 
-    def _record_failure(self, job: str, run_id: int, reason: str) -> None:
+    def _record_failure(self, job: str, run_id: int, detail: Detail) -> None:
         """Mark the run failed; a database that is down too must not hide the job's own error."""
         try:
-            self._finish(run_id, RunStatus.FAILED, {"error": reason})
+            self._finish(run_id, RunStatus.FAILED, detail)
         except SQLAlchemyError:
             log.exception("could not record failed job run", extra={"job": job, "run_id": run_id})
 
@@ -407,6 +496,20 @@ def nightly_trigger(tz: tzinfo) -> CronTrigger:
 
 def weekly_trigger(tz: tzinfo) -> CronTrigger:
     return CronTrigger(day_of_week="mon", hour=4, minute=30, timezone=tz)
+
+
+def injuries_trigger(tz: tzinfo) -> OrTrigger:
+    """10:00, 13:00, 16:00 and 18:30."""
+    return OrTrigger(
+        [
+            CronTrigger(hour="10,13,16", minute=0, timezone=tz),
+            CronTrigger(hour=LAST_INJURIES_RUN.hour, minute=LAST_INJURIES_RUN.minute, timezone=tz),
+        ]
+    )
+
+
+def daily_overlays_trigger(tz: tzinfo) -> CronTrigger:
+    return CronTrigger(hour=9, minute=0, timezone=tz)
 
 
 def poll_finals_trigger(tz: tzinfo) -> OrTrigger:
@@ -436,6 +539,8 @@ def build_scheduler(jobs: Jobs) -> BackgroundScheduler:
         (NIGHTLY, jobs.nightly_yesterday, nightly_trigger(tz)),
         (POLL_FINALS, jobs.poll_finals, poll_finals_trigger(tz)),
         (WEEKLY, jobs.weekly, weekly_trigger(tz)),
+        (INJURIES, jobs.injuries_now, injuries_trigger(tz)),
+        (DAILY_OVERLAYS, jobs.daily_overlays_today, daily_overlays_trigger(tz)),
     ]:
         # No misfire grace limit: APScheduler drops a run that starts more than its grace (1 s by
         # default) late, and on one thread a job due while another runs always starts late.

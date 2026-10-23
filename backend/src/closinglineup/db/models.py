@@ -1,5 +1,7 @@
 """ORM models. Alembic autogenerates migrations against `Base.metadata` (spec §6)."""
 
+# `dt.date` for a column named `date`, whose attribute would otherwise shadow the type.
+import datetime as dt
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, ClassVar
@@ -48,6 +50,26 @@ GAME_STATUSES = ("scheduled", "final", "postponed")
 DNP_REASONS = ("cd", "injury", "inactive", "suspension", "g_league", "other")
 BOX_SOURCES = ("stats", "cdn")
 SHOT_ZONES = ("rim", "short_mid", "long_mid", "corner_3", "above_break_3")
+# Spec §4.3: the official report's own spelling; ESPN's statuses are mapped onto these.
+INJURY_STATUSES = ("Out", "Doubtful", "Questionable", "Probable", "Available")
+INJURY_SOURCES = ("pdf", "espn")
+TRANSACTION_TYPES = (
+    "sign",
+    "waive",
+    "trade",
+    "two_way_sign",
+    "two_way_convert",
+    "assign",
+    "recall",
+    "option_exercise",
+    "option_decline",
+    "other",
+)
+IMPACT_SOURCES = ("epm", "darko", "bpm_local")
+# Not enumerated in spec §4.6: a player, team or early termination option.
+OPTION_TYPES = ("player", "team", "early_termination")
+# Spec §4.6: Spotrac, with RealGM the fallback behind the same row type.
+CONTRACT_SOURCES = ("spotrac", "realgm")
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> CheckConstraint:
@@ -327,3 +349,93 @@ class Matchup(Timestamps, Base):
     fg3a: Mapped[int]
     tov: Mapped[int]
     ast: Mapped[int]
+
+
+# Snapshots (spec §6.3): what the overlays write, each a dated view of a source rather than a
+# game's record.
+
+
+class InjuryStatus(Timestamps, Base):
+    """One player's line in one injury report, the official PDF's or ESPN's (spec §4.3). `game_id`
+    is NULL until the report's matchup is matched to a `game` row."""
+
+    __tablename__ = "injury_status"
+    __table_args__ = (
+        UniqueConstraint("player_id", "game_date", "report_datetime", "source"),
+        Index(None, "team_id", "report_datetime"),
+        _one_of("status", INJURY_STATUSES),
+        _one_of("source", INJURY_SOURCES),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    report_datetime: Mapped[datetime]
+    game_date: Mapped[date]
+    game_id: Mapped[str | None] = mapped_column(ForeignKey("game.game_id"))
+    player_id: Mapped[int]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    status: Mapped[str] = mapped_column(String)
+    reason: Mapped[str | None] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+
+
+class Transaction(Timestamps, Base):
+    """One NBA.com player-movement row, its `type` classified from the description (spec §4.4).
+    A team outside the NBA, a G League affiliate for one, is NULL; `detail` names it."""
+
+    __tablename__ = "transaction"
+    __table_args__ = (
+        UniqueConstraint("player_id", "date", "type", "detail"),
+        _one_of("type", TRANSACTION_TYPES),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    date: Mapped[dt.date]
+    type: Mapped[str] = mapped_column(String)
+    player_id: Mapped[int]
+    from_team_id: Mapped[int | None] = mapped_column(ForeignKey("team.nba_team_id"))
+    to_team_id: Mapped[int | None] = mapped_column(ForeignKey("team.nba_team_id"))
+    detail: Mapped[str] = mapped_column(String)
+
+
+class ImpactSnapshot(Timestamps, Base):
+    """One impact metric's value for a player on a date (spec §4.5). The O/D split and the
+    minutes it rests on are NULL where the source publishes none."""
+
+    __tablename__ = "impact_snapshot"
+    __table_args__ = (_one_of("source", IMPACT_SOURCES),)
+
+    date: Mapped[dt.date] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[float]
+    o_value: Mapped[float | None]
+    d_value: Mapped[float | None]
+    minutes_basis: Mapped[float | None]
+
+
+class Contract(Timestamps, Base):
+    """A player's contract for one season as a team's cap page showed it on `as_of_date` (spec
+    §4.6). `salary` and `guaranteed` are dollars: a partial guarantee is common.
+
+    `team_id`, the team whose page lists it, is in its natural key: a waived player is on his old
+    team's page as dead money and on his new team's with a live contract (NEU-1866)."""
+
+    __tablename__ = "contract"
+    __table_args__ = (
+        UniqueConstraint("player_id", "team_id", "season", "as_of_date", "source"),
+        _one_of("option_type", OPTION_TYPES),
+        _one_of("source", CONTRACT_SOURCES),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    player_id: Mapped[int]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    season: Mapped[str] = mapped_column(String)
+    salary: Mapped[int]
+    guaranteed: Mapped[int]
+    option_type: Mapped[str | None] = mapped_column(String)
+    option_date: Mapped[date | None]
+    trade_eligible_date: Mapped[date | None]
+    two_way: Mapped[bool]
+    as_of_date: Mapped[date]
+    source: Mapped[str] = mapped_column(String)

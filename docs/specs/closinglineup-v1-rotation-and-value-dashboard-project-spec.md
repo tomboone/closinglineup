@@ -215,7 +215,7 @@ Every table has `created_at` / `updated_at`. IDs are NBA's (`nba_player_id`, `nb
 - `injury_status(id, report_datetime, game_date, game_id NULL, player_id, team_id, status, reason, source ∈ {pdf, espn})`
 - `transaction(id, date, type, player_id, from_team_id NULL, to_team_id NULL, detail)`
 - `impact_snapshot(date, player_id, source ∈ {epm, darko, bpm_local}, value, o_value, d_value, minutes_basis)` PK `(date, player_id, source)`
-- `contract(id, player_id, season, salary, guaranteed, option_type NULL, option_date NULL, trade_eligible_date NULL, two_way, as_of_date, source)`
+- `contract(id, player_id, team_id, season, salary, guaranteed, option_type NULL, option_date NULL, trade_eligible_date NULL, two_way, as_of_date, source)` — `team_id` is the team whose cap page lists it: a waived player is on his old team's as dead money and his new team's with a live contract, so it is in the natural key (NEU-1866)
 
 ### 6.4 Derived
 
