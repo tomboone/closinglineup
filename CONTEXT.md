@@ -69,7 +69,7 @@ Play after the game is decided by a fixed margin-and-clock rule; excluded from o
 ### Overlays
 
 **Availability**:
-Whether a player can play on a date: active, injury status (Out / Doubtful / Questionable / Probable / Available), inactive, suspended, or assigned to the G League.
+Whether a player can play on a date: active, injury status (Out / Doubtful / Questionable / Probable / Available), inactive, suspended, or assigned to the G League. An assignment is read from the official injury report's `G League - On Assignment` lines, whatever their status; a recall is absence from a newer report covering the team (NEU-1905).
 _Avoid_: health, injury (an injury is the reason, availability is the state)
 
 **Transaction**:

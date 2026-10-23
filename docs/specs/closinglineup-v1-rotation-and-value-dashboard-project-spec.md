@@ -178,7 +178,7 @@ The NBA publishes `https://ak-static.cms.nba.com/referee/injury/Injury-Report_<Y
 
 ### 4.4 Transactions (`sources/transactions.py`)
 
-`NBA_Player_Movement.json` rows → `transaction(date, type, player, from_team, to_team, detail)` with `type` classified from the description: sign, waive, trade, two_way_sign, two_way_convert, assign, recall, option_exercise, option_decline, other. G League `assign`/`recall` pairs drive the G League badge and the Out tier. The feed is every move since 2015-07-01, so the overlay makes the table hold exactly its rows; as of 2026-10-23 it holds only signings, claims, waivers, trades and contract conversions, and no G League assignment, recall or option decision, so those types have no source yet (NEU-1869).
+`NBA_Player_Movement.json` rows → `transaction(date, type, player, from_team, to_team, detail)` with `type` classified from the description: sign, waive, trade, two_way_sign, two_way_convert, assign, recall, option_exercise, option_decline, other. The feed is every move since 2015-07-01, so the overlay makes the table hold exactly its rows; as of 2026-10-23 it holds only signings, claims, waivers, trades and contract conversions, and no G League assignment, recall or option decision (NEU-1869). A G League assignment is therefore read from the official injury report (§4.3), whose `G League - On Assignment` lines `derive.roster.current_g_league_assignment` reads, a recall being absence from a newer report that covers the team; an `assign`/`recall` row, should the feed ever carry one, decides from its date on (NEU-1905).
 
 ### 4.5 Impact metrics (`sources/epm.py`, `sources/darko.py`, `derive/bpm.py`)
 
@@ -262,7 +262,7 @@ Evaluated in order; the first match wins:
 4. **Fringe** — played in ≥ 50% of the last 10 team games.
 5. **Out** — everything else, including a current G League assignment.
 
-Thresholds live in `TierRule` (one settings object). A role window shorter than its nominal length computes on what it has and sets `is_short`. Badges: `two_way`, `ten_day`, `exhibit_10` from `roster_membership.contract_type`; `g_league` from the latest assign/recall.
+Thresholds live in `TierRule` (one settings object). A role window shorter than its nominal length computes on what it has and sets `is_short`. Badges: `two_way`, `ten_day`, `exhibit_10` from `roster_membership.contract_type`; `g_league` from the official injury report's `G League - On Assignment` lines, whatever their status, held until a newer report covering the team omits the player (§4.4, NEU-1905).
 
 ### 7.6 Rotation events and signals
 

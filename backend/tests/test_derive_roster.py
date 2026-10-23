@@ -1,32 +1,48 @@
 import json
 from collections import defaultdict
 from collections.abc import Iterator
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, insert, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from closinglineup import injuries
 from closinglineup.clock import FakeClock
-from closinglineup.db.models import Game, PlayerGame, RosterMembership, RunStatus, Transaction
+from closinglineup.db.models import (
+    Game,
+    InjuryStatus,
+    PlayerGame,
+    RosterMembership,
+    RunStatus,
+    Transaction,
+)
 from closinglineup.derive.roster import (
+    ON_ASSIGNMENT,
     current_g_league_assignment,
     merge_memberships,
     rebuild_roster_membership,
 )
+from closinglineup.names import NameIndex, load_aliases
 from closinglineup.parse.rows import RosterMembershipRow
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.injury_pdf import EASTERN
+from closinglineup.sources.injury_pdf import parse as parse_report
 from closinglineup.sources.transactions import TransactionRow, TransactionType, parse
 from closinglineup.teams import by_tricode
+from tests.test_injuries import PLAYERS as REPORT_PLAYERS
+from tests.test_injuries import REPORTED
+from tests.test_injury_pdf import WEEKEND
 from tests.test_transactions import FEED
 
 GSW, DEN, LAL = (by_tricode(t).nba_team_id for t in ("GSW", "DEN", "LAL"))
 MEM, CHI, CHA, HOU = (by_tricode(t).nba_team_id for t in ("MEM", "CHI", "CHA", "HOU"))
 # Player IDs no real player has, so leftovers of other tests on the same database stay out.
-PLAYER, OTHER = 9_000_001, 9_000_002
-PLAYERS = (PLAYER, OTHER)
+PLAYER, OTHER, TEAMMATE = 9_000_001, 9_000_002, 9_000_003
+PLAYERS = (PLAYER, OTHER, TEAMMATE)
 DAY = date(2019, 10, 23)
 
 # deploy/README.md's coverage check: player_game rows of the season with no covering membership.
@@ -293,6 +309,7 @@ def _clear(db: sessionmaker[Session]) -> None:
         session.execute(delete(Game).where(Game.game_id.in_(game_ids)))
         session.execute(delete(RosterMembership).where(RosterMembership.player_id.in_(PLAYERS)))
         session.execute(delete(Transaction).where(Transaction.player_id.in_(PLAYERS)))
+        session.execute(delete(InjuryStatus).where(InjuryStatus.player_id.in_(PLAYERS)))
 
 
 @pytest.fixture
@@ -384,26 +401,170 @@ def test_the_rebuild_covers_every_game_replaces_stale_spans_and_a_rerun_changes_
     ]
 
 
-def test_an_assignment_holds_until_the_recall(db: sessionmaker[Session]) -> None:
+# G League assignment, read from the official injury report (spec §7.5).
+
+TWO_WAY = "G League - Two-Way"
+
+
+@pytest.fixture
+def reports(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
+    """No injury rows or transactions of the test players, before and after."""
+    _clear(db)
+    yield db
+    _clear(db)
+
+
+def _at(offset: int, hour: int, minute: int = 0) -> datetime:
+    return datetime.combine(_day(offset), time(hour, minute), EASTERN)
+
+
+def _report(
+    db: sessionmaker[Session],
+    at: datetime,
+    *lines: tuple[int, str | None],
+    team_id: int = GSW,
+    game_date: date | None = None,
+    status: str = "Out",
+    source: str = "pdf",
+) -> None:
+    """One report's lines for the team, each (player ID, reason), for the game on `game_date`,
+    the report's date by default."""
     with db.begin() as session:
-        session.execute(delete(Transaction).where(Transaction.player_id == PLAYER))
-        for offset, kind in ((1, "assign"), (3, "recall")):
-            session.add(
-                Transaction(
-                    date=_day(offset),
-                    type=kind,
-                    player_id=PLAYER,
-                    from_team_id=GSW if kind == "assign" else None,
-                    to_team_id=GSW if kind == "recall" else None,
-                    detail=f"{kind} {offset}",
-                )
-            )
+        session.execute(
+            insert(InjuryStatus),
+            [
+                {
+                    "report_datetime": at,
+                    "game_date": game_date or at.date(),
+                    "player_id": player_id,
+                    "team_id": team_id,
+                    "status": status,
+                    "reason": reason,
+                    "source": source,
+                }
+                for player_id, reason in lines
+            ],
+        )
+
+
+def _transaction(offset: int, kind: str) -> Transaction:
+    return Transaction(
+        date=_day(offset),
+        type=kind,
+        player_id=PLAYER,
+        from_team_id=GSW if kind == "assign" else None,
+        to_team_id=GSW if kind == "recall" else None,
+        detail=f"{kind} {offset}",
+    )
+
+
+def _assigned(db: sessionmaker[Session], *offsets: int, player_id: int = PLAYER) -> list[bool]:
+    with db() as session:
+        return [current_g_league_assignment(session, player_id, _day(o)) for o in offsets]
+
+
+def test_every_on_assignment_line_of_the_fixture_report_reads_assigned(
+    db: sessionmaker[Session],
+) -> None:
+    index = NameIndex(REPORT_PLAYERS, load_aliases())
+    rows: list[dict[str, Any]] = injuries.resolve_rows(parse_report(WEEKEND), index, {}, {}).rows
+    by_reason: defaultdict[str | None, list[int]] = defaultdict(list)
+    for row in rows:
+        by_reason[row["reason"]].append(row["player_id"])
+    assigned, two_way = by_reason[ON_ASSIGNMENT], by_reason[TWO_WAY]
+    injured = [
+        player_id
+        for reason, players in by_reason.items()
+        if reason and reason.startswith("Injury/Illness")
+        for player_id in players
+    ]
+    # The Questionable and the Available line are among the eight.
+    assert len(assigned) == 8 and two_way and injured
+    clear = delete(InjuryStatus).where(
+        InjuryStatus.report_datetime == REPORTED, InjuryStatus.source == "pdf"
+    )
+    with db.begin() as session:
+        session.execute(clear)
+        session.execute(insert(InjuryStatus), rows)
     try:
         with db() as session:
-            assigned = [current_g_league_assignment(session, PLAYER, _day(d)) for d in range(5)]
+            read = {
+                player_id: current_g_league_assignment(session, player_id, REPORTED.date())
+                for player_id in assigned + two_way + injured
+            }
     finally:
         with db.begin() as session:
-            session.execute(delete(Transaction).where(Transaction.player_id == PLAYER))
+            session.execute(clear)
 
-    # Day 0 before the assignment, day 1 assigned, day 2 still, day 3 recalled, day 4 still.
-    assert assigned == [False, True, True, False, False]
+    assert all(read[player_id] for player_id in assigned)
+    assert not any(read[player_id] for player_id in two_way + injured)
+
+
+def test_an_assignment_holds_until_a_newer_report_for_the_team_omits_him(
+    reports: sessionmaker[Session],
+) -> None:
+    _report(reports, _at(1, 17), (PLAYER, ON_ASSIGNMENT), (TEAMMATE, TWO_WAY))
+    _report(reports, _at(3, 17), (TEAMMATE, TWO_WAY))
+
+    # Day 0 before the assignment, day 1 assigned, day 2 (no game) still, day 3 recalled, day 4
+    # still.
+    assert _assigned(reports, 0, 1, 2, 3, 4) == [False, True, True, False, False]
+    assert _assigned(reports, 1, 3, player_id=TEAMMATE) == [False, False]
+
+
+def test_a_later_edition_of_the_same_games_report_that_drops_him_reads_recalled(
+    reports: sessionmaker[Session],
+) -> None:
+    _report(reports, _at(1, 13), (PLAYER, ON_ASSIGNMENT))
+    _report(reports, _at(1, 17, 15), (TEAMMATE, "Ankle"))
+
+    assert _assigned(reports, 1, 2) == [False, False]
+
+
+def test_a_newer_report_for_another_team_is_not_a_recall(reports: sessionmaker[Session]) -> None:
+    _report(reports, _at(1, 17), (PLAYER, ON_ASSIGNMENT))
+    _report(reports, _at(2, 17), (TEAMMATE, "Ankle"), team_id=DEN)
+
+    assert _assigned(reports, 2) == [True]
+
+
+def test_a_line_for_tomorrows_game_is_read_tomorrow_not_today(
+    reports: sessionmaker[Session],
+) -> None:
+    _report(reports, _at(0, 17), (PLAYER, ON_ASSIGNMENT), game_date=_day(1))
+
+    assert _assigned(reports, 0, 1) == [False, True]
+
+
+def test_espn_rows_are_ignored_whatever_their_age(reports: sessionmaker[Session]) -> None:
+    _report(reports, _at(1, 17), (PLAYER, ON_ASSIGNMENT))
+    _report(reports, _at(2, 12), (TEAMMATE, "Ankle"), source="espn")
+    _report(reports, _at(3, 17), (TEAMMATE, TWO_WAY))
+    _report(reports, _at(4, 12), (PLAYER, "Knee"), source="espn")
+
+    # Day 2: ESPN's newer row does not recall him. Day 4: nor does it assign him.
+    assert _assigned(reports, 2, 3, 4) == [True, False, False]
+
+
+def test_a_transaction_dated_on_or_after_the_last_report_line_overrides_it(
+    reports: sessionmaker[Session],
+) -> None:
+    _report(reports, _at(1, 17), (PLAYER, "Knee"))
+    _report(reports, _at(5, 17), (PLAYER, ON_ASSIGNMENT))
+    with reports.begin() as session:
+        session.add_all([_transaction(2, "assign"), _transaction(5, "recall")])
+
+    # Day 1: the report alone. Day 2: an assignment after the line. Day 5: a recall dated the
+    # line's day wins the tie.
+    assert _assigned(reports, 1, 2, 4, 5) == [False, True, True, False]
+
+
+def test_a_transaction_dated_before_the_last_report_line_does_not_override_it(
+    reports: sessionmaker[Session],
+) -> None:
+    _report(reports, _at(1, 17), (PLAYER, "Knee"))
+    _report(reports, _at(4, 17), (PLAYER, ON_ASSIGNMENT))
+    with reports.begin() as session:
+        session.add_all([_transaction(0, "assign"), _transaction(3, "recall")])
+
+    assert _assigned(reports, 0, 1, 3, 4) == [True, False, False, True]
