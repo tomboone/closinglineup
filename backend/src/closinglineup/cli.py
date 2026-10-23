@@ -21,6 +21,7 @@ from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
+from closinglineup.derive.garbage_time import GarbageTimeRule, write_garbage_time
 from closinglineup.derive.reconcile import (
     LINEUP_TOLERANCE_POSSESSIONS,
     MIN_POSSESSIONS,
@@ -350,6 +351,26 @@ def load(
         typer.echo("load: nothing to load")
     if any(result.status is RunStatus.FAILED for result in results):
         raise typer.Exit(1)
+
+
+@app.command("derive", help=COMMANDS["derive"])
+def derive(date: DateOption = None, start: FromOption = None, end: ToOption = None) -> None:
+    days = _days(date, start, end)
+    if days is None:
+        raise typer.BadParameter("pass --date or --from/--to")
+    settings = Settings()
+    rule = GarbageTimeRule.from_settings(settings)
+    engine = make_engine(settings)
+    try:
+        db = make_session_factory(engine)
+        for day in days:
+            flagged = write_garbage_time(db, day, rule)
+            typer.echo(
+                f"derive {day}: garbage time: {flagged['games']} games, {flagged['stints']} "
+                f"stints, {flagged['flagged']} flagged, {flagged['changed']} changed"
+            )
+    finally:
+        engine.dispose()
 
 
 def _team_ids(teams: str | None) -> list[int]:
