@@ -54,6 +54,10 @@ backend/
     scheduler.py           # APScheduler jobs → CLI command functions
     season.py              # season label "2026-27", phase, counted-game filter
     teams.py               # canonical 30-team table: nba_team_id ↔ tricode ↔ espn id
+    names.py               # player names → NBA.com IDs, normalized, plus aliases.yml
+    aliases.yml            # source spellings that differ from NBA.com's, → player ID
+    overlays.py            # overlay registry: name → job family + run function
+    injuries.py            # the `injuries` overlay: injury report → injury_status
     sources/
       nba_http.py          # curl_cffi NbaSession (port). The only importer of curl_cffi.
       cache.py             # RawCache: path layout, write-once, read, list, integrity
@@ -87,7 +91,7 @@ backend/
       routers/ league.py teams.py players.py games.py meta.py
       schemas.py           # response models; the frontend's TS types are generated from these
   tests/
-    fixtures/              # recorded raw responses per endpoint, trimmed; fixture PDFs
+    fixtures/              # recorded raw responses per endpoint, trimmed; injury/report/ PDFs
 frontend/
   package.json  vite.config.ts  src/ ...
 deploy/
@@ -170,7 +174,7 @@ The same `NbaSession` is used; cdn.nba.com also fingerprints TLS.
 
 ### 4.3 Injury report (`sources/injury_pdf.py`)
 
-The NBA publishes `https://ak-static.cms.nba.com/referee/injury/Injury-Report_<YYYY-MM-DD>_<HH>_<MM>[AM|PM].pdf` every 15 minutes around the clock, stamped in Eastern time; a report not published answers 403 (pinned in NEU-1867; the stamp had no minutes, and reports were hourly, until partway through 2025-26). Discovery tries the newest quarter hours of the date first. Parse with pdfplumber into rows `(report_datetime, game_date, game_id?, team, player, status, reason)`, status ∈ {Out, Doubtful, Questionable, Probable, Available}. Games are matched to `game` rows on date + matchup text. The parser is isolated and fixture-tested against at least three real PDFs (a weekday, a weekend, one with "NOT YET SUBMITTED" teams). On fetch or parse failure, the ESPN injuries client runs and its rows are stored with `source='espn'` and `status` mapped (Out→Out, Day-To-Day→Questionable, GTD→Questionable); the UI shows a stale marker when the latest row for a team is from ESPN.
+The NBA publishes `https://ak-static.cms.nba.com/referee/injury/Injury-Report_<YYYY-MM-DD>_<HH>_<MM>[AM|PM].pdf` every 15 minutes around the clock on any day with games that day or the next (none in the All-Star break), stamped in Eastern time; a report not published answers 403 (pinned in NEU-1867; the stamp had no minutes, and reports were hourly, until partway through 2025-26). Discovery tries the newest quarter hours of the date first. Parse with pdfplumber into rows `(report_datetime, game_date, game_id?, team, player, status, reason)`, status ∈ {Out, Doubtful, Questionable, Probable, Available}. Games are matched to `game` rows on date + matchup text. The parser is isolated and fixture-tested against at least three real PDFs (a weekday, a weekend, one with "NOT YET SUBMITTED" teams). On fetch or parse failure, the ESPN injuries client runs and its rows are stored with `source='espn'` and `status` mapped (Out→Out, Day-To-Day→Questionable, GTD→Questionable); the UI shows a stale marker when the latest row for a team is from ESPN.
 
 ### 4.4 Transactions (`sources/transactions.py`)
 

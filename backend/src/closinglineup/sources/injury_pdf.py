@@ -114,6 +114,8 @@ def candidates(day: date, now: datetime) -> list[datetime]:
         return []
     found: list[datetime] = []
     at = latest
+    # Wall-clock steps: on a DST night the 1:00-3:00 quarter hours repeat or skip, which only a
+    # run in those hours, and no scheduled one, would meet.
     while at.date() == day and len(found) < DISCOVERY_TRIES:
         found.append(at)
         at -= PUBLISHED_EVERY
@@ -126,6 +128,7 @@ def discover(day: date, session: NbaSession, cache: RawCache, now: datetime) -> 
     Each candidate quarter hour, newest first, is read from the cache if it is there and fetched
     otherwise; a 403 or 404 moves on to the one before. Only a 200 whose body is a PDF is cached.
     """
+    answers: list[int] = []
     for at in candidates(day, now):
         key = report_key(at)
         path = cache.path(SOURCE, ENDPOINT, key, suffix=PDF_SUFFIX)
@@ -134,6 +137,7 @@ def discover(day: date, session: NbaSession, cache: RawCache, now: datetime) -> 
         url = report_url(at)
         response = session.get(url)
         if response.status_code in NOT_PUBLISHED:
+            answers.append(response.status_code)
             continue
         if response.status_code != 200:
             raise NbaHttpError(f"HTTP {response.status_code} from {url}")
@@ -150,7 +154,10 @@ def discover(day: date, session: NbaSession, cache: RawCache, now: datetime) -> 
         )
         log.info("fetched", extra={"source": SOURCE, "endpoint": ENDPOINT, "key": key})
         return path
-    raise InjuryReportNotFoundError(f"no injury report published on {day} by {now.isoformat()}")
+    # Akamai answers a blocked request with a 403 too, so the answers are kept in the message.
+    raise InjuryReportNotFoundError(
+        f"no injury report published on {day} by {now.isoformat()}; answers: {answers}"
+    )
 
 
 def parse(pdf_path: Path) -> InjuryReport:
@@ -227,7 +234,8 @@ def _read_rows(report_datetime: datetime, pages: list[list[list[str]]], name: st
     down from the row above, and joining each reason split across rows back together.
 
     A row with only a reason continues one cut by a page break: the previous page's last line if
-    it starts a page, else the next line, whose reason it begins.
+    it starts a page right after one, else the next line, whose reason it begins. Only the first
+    is in the fixtures; the second is the same break falling a row earlier.
     """
     rows: list[InjuryStatusRow] = []
     not_submitted: list[tuple[date, str]] = []
@@ -235,6 +243,8 @@ def _read_rows(report_datetime: datetime, pages: list[list[list[str]]], name: st
     matchup: tuple[str, str] | None = None
     team: str | None = None
     pending: list[str] = []
+    # Whether the row above was a player's line, which a fragment starting a page may continue.
+    after_line = False
     for page in pages:
         for index, (day, _, teams, team_name, player, status, reason) in enumerate(page):
             if day:
@@ -250,13 +260,18 @@ def _read_rows(report_datetime: datetime, pages: list[list[list[str]]], name: st
                     raise InjuryReportParseError(f"{name}: unknown team {team_name!r}")
             if not player and not status:
                 if reason == NOT_YET_SUBMITTED:
+                    if pending:
+                        raise InjuryReportParseError(
+                            f"{name}: reason text {' '.join(pending)!r} has no line"
+                        )
+                    after_line = False
                     day_of, _, team_of = _context(game_date, matchup, team, name)
                     log.warning(
                         "injury report not yet submitted",
                         extra={"report": name, "game_date": day_of.isoformat(), "team": team_of},
                     )
                     not_submitted.append((day_of, team_of))
-                elif reason and index == 0 and rows and not pending:
+                elif reason and index == 0 and after_line and not pending:
                     rows[-1] = _extend_reason(rows[-1], reason)
                 elif reason:
                     pending.append(reason)
@@ -268,6 +283,7 @@ def _read_rows(report_datetime: datetime, pages: list[list[list[str]]], name: st
                 raise InjuryReportParseError(f"{name}: {team_of} is not in {away}@{home}")
             full_reason = " ".join([*pending, reason]).strip() or None
             pending = []
+            after_line = True
             rows.append(InjuryStatusRow(day_of, away, home, team_of, player, status, full_reason))
     if pending:
         raise InjuryReportParseError(f"{name}: reason text {' '.join(pending)!r} has no line")

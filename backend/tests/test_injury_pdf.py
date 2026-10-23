@@ -20,11 +20,11 @@ from closinglineup.sources.injury_pdf import (
 from closinglineup.sources.nba_http import NbaHttpError, NbaSession, RateLimiter
 from tests.fakes import Connect, ScriptedGet, fake_response
 
-FIXTURES = Path(__file__).parent / "fixtures" / "injury_pdf"
+FIXTURES = Path(__file__).parent / "fixtures" / "injury"
 SRC = Path(__file__).parent.parent / "src"
-WEEKDAY = FIXTURES / "2026-10-22T1700.pdf"
-WEEKEND = FIXTURES / "2026-03-01T1715.pdf"
-MORNING = FIXTURES / "2026-10-22T0900.pdf"
+WEEKDAY = FIXTURES / "report" / "2026-10-22T1700.pdf"
+WEEKEND = FIXTURES / "report" / "2026-03-01T1715.pdf"
+MORNING = FIXTURES / "report" / "2026-10-22T0900.pdf"
 
 
 def _eastern(*parts: int) -> datetime:
@@ -109,6 +109,37 @@ def test_a_reason_cut_by_a_page_break_is_joined_to_its_line() -> None:
     )
 
 
+GAME = ["10/22/2026", "07:00 (ET)", "CLE@PHI", "Cleveland Cavaliers"]
+BLANK = ["", "", "", ""]
+
+
+def test_a_reason_cut_before_its_line_at_a_page_break_begins_that_lines_reason() -> None:
+    pages = [
+        [[*GAME, "Allen, Jarrett", "Out", "Injury/Illness - Left Knee"], [*BLANK, "", "", "Left"]],
+        [[*BLANK, "Diop, Khalifa", "Out", "Ankle Sprain"]],
+    ]
+
+    rows = injury_pdf._read_rows(_eastern(2026, 10, 22, 17, 0), pages, "test")  # pyright: ignore[reportPrivateUsage]
+
+    assert [(row.player, row.reason) for row in rows.rows] == [
+        ("Allen, Jarrett", "Injury/Illness - Left Knee"),
+        ("Diop, Khalifa", "Left Ankle Sprain"),
+    ]
+
+
+def test_a_fragment_starting_a_page_after_a_team_not_yet_submitted_is_refused() -> None:
+    pages = [
+        [
+            [*GAME, "Allen, Jarrett", "Out", "Injury/Illness - Left Knee"],
+            ["", "", "", "Philadelphia 76ers", "", "", "NOT YET SUBMITTED"],
+        ],
+        [[*BLANK, "", "", "Soreness"]],
+    ]
+
+    with pytest.raises(injury_pdf.InjuryReportParseError, match="'Soreness' has no line"):
+        injury_pdf._read_rows(_eastern(2026, 10, 22, 17, 0), pages, "test")  # pyright: ignore[reportPrivateUsage]
+
+
 def test_candidates_are_the_newest_quarter_hours_of_the_date_by_now() -> None:
     now = _eastern(2026, 10, 22, 13, 7)
 
@@ -187,7 +218,7 @@ def test_discover_raises_when_no_report_was_published(tmp_path: Path) -> None:
     tries = injury_pdf.DISCOVERY_TRIES
     get = ScriptedGet(*(fake_response(403) for _ in range(tries)))
 
-    with pytest.raises(InjuryReportNotFoundError, match="no injury report published on"):
+    with pytest.raises(InjuryReportNotFoundError, match=r"published on .*answers: \[403, 403,"):
         discover(date(2026, 10, 22), _session(get, clock), RawCache(tmp_path, clock), NOW)
     assert len(get.calls) == tries
 

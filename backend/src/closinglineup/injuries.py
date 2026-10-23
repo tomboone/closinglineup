@@ -42,6 +42,8 @@ class Resolved:
     unresolved: list[str]
     # Each matchup with no `game` row, as "AWY@HOM YYYY-MM-DD".
     unmatched_games: list[str]
+    # Each line naming a player already named for its game date, which has no row, as above.
+    duplicates: list[str]
 
 
 def resolve_rows(
@@ -49,10 +51,11 @@ def resolve_rows(
 ) -> Resolved:
     """The report's lines as `injury_status` rows, with IDs for their player, team and game.
 
-    A player named twice for one game date keeps his first line; the second is logged.
+    A player named twice for one game date keeps his first line; the second is logged and listed.
     """
     rows: list[dict[str, Any]] = []
     unresolved: list[str] = []
+    duplicates: list[str] = []
     unmatched: set[str] = set()
     seen: set[tuple[int, date]] = set()
     for line in report.rows:
@@ -67,6 +70,7 @@ def resolve_rows(
             continue
         if (player_id, line.game_date) in seen:
             log.warning("injury report names a player twice", extra={"line": where})
+            duplicates.append(where)
             continue
         seen.add((player_id, line.game_date))
         away, home = by_tricode(line.away).nba_team_id, by_tricode(line.home).nba_team_id
@@ -85,7 +89,7 @@ def resolve_rows(
                 "source": PDF_SOURCE,
             }
         )
-    return Resolved(rows, unresolved, sorted(unmatched))
+    return Resolved(rows, unresolved, sorted(unmatched), duplicates)
 
 
 def run(jobs: "Jobs", day: date) -> dict[str, Any]:
@@ -115,6 +119,7 @@ def run(jobs: "Jobs", day: date) -> dict[str, Any]:
         "not_submitted": [f"{team} {when.isoformat()}" for when, team in report.not_submitted],
         "unresolved": resolved.unresolved,
         "unmatched_games": resolved.unmatched_games,
+        "duplicates": resolved.duplicates,
     }
 
 

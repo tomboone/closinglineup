@@ -1,5 +1,6 @@
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,13 @@ from closinglineup.heartbeat import Heartbeat
 from closinglineup.names import NameIndex, load_aliases
 from closinglineup.overlays import by_name
 from closinglineup.settings import Settings
-from closinglineup.sources.injury_pdf import EASTERN, parse, report_url
+from closinglineup.sources.injury_pdf import (
+    EASTERN,
+    InjuryReport,
+    InjuryStatusRow,
+    parse,
+    report_url,
+)
 from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import by_tricode
 from tests.fakes import Connect, RoutedGet
@@ -59,6 +66,17 @@ def test_every_line_but_an_unknown_player_resolves_to_a_player_and_team(
     assert por and all(row["game_id"] == GAME_ID for row in por)
     assert "POR@ATL 2026-03-01" not in resolved.unmatched_games
     assert "MIN@DEN 2026-03-01" in resolved.unmatched_games
+    assert resolved.duplicates == []
+
+
+def test_a_player_named_twice_for_a_date_keeps_his_first_line_and_lists_the_second() -> None:
+    line = InjuryStatusRow(DAY, "POR", "ATL", "POR", "Yang, Hansen", "Out", None)
+    report = InjuryReport(REPORTED, [line, replace(line, status="Available")], [])
+
+    resolved = injuries.resolve_rows(report, _index(), {}, {})
+
+    assert [row["status"] for row in resolved.rows] == ["Out"]
+    assert resolved.duplicates == ["Yang, Hansen (POR 2026-03-01)"]
 
 
 def test_the_overlay_is_registered_in_the_injuries_family() -> None:
