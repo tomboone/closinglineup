@@ -10,7 +10,8 @@ stats.nba.com's `playbyplayv2`, which its `stats_nba` loaders read, answers `{}`
 File layout, as pbpstats 1.3.11 (`PBPSTATS_VERSION`) reads it under `DATA_DIR/pbpstats/`:
 
     pbp/live_<game_id>.json       `raw/cdn/playbyplay/<game_id>.json`, copied by `materialize`
-                                  less its `game` actions, with the 2026-27 fixes (below)
+                                  less its `game` actions, with the 2026-27 fixes (below) and
+                                  the game's action overrides
     overrides/missing_period_starters.json
                                   {game_id: {period: {team_id: [five player IDs]}}}, for a period
                                   whose starters pbpstats cannot infer from its events
@@ -18,9 +19,15 @@ File layout, as pbpstats 1.3.11 (`PBPSTATS_VERSION`) reads it under `DATA_DIR/pb
 The live loaders read nothing else: no box score, and no other override. They do load
 `possession_change_event_overrides.json` and `non_possession_changing_event_overrides.json`, but
 only the `stats_nba` events consult them, so they are not committed; nor is
-`bad_pbp_possessions.json`, which only the `stats_nba` possession loader reads. The override file
-is committed under `backend/pbpstats_overrides/`; `materialize` copies it in beside each game it
-writes, so pbpstats always reads the committed version.
+`bad_pbp_possessions.json`, which only the `stats_nba` possession loader reads. Their one override
+file is committed under `backend/pbpstats_overrides/`; `materialize` copies it in beside each game
+it writes, so pbpstats always reads the committed version.
+
+pbpstats has no override for an action's own fields, so this module keeps one beside it,
+`backend/pbpstats_overrides/action_overrides.json`: {game_id: {action_number: {field: value}}},
+for a scorer's error in the feed, such as an action stamped later on the clock than the one after
+it. `materialize` applies it to the actions it writes; pbpstats never reads it. Each entry in
+either file has its reason in the README beside them.
 
 Ordering quirks handled here, seen in 2025-26 feeds:
 
@@ -77,6 +84,8 @@ PBPSTATS_VERSION = "1.3.11"
 # `/app/src/closinglineup/parse/pbp.py` in the image.
 OVERRIDES_SOURCE = Path(__file__).resolve().parents[3] / "pbpstats_overrides"
 OVERRIDE_FILES = ("missing_period_starters.json",)
+# Read by `materialize`, not pbpstats, so it is not installed with them.
+ACTION_OVERRIDES = "action_overrides.json"
 
 # The live feed's game start and end markers, which pbpstats 1.3.11 cannot read.
 GAME_ACTION = "game"
@@ -145,7 +154,8 @@ def install_overrides(data_dir: Path) -> None:
 
 def materialize(cache: RawCache, game_id: str) -> Path:
     """Copy the game's cached live play-by-play into pbpstats's layout, less its `game`
-    actions, each with a `personId` and in `orderNumber` order; return the file written.
+    actions, each with a `personId`, its action overrides applied, and in `orderNumber` order;
+    return the file written.
 
     The overrides are installed alongside, so pbpstats never reads a stale set.
     """
@@ -156,7 +166,10 @@ def materialize(cache: RawCache, game_id: str) -> Path:
     payload: dict[str, Any] = json.loads(content)
     game: dict[str, Any] = payload["game"]
     actions: list[dict[str, Any]] = sorted(
-        ({"personId": 0, **a} for a in game["actions"] if a["actionType"] != GAME_ACTION),
+        _override_actions(
+            game_id,
+            [{"personId": 0, **a} for a in game["actions"] if a["actionType"] != GAME_ACTION],
+        ),
         key=lambda a: a["orderNumber"],
     )
     payload = {**payload, "game": {**game, "actions": actions}}
@@ -166,6 +179,20 @@ def materialize(cache: RawCache, game_id: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(path, json.dumps(payload).encode())
     return path
+
+
+def _override_actions(game_id: str, actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`actions` with the game's committed action overrides applied."""
+    committed: dict[str, dict[str, dict[str, Any]]] = json.loads(
+        (OVERRIDES_SOURCE / ACTION_OVERRIDES).read_text()
+    )
+    overrides = {int(number): fields for number, fields in committed.get(game_id, {}).items()}
+    missing = overrides.keys() - {a["actionNumber"] for a in actions}
+    if missing:
+        raise PbpError(
+            f"game {game_id}: {ACTION_OVERRIDES} names actions not in the feed: {sorted(missing)}"
+        )
+    return [{**a, **overrides.get(a["actionNumber"], {})} for a in actions]
 
 
 def stints_for_game(data_dir: Path, game_id: str) -> list[StintRow]:
