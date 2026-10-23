@@ -25,7 +25,7 @@ Non-goals for v1: fantasy, any ML or predictive model, own RAPM/EPM, play-type c
 | Injuries | Official NBA injury-report PDF, parsed several times a day, is primary. ESPN's injuries JSON (nba-today client, plain httpx) is the fallback and is marked stale in the UI when used. |
 | Transactions | NBA.com player-movement JSON (`stats.nba.com/js/data/playermovement/NBA_Player_Movement.json`), daily. |
 | Impact metrics | Local BPM always; EPM (Dunks & Threes) and DARKO daily snapshots, each behind a terms-of-use check at build time and an enable flag. `impact_snapshot.source` keeps them interchangeable. |
-| Contracts | Spotrac team cap pages weekly; RealGM fallback. Approximate is fine. |
+| Contracts | Hoops Rumors' two seasonal articles weekly, the non-guaranteed list and the early guarantee dates; non-guaranteed contracts only, no fallback. Spotrac's and RealGM's terms forbid scraping (ADR-0004). |
 | Backfill | 2025-26 complete, 2026-27 to date. Shot charts weekly. |
 | Scheduling | One long-running `worker` container with APScheduler. Every job is also a CLI command. |
 | Frontend | React + Vite + TypeScript + ECharts, built into the app image and served as static files by FastAPI. Views: team, player, league morning page, game. |
@@ -58,6 +58,7 @@ backend/
     aliases.yml            # source spellings that differ from NBA.com's, → player ID
     overlays.py            # overlay registry: name → job family + run function
     injuries.py            # the `injuries` overlay: injury report → injury_status
+    contracts.py           # the `contracts` overlay: Hoops Rumors → contract
     sources/
       nba_http.py          # curl_cffi NbaSession (port). The only importer of curl_cffi.
       cache.py             # RawCache: path layout, write-once, read, list, integrity
@@ -67,7 +68,7 @@ backend/
       espn_injuries.py     # fallback (port nba-today's ESPN injuries client)
       transactions.py      # NBA.com player-movement JSON
       epm.py  darko.py     # impact metric scrapers
-      spotrac.py           # contracts
+      hoopsrumors.py       # contracts: non-guaranteed list + guarantee dates
     parse/
       box.py  matchups.py  hustle.py  usage.py   # raw JSON → typed rows
       pbp.py               # pbpstats bridge: file-mode loaders → stints, possessions, lineups
@@ -115,7 +116,7 @@ parse  : raw JSON ──▶ typed rows ──▶ DATA_DIR/parquet/<table>/<game_
          (pbpstats reads DATA_DIR/pbpstats/… in file mode for stints/possessions;
           shot files are per shot chart: DATA_DIR/parquet/shot/<player_id>_<season>_<type>.parquet)
 load   : parquet ──COPY──▶ staging ──upsert──▶ Postgres tables (§6)
-overlay: injury PDF / ESPN / transactions / EPM / DARKO / Spotrac ──▶ snapshot tables (§6.3)
+overlay: injury PDF / ESPN / transactions / EPM / DARKO / Hoops Rumors ──▶ snapshot tables (§6.3)
 derive : refresh views → rotation_state → rotation_event → flags → bpm → reconcile
 api    : FastAPI reads Postgres only
 ```
@@ -129,7 +130,7 @@ A `load_log` row per (table, game_date, step) records what ran; `fetch --missing
 | `nightly` | 03:30 daily | schedule refresh → fetch yesterday's final games (all per-game endpoints) → parse → load → derive → reconcile sample | `HEALTHCHECKS_URL_NIGHTLY` |
 | `injuries` | 10:00, 13:00, 16:00, 18:30 | injury PDF (ESPN fallback) → `injury_status` | `HEALTHCHECKS_URL_DAILY` (last run of the day pings) |
 | `daily_overlays` | 09:00 | transactions, EPM, DARKO, rosters (`commonteamroster`, `commonallplayers`) | `HEALTHCHECKS_URL_DAILY` |
-| `weekly` | Mon 04:30 | shot charts for every active player, Spotrac contracts, `leaguedash*` cross-check pulls | `HEALTHCHECKS_URL_WEEKLY` |
+| `weekly` | Mon 04:30 | shot charts for every active player, Hoops Rumors contracts, `leaguedash*` cross-check pulls | `HEALTHCHECKS_URL_WEEKLY` |
 | `poll_finals` | every 30 min 18:00–02:00 | cdn.nba.com scoreboard: mark games final so `nightly` knows what to fetch | none |
 
 A job that fails pings `/fail` with the exception summary in the body and leaves `load_log` rows for the next run to pick up. Jobs never overlap: APScheduler `max_instances=1`, `coalesce=True`.
@@ -186,13 +187,26 @@ The NBA publishes `https://ak-static.cms.nba.com/referee/injury/Injury-Report_<Y
 - DARKO: darko.app's DPM leaderboard, daily, `source='darko'`, DPM with O/D split and projected minutes (`x_minutes`) as `minutes_basis`. Its "Download CSV" button serializes the board in the browser, so the fetch is the data file behind it, the leaderboard route's SvelteKit `/__data.json` (devalue-serialized; `sources/darko.py` documents the layout), which carries every player's `nba_id`; a line without one resolves by name and the alias table (NEU-1871). The Shiny app at apanalytics.shinyapps.io was taken offline in June 2026 and points to darko.app, which publishes no terms of use and no robots.txt (checked 2026-10-23). `DARKO_ENABLED` flag; off, the overlay is a no-op with no request.
 - BPM: Basketball Reference's published BPM 2.0 formula over `player_game` sums and team ratings, computed in `derive`, `source='bpm_local'`, always on. `derive/bpm.py` runs as a `nightly` step after load, over the season's regular-season games final through the date, with the team adjustment to the team's own net rating (not schedule-adjusted) and the lead correction from half its margin; every 2025-26 player with 1,000+ minutes lands within ±1.0 of the published value, and the league's minutes-weighted mean within ±0.2 of 0 (`tests/test_bpm.py`, NEU-1872).
 
-### 4.6 Contracts (`sources/spotrac.py`)
+### 4.6 Contracts (`sources/hoopsrumors.py`, `contracts.py`)
 
-Spotrac team cap page per team, weekly → `contract(player, season, salary, guaranteed, option_type, option_date, trade_eligible_date, two_way, as_of_date)`. Players are matched by name + team with a manual alias table in `backend/src/closinglineup/aliases.yml` for mismatches (`backend/data/` is the local data volume, not committed; NEU-1867). RealGM is the fallback parser behind the same row type.
+Spotrac's and RealGM's terms forbid automated access, and both answer a non-browser client with 403; ESPN's terms forbid scraping, and HoopsHype is Spotrac's (ADR-0004). Hoops Rumors' robots.txt allows its articles (`Crawl-delay: 1`) and it publishes no terms of use. Each season, until January 10, it maintains two articles, whose URLs are committed per season in `sources/hoopsrumors.py`'s `ARTICLES` (added by hand, May to July). A season with no entry raises, naming it.
+
+- **"<season> Non-Guaranteed Contracts By Team"**: an `<h3>` per team, by full name, over its players without a fully guaranteed salary (non-guaranteed, partially guaranteed, Exhibit 9 or 10): `Name`, or `Name ($X)` for one not on a minimum salary, optionally with `Partially guaranteed for $Y.` Two-way contracts are not on it.
+- **"Early NBA Salary Guarantee Dates For <season>"**: lines under date headings (June to December in the season's first year, January to May in its second), or under "First day of NBA regular season" or "First day of team's regular season". Each line is `Name (Team): <before> becomes|increases to <after>.`, ending `(✅)` or `(❌)` once settled.
+
+The `contracts` overlay (weekly, behind `HOOPSRUMORS_ENABLED`) fetches both pages with plain httpx, a second apart. It makes the run date's `source='hoopsrumors'` rows exactly the list: one per listed player whose name resolves. The name resolves through the name index and `aliases.yml` against the team's roster on the date, as in §4.5's fallback.
+
+Each row has:
+
+- **salary**: the list's amount, else his guarantee-date lines' full salary, else NULL, with `minimum_salary` set when the list gives no amount;
+- **guaranteed**: the partial guarantee, else 0;
+- **guarantee_date** and **guaranteed_after**: from his first unsettled guarantee-date line on or after the run date for the same team. A named heading resolves to the season's, or the team's, first regular-season game. With no such line, they are January 7 and his salary.
+
+A player absent from the list is taken as fully guaranteed. Two-way status is `roster_membership`'s alone. An unresolved name has no row and is listed in the run's detail as `Name (TRI)`, with its ready-to-paste `aliases.yml` line, `Name: <player ID>`. A fetch or parse failure fails the step and leaves the last snapshot in place. No source carries options, trade-eligible dates or fully guaranteed salaries (NEU-1873).
 
 ## 5. Raw cache (`sources/cache.py`)
 
-`DATA_DIR/raw/<source>/<endpoint>/<key>.json` where `key` is the game ID, the date, `<player_id>_<season>` or `<team_id>_<season>` as appropriate; injury PDFs are kept as `raw/injury/report/<report_datetime>.pdf`, the report's Eastern time as `YYYY-MM-DDTHHMM` (NEU-1867). ESPN's injuries, a snapshot fetched afresh on each fallback, are kept as `raw/espn/injuries/<instant fetched, UTC as YYYYMMDDTHHMMSSZ>.json`, like today's CDN scoreboard (NEU-1868). darko.app's leaderboard is kept as `raw/darko/leaderboard/<date>.json`, the date it is fetched for, so the day's re-run reads it (NEU-1871). Files are write-once; a `.meta.json` sibling records `fetched_at`, status and the request params. `closinglineup reparse --from --to` re-runs parse → load → derive from the cache without the network. pbpstats override files (`DATA_DIR/pbpstats/overrides/`) are committed to the repo under `backend/pbpstats_overrides/` and copied in by `parse.pbp.materialize` before pbpstats reads a game.
+`DATA_DIR/raw/<source>/<endpoint>/<key>.json` where `key` is the game ID, the date, `<player_id>_<season>` or `<team_id>_<season>` as appropriate; injury PDFs are kept as `raw/injury/report/<report_datetime>.pdf`, the report's Eastern time as `YYYY-MM-DDTHHMM` (NEU-1867). ESPN's injuries, a snapshot fetched afresh on each fallback, are kept as `raw/espn/injuries/<instant fetched, UTC as YYYYMMDDTHHMMSSZ>.json`, like today's CDN scoreboard (NEU-1868). darko.app's leaderboard is kept as `raw/darko/leaderboard/<date>.json`, the date it is fetched for, so the day's re-run reads it (NEU-1871). Hoops Rumors' two articles are kept the same way, as `raw/hoopsrumors/non_guaranteed/<date>.html` and `raw/hoopsrumors/guarantee_dates/<date>.html` (NEU-1873). Files are write-once; a `.meta.json` sibling records `fetched_at`, status and the request params. `closinglineup reparse --from --to` re-runs parse → load → derive from the cache without the network. pbpstats override files (`DATA_DIR/pbpstats/overrides/`) are committed to the repo under `backend/pbpstats_overrides/` and copied in by `parse.pbp.materialize` before pbpstats reads a game.
 
 ## 6. Data model (Postgres, schema `public`)
 
@@ -219,7 +233,7 @@ Every table has `created_at` / `updated_at`. IDs are NBA's (`nba_player_id`, `nb
 - `injury_status(id, report_datetime, game_date, game_id NULL, player_id, team_id, status, reason, source ∈ {pdf, espn})`
 - `transaction(id, date, type, player_id, from_team_id NULL, to_team_id NULL, detail)`
 - `impact_snapshot(date, player_id, source ∈ {epm, darko, bpm_local}, value, o_value, d_value, minutes_basis)` PK `(date, player_id, source)`
-- `contract(id, player_id, team_id, season, salary, guaranteed, option_type NULL, option_date NULL, trade_eligible_date NULL, two_way, as_of_date, source)` — `team_id` is the team whose cap page lists it: a waived player is on his old team's as dead money and his new team's with a live contract, so it is in the natural key (NEU-1866)
+- `contract(id, player_id, team_id, season, salary NULL, minimum_salary, guaranteed, guarantee_date, guaranteed_after NULL, as_of_date, source ∈ {hoopsrumors})` — non-guaranteed contracts only, one row per listed player per weekly `as_of_date`; a player with no row that week is fully guaranteed (ADR-0004). `salary` and `guaranteed_after` are NULL for a minimum-salary contract no source line prices. `team_id` is in the natural key, `(player_id, team_id, season, as_of_date, source)`: a waived player's old contract and his new team's are each a row (NEU-1866, NEU-1873)
 
 ### 6.4 Derived
 
@@ -305,7 +319,7 @@ Routes: `/` (league morning page), `/teams/:tricode`, `/players/:id`, `/games/:g
 | `NBA_RPS` | `1.0` | NBA.com requests per second |
 | `NBA_TIMEOUT_SECONDS` | `30` | |
 | `HEALTHCHECKS_URL_NIGHTLY` / `_DAILY` / `_WEEKLY` | unset → no-op | |
-| `EPM_ENABLED`, `DARKO_ENABLED`, `SPOTRAC_ENABLED` | `false` until terms are checked | |
+| `EPM_ENABLED`, `DARKO_ENABLED`, `HOOPSRUMORS_ENABLED` | `false` until terms are checked | Hoops Rumors replaces `SPOTRAC_ENABLED` (ADR-0004) |
 | `GARBAGE_TIME_RULE` | `25:540,20:360,15:180,10:60` | |
 | `TIER_STARTER_MIN`, `TIER_CORE_SHARE`, `TIER_FRINGE_PLAYED_RATE` | `4/5`, `0.18`, `0.5` | |
 | `LOG_LEVEL` | `INFO` | |

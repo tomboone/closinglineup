@@ -91,3 +91,50 @@ def test_downgrade_to_the_baseline_drops_the_data_tables_cleanly(database_url: s
         # Leave the database at head for every other test, which upgrades and asserts on it
         # itself; asserting here would mask a failed downgrade.
         alembic("upgrade", "head", database_url=database_url)
+
+
+def _columns(database_url: str, table: str) -> set[str]:
+    engine = create_engine(database_url)
+    try:
+        return {column["name"] for column in inspect(engine).get_columns(table)}
+    finally:
+        engine.dispose()
+
+
+# NEU-1873: Hoops Rumors' non-guaranteed contracts in place of Spotrac's cap pages.
+CONTRACT_FROM_HOOPS_RUMORS = "e347b161377e"
+CONTRACT_KEY_AND_TIMESTAMPS = {
+    "id",
+    "player_id",
+    "team_id",
+    "season",
+    "as_of_date",
+    "source",
+    "created_at",
+    "updated_at",
+}
+
+
+def test_the_contract_migration_upgrades_and_downgrades_its_columns(database_url: str) -> None:
+    assert alembic("upgrade", "head", database_url=database_url).returncode == 0
+    assert _columns(database_url, "contract") == CONTRACT_KEY_AND_TIMESTAMPS | {
+        "salary",
+        "minimum_salary",
+        "guaranteed",
+        "guarantee_date",
+        "guaranteed_after",
+    }
+
+    downgrade = alembic("downgrade", f"{CONTRACT_FROM_HOOPS_RUMORS}-1", database_url=database_url)
+    try:
+        assert downgrade.returncode == 0, downgrade.stderr
+        assert _columns(database_url, "contract") == CONTRACT_KEY_AND_TIMESTAMPS | {
+            "salary",
+            "guaranteed",
+            "option_type",
+            "option_date",
+            "trade_eligible_date",
+            "two_way",
+        }
+    finally:
+        alembic("upgrade", "head", database_url=database_url)

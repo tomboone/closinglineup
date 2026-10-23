@@ -29,7 +29,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.healthchecks_url_weekly is None
     assert settings.epm_enabled is False
     assert settings.darko_enabled is False
-    assert settings.spotrac_enabled is False
+    assert settings.hoopsrumors_enabled is False
     assert settings.garbage_time_rule == ((25, 540), (20, 360), (15, 180), (10, 60))
     assert settings.tier_starter_min == (4, 5)
     assert settings.tier_core_share == 0.18

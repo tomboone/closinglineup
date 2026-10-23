@@ -66,10 +66,8 @@ TRANSACTION_TYPES = (
     "other",
 )
 IMPACT_SOURCES = ("epm", "darko", "bpm_local")
-# Not enumerated in spec §4.6: a player, team or early termination option.
-OPTION_TYPES = ("player", "team", "early_termination")
-# Spec §4.6: Spotrac, with RealGM the fallback behind the same row type.
-CONTRACT_SOURCES = ("spotrac", "realgm")
+# Spec §4.6: Hoops Rumors' non-guaranteed list, with no fallback (ADR-0004).
+CONTRACT_SOURCES = ("hoopsrumors",)
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> CheckConstraint:
@@ -414,16 +412,18 @@ class ImpactSnapshot(Timestamps, Base):
 
 
 class Contract(Timestamps, Base):
-    """A player's contract for one season as a team's cap page showed it on `as_of_date` (spec
-    §4.6). `salary` and `guaranteed` are dollars: a partial guarantee is common.
+    """A player's non-guaranteed contract for one season as the week's list showed it on
+    `as_of_date` (spec §4.6, ADR-0004); a player with none that week is fully guaranteed. The
+    amounts are dollars. `salary` is NULL for a minimum-salary contract whose amount no source
+    line gives; `guaranteed` is what is guaranteed now, and `guaranteed_after` what is from
+    `guarantee_date`, the date it next rises (January 7 by default).
 
-    `team_id`, the team whose page lists it, is in its natural key: a waived player is on his old
-    team's page as dead money and on his new team's with a live contract (NEU-1866)."""
+    `team_id` is in its natural key: a waived player's old contract and his new team's are each a
+    row (NEU-1866)."""
 
     __tablename__ = "contract"
     __table_args__ = (
         UniqueConstraint("player_id", "team_id", "season", "as_of_date", "source"),
-        _one_of("option_type", OPTION_TYPES),
         _one_of("source", CONTRACT_SOURCES),
     )
 
@@ -431,11 +431,10 @@ class Contract(Timestamps, Base):
     player_id: Mapped[int]
     team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
     season: Mapped[str] = mapped_column(String)
-    salary: Mapped[int]
+    salary: Mapped[int | None]
+    minimum_salary: Mapped[bool]
     guaranteed: Mapped[int]
-    option_type: Mapped[str | None] = mapped_column(String)
-    option_date: Mapped[date | None]
-    trade_eligible_date: Mapped[date | None]
-    two_way: Mapped[bool]
+    guarantee_date: Mapped[date]
+    guaranteed_after: Mapped[int | None]
     as_of_date: Mapped[date]
     source: Mapped[str] = mapped_column(String)

@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # Off until each source's terms of use are checked (spec §2).
     epm_enabled: bool = False
     darko_enabled: bool = False
-    spotrac_enabled: bool = False
+    hoopsrumors_enabled: bool = False
 
     garbage_time_rule: Annotated[GarbageTimeRule, NoDecode] = Field(
         default=((25, 540), (20, 360), (15, 180), (10, 60)), min_length=1

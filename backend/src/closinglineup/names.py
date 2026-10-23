@@ -1,7 +1,7 @@
 """Matching a source's spelling of a player's name to his NBA.com player ID.
 
 Sources other than NBA.com's JSON name players rather than identify them: the injury report, and
-Spotrac (spec §4.6). A name is matched to `player.name`, NBA.com's `DISPLAY_FIRST_LAST`, with
+Hoops Rumors (spec §4.6). A name is matched to `player.name`, NBA.com's `DISPLAY_FIRST_LAST`, with
 case, accents and punctuation ignored. Where a source spells a player differently, as the injury
 report's "Yang, Hansen" for NBA.com's Yang Hansen does, the alias table `aliases.yml`, beside
 this module, maps the source's spelling to his ID.
