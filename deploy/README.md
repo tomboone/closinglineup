@@ -191,18 +191,19 @@ docker compose run --rm worker closinglineup fetch --rosters --season 2025-26
 docker compose run --rm worker closinglineup fetch --rosters --season 2026-27
 ```
 
-**Parse and load** each season's dates, then build its roster memberships from the games just loaded.
-Rosters are snapshots, so the memberships of a past season come from its games: a span per run of games
-a player had a box-score line for with one team (`nightly` rebuilds the current season's after each
-load). A date with no games parses to empty files, so the ranges can be generous:
+**Parse and load** each season's dates, store the transactions, then build the roster memberships.
+Rosters are snapshots, so `load --memberships` builds every season's memberships from the rosters, the
+transactions (NBA.com's player movement, every move since 2015) and the games just loaded together, and
+replaces the whole table (`nightly` rebuilds it after each load). A date with no games parses to empty
+files, so the ranges can be generous:
 
 ```sh
 docker compose run --rm worker closinglineup parse --from 2025-10-01 --to 2026-06-30
 docker compose run --rm worker closinglineup load --from 2025-10-01 --to 2026-06-30
-docker compose run --rm worker closinglineup load --memberships --season 2025-26
 docker compose run --rm worker closinglineup parse --from 2026-10-01 --to 2026-10-22
 docker compose run --rm worker closinglineup load --from 2026-10-01 --to 2026-10-22
-docker compose run --rm worker closinglineup load --memberships --season 2026-27
+docker compose run --rm worker closinglineup overlays transactions
+docker compose run --rm worker closinglineup load --memberships
 ```
 
 `parse` lists any game it could not read (a play-by-play pbpstats needs an override for, say) and exits 1;

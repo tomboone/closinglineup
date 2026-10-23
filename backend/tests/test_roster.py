@@ -9,9 +9,8 @@ from closinglineup.parse.roster import (
     contract_type,
     parse_players,
     parse_roster,
-    participation_spans,
 )
-from closinglineup.parse.rows import ParseError, PlayerRow, RosterMembershipRow
+from closinglineup.parse.rows import ParseError, PlayerRow
 
 FIXTURES = Path(__file__).parent / "fixtures" / "nba_stats"
 GSW = 1610612744
@@ -92,53 +91,3 @@ def test_a_traded_draft_pick_has_no_draft_slot() -> None:
 def test_a_payload_without_the_result_set_is_an_error() -> None:
     with pytest.raises(ParseError, match="CommonTeamRoster"):
         parse_roster(_all_players(), AS_OF)
-
-
-DEN, LAL = 1610612743, 1610612747
-OCT_23, OCT_25, NOV_2, NOV_9, DEC_1 = (
-    date(2025, 10, 23),
-    date(2025, 10, 25),
-    date(2025, 11, 2),
-    date(2025, 11, 9),
-    date(2025, 12, 1),
-)
-
-
-def _span(player_id: int, team_id: int, start: date, end: date) -> RosterMembershipRow:
-    return RosterMembershipRow(
-        player_id=player_id, team_id=team_id, start_date=start, end_date=end, source="player_game"
-    )
-
-
-def test_a_player_on_one_team_has_one_span_from_his_first_game_to_his_last() -> None:
-    appearances = [(STEPHEN_CURRY, GSW, day) for day in (NOV_2, OCT_23, OCT_25)]
-
-    assert participation_spans(appearances) == [_span(STEPHEN_CURRY, GSW, OCT_23, NOV_2)]
-
-
-def test_a_player_traded_away_and_back_has_a_span_per_stint_and_none_overlap() -> None:
-    appearances = [
-        (1, GSW, OCT_23),
-        (1, GSW, OCT_25),
-        (1, DEN, NOV_2),
-        (1, GSW, NOV_9),
-        (1, GSW, DEC_1),
-        (2, LAL, OCT_25),
-    ]
-
-    assert participation_spans(appearances) == [
-        _span(1, GSW, OCT_23, OCT_25),
-        _span(1, DEN, NOV_2, NOV_2),
-        _span(1, GSW, NOV_9, DEC_1),
-        _span(2, LAL, OCT_25, OCT_25),
-    ]
-
-
-def test_spans_are_standard_and_ignore_a_repeated_appearance() -> None:
-    [span] = participation_spans([(1, GSW, OCT_23), (1, GSW, OCT_23)])
-
-    assert (span.start_date, span.end_date, span.contract_type) == (OCT_23, OCT_23, "standard")
-
-
-def test_no_appearances_have_no_spans() -> None:
-    assert participation_spans([]) == []

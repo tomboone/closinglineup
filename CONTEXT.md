@@ -73,7 +73,7 @@ Whether a player can play on a date: active, injury status (Out / Doubtful / Que
 _Avoid_: health, injury (an injury is the reason, availability is the state)
 
 **Transaction**:
-A roster move on a date: sign, waive, trade, two-way conversion, G League assign or recall, option decision.
+A roster move on a date: sign, waive, trade, two-way conversion, G League assign or recall, option decision. NBA.com's player-movement feed carries only the first four.
 
 **Impact snapshot**:
 One public (EPM, DARKO) or locally computed (BPM) impact metric value for a player on a date, with its offensive and defensive split and its minutes basis.

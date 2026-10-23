@@ -5,14 +5,11 @@
 position, and the draft slot when `HOW_ACQUIRED` still reads `#19 Pick in 2023 Draft` (a player
 since traded or signed elsewhere has no draft slot here).
 
-A roster is a snapshot, so its memberships are open-ended from the date it was taken; `derive`
-closes and stitches them with transactions (NEU-1869). The contract type is read from
+A roster is a snapshot, so its memberships are open-ended from the date it was taken;
+`derive.roster` merges them with transactions and games into `roster_membership` (NEU-1869), where
+a game is evidence of a player on a team (`PARTICIPATION_SOURCE`). The contract type is read from
 `HOW_ACQUIRED` where it names one (two-way, 10-day, Exhibit 10), and is `standard` otherwise. The
 markers are asserted, not observed: no row of the GSW fixture roster names a contract type.
-
-A roster fetched today says nothing of who was on a team last season, so `participation_spans`
-builds the history from the games themselves: a membership per run of games a player has a
-box-score line for with one team, from its first game date to its last.
 """
 
 import re
@@ -109,29 +106,3 @@ def parse_roster(roster: Payload, as_of: date) -> list[RosterMembershipRow]:
         )
         for row in result_set(roster, TEAM_ROSTER)
     ]
-
-
-def participation_spans(appearances: Iterable[tuple[int, int, date]]) -> list[RosterMembershipRow]:
-    """A membership per run of consecutive game dates on which a player had a `player_game` row
-    with one team, given as (player ID, team ID, game date), from the run's first date to its last.
-
-    A DNP or inactive line counts, since the player was on the team. A player traded away and
-    back has a span per stint with the team, so his spans never overlap. Participation names no
-    contract, so every span is `standard`.
-    """
-    spans: list[RosterMembershipRow] = []
-    for player_id, team_id, game_date in sorted(set(appearances), key=lambda a: (a[0], a[2], a[1])):
-        last = spans[-1] if spans else None
-        if last is not None and (last.player_id, last.team_id) == (player_id, team_id):
-            spans[-1] = last.model_copy(update={"end_date": game_date})
-            continue
-        spans.append(
-            RosterMembershipRow(
-                player_id=player_id,
-                team_id=team_id,
-                start_date=game_date,
-                end_date=game_date,
-                source=PARTICIPATION_SOURCE,
-            )
-        )
-    return spans

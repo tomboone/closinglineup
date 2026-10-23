@@ -17,9 +17,10 @@ shot chart is cached (`load.parquet`).
 season's cached player list and team rosters as they are when the date is parsed, each roster's
 memberships open from the day it was fetched (`parse.roster`). The cache keeps one roster per team
 per season, so parsing an earlier date after a newer roster fetch writes that fetch's
-memberships, not the ones of the date; the history comes from the season's games once they are
-loaded (`load.memberships`), and `derive` stitches it with transactions (NEU-1869). Reference rows
-a parser cannot read are reported under `REFERENCE` and left out, like a game's.
+memberships, not the ones of the date. `derive.roster` rebuilds the whole `roster_membership` table
+from every cached roster (`roster_snapshots`), the transactions and the loaded games, replacing what
+a load writes there (NEU-1869). Reference rows a parser cannot read are reported under `REFERENCE`
+and left out, like a game's.
 
 A date's games come from its season's schedule, whichever cached copy was fetched last:
 cdn.nba.com's, which `nightly` refreshes, or stats.nba.com's, which `fetch --season` does.
@@ -149,17 +150,8 @@ def _fetched_on(cache: RawCache, endpoint: str, key: str, tz: tzinfo) -> date:
     return datetime.fromisoformat(meta["fetched_at"]).astimezone(tz).date()
 
 
-def _reference_rows(
-    cache: RawCache, season: str, tz: tzinfo
-) -> tuple[list[PlayerRow], list[RosterMembershipRow]]:
-    """The season's players and roster memberships, from whatever of its player list and team
-    rosters are cached.
-
-    A roster fetched after its season ended, as a backfill fetches last season's, still fills in
-    its players, but has no memberships: it would open them on the day it was fetched, on teams
-    some of its players have since left. That season's memberships come from its games.
-    """
-    _, season_end = season_bounds(season)
+def _cached_rosters(cache: RawCache, season: str) -> dict[str, Payload]:
+    """The season's cached team rosters, by cache key."""
     rosters: dict[str, Payload] = {}
     for key in cache.list(nba_stats.SOURCE, nba_stats.COMMON_TEAM_ROSTER):
         if not key.endswith(f"_{season}"):
@@ -168,12 +160,49 @@ def _reference_rows(
             roster := _payload(cache, nba_stats.SOURCE, nba_stats.COMMON_TEAM_ROSTER, key)
         ) is not None:
             rosters[key] = roster
-    memberships = [
+    return rosters
+
+
+def _snapshot_memberships(
+    cache: RawCache, rosters: dict[str, Payload], season: str, tz: tzinfo
+) -> list[RosterMembershipRow]:
+    _, season_end = season_bounds(season)
+    return [
         membership
         for key, roster in rosters.items()
         if (as_of := _fetched_on(cache, nba_stats.COMMON_TEAM_ROSTER, key, tz)) <= season_end
         for membership in parse_roster(roster, as_of)
     ]
+
+
+def roster_snapshots(cache: RawCache, tz: tzinfo) -> list[RosterMembershipRow]:
+    """The memberships of every cached roster of every season, each open from the day it was
+    fetched; a roster fetched after its season ended has none, as in `_reference_rows`.
+
+    Raises one of `PAYLOAD_ERRORS` on a roster that does not parse.
+    """
+    keys = cache.list(nba_stats.SOURCE, nba_stats.COMMON_TEAM_ROSTER)
+    seasons = sorted({key.rsplit("_", 1)[1] for key in keys})
+    return [
+        membership
+        for season in seasons
+        for membership in _snapshot_memberships(cache, _cached_rosters(cache, season), season, tz)
+    ]
+
+
+def _reference_rows(
+    cache: RawCache, season: str, tz: tzinfo
+) -> tuple[list[PlayerRow], list[RosterMembershipRow]]:
+    """The season's players and roster memberships, from whatever of its player list and team
+    rosters are cached.
+
+    A roster fetched after its season ended, as a backfill fetches last season's, still fills in
+    its players, but has no memberships: it would open them on the day it was fetched, on teams
+    some of its players have since left. That season's memberships come from its games and
+    transactions (`derive.roster`).
+    """
+    rosters = _cached_rosters(cache, season)
+    memberships = _snapshot_memberships(cache, rosters, season, tz)
     all_players = _payload(cache, nba_stats.SOURCE, nba_stats.COMMON_ALL_PLAYERS, season)
     players = parse_players(all_players, rosters.values()) if all_players is not None else []
     return players, memberships
