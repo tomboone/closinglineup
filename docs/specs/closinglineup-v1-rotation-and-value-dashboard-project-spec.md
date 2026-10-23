@@ -178,7 +178,7 @@ The NBA publishes `https://ak-static.cms.nba.com/referee/injury/Injury-Report_<Y
 
 ### 4.4 Transactions (`sources/transactions.py`)
 
-`NBA_Player_Movement.json` rows → `transaction(date, type, player, from_team, to_team, detail)` with `type` classified from the description: sign, waive, trade, two_way_sign, two_way_convert, assign, recall, option_exercise, option_decline, other. G League `assign`/`recall` pairs drive the G League badge and the Out tier.
+`NBA_Player_Movement.json` rows → `transaction(date, type, player, from_team, to_team, detail)` with `type` classified from the description: sign, waive, trade, two_way_sign, two_way_convert, assign, recall, option_exercise, option_decline, other. G League `assign`/`recall` pairs drive the G League badge and the Out tier. The feed is every move since 2015-07-01, so the overlay makes the table hold exactly its rows; as of 2026-10-23 it holds only signings, claims, waivers, trades and contract conversions, and no G League assignment, recall or option decision, so those types have no source yet (NEU-1869).
 
 ### 4.5 Impact metrics (`sources/epm.py`, `sources/darko.py`, `derive/bpm.py`)
 
@@ -202,7 +202,7 @@ Every table has `created_at` / `updated_at`. IDs are NBA's (`nba_player_id`, `nb
 
 - `team(nba_team_id PK, tricode, name, conference, division)`
 - `player(nba_player_id PK, name, birthdate, draft_year, draft_pick, height_in, position)`
-- `roster_membership(id, player_id, team_id, start_date, end_date NULL, contract_type ∈ {standard, two_way, ten_day, exhibit_10}, source)` — derived nightly from rosters + transactions; a player is on one team per date. A season's history is first built from its games: a span per run of games a player has a `player_game` row with one team, `source='player_game'` (NEU-1864).
+- `roster_membership(id, player_id, team_id, start_date, end_date NULL, contract_type ∈ {standard, two_way, ten_day, exhibit_10}, source)` — rebuilt whole nightly by `derive.roster` from every cached roster, transaction and `player_game` row; a player is on one team per date. A span opens at the first evidence of him on a team and runs until a waiver (which ends it that day), a trade (the day before), or evidence of him elsewhere or a later roster without him (which end it at the last evidence of him on the team, his last game, say); `source` is what opened it (`transaction`, `player_game`, `commonteamroster`) (NEU-1864, NEU-1869).
 - `game(game_id PK, season, game_date, phase ∈ {regular, cup_knockout, play_in, playoff}, home_team_id, away_team_id, status ∈ {scheduled, final, postponed}, home_score, away_score, home_b2b, away_b2b)`
 
 ### 6.2 Per game

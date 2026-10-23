@@ -63,6 +63,7 @@ TEAMS: tuple[Team, ...] = (
 _BY_NBA_TEAM_ID = {t.nba_team_id: t for t in TEAMS}
 _BY_TRICODE = {t.tricode: t for t in TEAMS}
 _BY_ESPN_ID = {t.espn_id: t for t in TEAMS}
+_BY_NAME = {t.name: t for t in TEAMS}
 
 
 def _lookup[K: Hashable](index: dict[K, Team], key: K, kind: str) -> Team:
@@ -83,3 +84,8 @@ def by_tricode(tricode: str) -> Team:
 def by_espn_id(espn_id: int) -> Team:
     """ESPN sends IDs as strings (`"18"`); coerce them to int before calling this."""
     return _lookup(_BY_ESPN_ID, espn_id, "ESPN ID")
+
+
+def by_name(name: str) -> Team:
+    """NBA.com's full name, e.g. `LA Clippers`, as its player-movement descriptions spell it."""
+    return _lookup(_BY_NAME, name, "name")

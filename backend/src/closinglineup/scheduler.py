@@ -1,9 +1,9 @@
 """The worker's jobs, on APScheduler: each runs the functions the CLI does and records a `job_run`
 row as it starts and finishes (spec §3.3, §6.4).
 
-So far `nightly` refreshes the schedule, fetches, parses and loads, rebuilds the season's roster
-memberships from its games, then reconciles a sample of two teams' stints with NBA.com's; the
-rest of derive joins it when it lands.
+So far `nightly` refreshes the schedule, fetches, parses and loads, rebuilds the roster
+memberships from rosters, transactions and games, then reconciles a sample of two teams' stints
+with NBA.com's; the rest of derive joins it when it lands.
 `weekly` re-fetches, parses and loads the season's shot charts, then runs the weekly overlays;
 `injuries` and `daily_overlays` run theirs (`closinglineup.overlays`).
 """
@@ -37,9 +37,9 @@ from closinglineup.derive.reconcile import (
     sample_teams,
     season_type_of,
 )
+from closinglineup.derive.roster import rebuild_roster_membership
 from closinglineup.heartbeat import Heartbeat, JobFamily
 from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures
-from closinglineup.load.memberships import load_participation_spans
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.overlays import OverlayFamily, by_name, overlays_in
 from closinglineup.pipeline import SHOT_TABLE, parse_date, parse_shot_charts
@@ -220,9 +220,10 @@ class Jobs:
         answers badly is listed in the run's detail and does not fail the job, since
         `playbyplayv2` currently always does (see `nba_stats.fetch_playbyplay_v2`); nor does a
         game a parser cannot read, which `parse_date` leaves out. Each earlier parsed date whose
-        last load of a table failed or never ran is loaded again, and the season's roster
-        memberships are rebuilt from its loaded games. A table that fails to load fails the job,
-        and its failed `load_log` row is there for the next run.
+        last load of a table failed or never ran is loaded again, and the roster memberships are
+        rebuilt from the cached rosters, the transactions and every loaded game
+        (`derive.roster`). A table that fails to load fails the job, and its failed `load_log` row
+        is there for the next run; so does a rebuild that fails.
 
         Last, two teams' stints, a different two each day (`reconcile.sample_teams`), are
         reconciled with NBA.com's lineups and on/off, re-fetched for the purpose. A row outside
@@ -315,7 +316,7 @@ class Jobs:
         # Self-heals any earlier date a past run left without a successful load (spec §3.2).
         earlier = [d for d in self.store.dates() if d != day]
         healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
-        spans = load_participation_spans(self.db, season_label(day))
+        spans = rebuild_roster_membership(self.db, self.cache, self.settings.tz)
         raise_for_failures([*loaded, *healed, spans])
         reconciled = (
             self._reconcile(season_label(day), season_type, teams, refresh)

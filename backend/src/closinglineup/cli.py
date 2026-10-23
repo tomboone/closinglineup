@@ -30,9 +30,9 @@ from closinglineup.derive.reconcile import (
     describe,
     reconcile,
 )
+from closinglineup.derive.roster import rebuild_roster_membership
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
-from closinglineup.load.memberships import load_participation_spans
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.logging import configure_logging
 from closinglineup.overlays import UnknownOverlayError, by_name
@@ -315,13 +315,9 @@ def load(
         bool,
         typer.Option(
             "--memberships",
-            help="Rebuild --season's roster memberships from its loaded games.",
+            help="Rebuild the roster memberships from rosters, transactions and loaded games.",
         ),
     ] = False,
-    season: Annotated[
-        str | None,
-        typer.Option(help="With --memberships: e.g. 2026-27. Defaults to the current one."),
-    ] = None,
 ) -> None:
     days = _days(date, start, end)
     if shots and memberships:
@@ -330,16 +326,14 @@ def load(
         raise typer.BadParameter("--shots and --memberships take no dates and no --missing")
     if days is None and not missing and not shots and not memberships:
         raise typer.BadParameter("pass --date, --from/--to, --missing, --shots or --memberships")
-    if season is not None and not memberships:
-        raise typer.BadParameter("--season goes with --memberships")
     settings = Settings()
     engine = make_engine(settings)
     db = make_session_factory(engine)
     store = ParquetStore(settings.data_dir)
     try:
         if memberships:
-            season = season or season_label(SystemClock().now().astimezone(settings.tz).date())
-            results: list[LoadResult] = [load_participation_spans(db, season)]
+            cache = RawCache(settings.data_dir)
+            results: list[LoadResult] = [rebuild_roster_membership(db, cache, settings.tz)]
         elif shots:
             results = load_keyed(db, store, SystemClock(), SHOT_TABLE)
         else:

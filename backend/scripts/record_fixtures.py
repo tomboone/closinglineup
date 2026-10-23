@@ -21,7 +21,7 @@ from typing import Any
 from closinglineup.clock import SystemClock
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
-from closinglineup.sources import nba_cdn, nba_stats
+from closinglineup.sources import nba_cdn, nba_stats, transactions
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import make_nba_session
 from closinglineup.teams import by_tricode
@@ -299,6 +299,42 @@ def record_stats_season(options: Options) -> None:
             nba_stats.LEAGUE_DASH_TEAM_STATS,
             nba_stats.fetch_league_dash_team_stats(session, cache, SEASON, regular, advanced),
         )
+
+
+# The league year a trimmed player-movement fixture keeps: free agency opens on July 1.
+LEAGUE_YEAR_OPENS = (7, 1)
+
+
+def _trim_movement(payload: Payload, today: date) -> Payload:
+    """The rows of the league year `today` is in, from the latest July 1 on."""
+    month, day = LEAGUE_YEAR_OPENS
+    year = today.year if (today.month, today.day) >= LEAGUE_YEAR_OPENS else today.year - 1
+    since = date(year, month, day).isoformat()
+    root = payload[transactions.ROOT]
+    kept = [row for row in root["rows"] if row["TRANSACTION_DATE"] >= since]
+    return {transactions.ROOT: {**root, "rows": kept}}
+
+
+@recorder(
+    "transactions",
+    "stats.nba.com: the player-movement feed, keyed by today's date and trimmed to the rows of "
+    "the current league year (from July 1)",
+)
+def record_transactions(options: Options) -> None:
+    clock = SystemClock()
+    today = datetime.now(_settings().tz).date()
+    with (
+        tempfile.TemporaryDirectory() as data_dir,
+        make_nba_session(_settings(), clock) as session,
+    ):
+        cache = RawCache(Path(data_dir), clock)
+        payload = transactions.fetch(session, cache, today)
+    write_fixture(
+        transactions.SOURCE,
+        transactions.ENDPOINT,
+        today.isoformat(),
+        _trim_movement(payload, today),
+    )
 
 
 def _registry() -> str:

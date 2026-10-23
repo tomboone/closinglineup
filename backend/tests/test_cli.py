@@ -32,8 +32,8 @@ from closinglineup.sources.nba_http import NbaSession, RateLimiter
 from closinglineup.teams import TEAMS
 from tests.fakes import Connect, FakeOverlay, RoutedGet, ScriptedGet, fake_response
 from tests.test_backfill import InterruptedGet, season_routes
+from tests.test_derive_roster import UNCOVERED
 from tests.test_loader import clear_fixture_game
-from tests.test_memberships import UNCOVERED
 from tests.test_nba_stats import ENDPOINTS, GAME_ID, fixture_body, season_fixture_body
 from tests.test_pipeline import DAY, GAME, UNCACHED, cache_fixture_game
 from tests.test_pipeline import SCHEDULE as FIXTURE_SCHEDULE
@@ -483,7 +483,6 @@ def test_parse_exits_1_when_the_schedule_is_not_cached(data_env: Path) -> None:
         ("load", ["--shots", "--date", "2025-10-23"], "take no dates and no --missing"),
         ("load", ["--memberships", "--missing"], "take no dates and no --missing"),
         ("load", ["--shots", "--memberships"], "pass --shots or --memberships, not both"),
-        ("load", ["--missing", "--season", "2025-26"], "--season goes with --memberships"),
     ],
 )
 def test_parse_and_load_without_dates_are_usage_errors(
@@ -604,17 +603,17 @@ def test_nightly_date_fetches_parses_and_loads_the_fixture_game(
     assert run.detail["memberships"] >= 28
 
 
-def test_load_memberships_builds_the_seasons_spans_from_its_loaded_games(
+def test_load_memberships_rebuilds_the_spans_from_the_loaded_games(
     load_env: Path, db: sessionmaker[Session]
 ) -> None:
     cache_fixture_game(load_env)
     runner.invoke(app, ["parse", "--date", "2025-10-23"])
     assert runner.invoke(app, ["load", "--date", "2025-10-23"]).exit_code == 0
 
-    result = runner.invoke(app, ["load", "--memberships", "--season", "2025-26"])
+    result = runner.invoke(app, ["load", "--memberships"])
 
     assert result.exit_code == 0, result.output
-    assert result.output.startswith("load roster_membership 2025-26: succeeded, ")
+    assert result.output.startswith("load roster_membership all: succeeded, ")
     with db() as session:
         uncovered = session.execute(UNCOVERED, {"season": "2025-26"}).scalar_one()
     assert uncovered == 0
