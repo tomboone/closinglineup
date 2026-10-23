@@ -7,10 +7,17 @@ player's on-court totals with `leagueplayerondetails`. The sums are unfiltered, 
 included, since NBA.com counts every possession.
 
 Ratings are per 100 possessions: offense over the team's own possessions, defense over the
-opponent's, as NBA.com computes them. A stint row carries only its own team's possessions, so the
-opponent's come from the other team's row of the same stint. Only the lineups and players NBA.com
-credits with at least `MIN_POSSESSIONS` (its `POSS`) are compared, and only on net rating, which
-NBA.com rounds to 0.1; the tolerances absorb that.
+opponent's, as NBA.com computes them. Possessions are credited as NBA.com credits them, which is
+not how a stint counts them (NEU-1899): every possession pbpstats emits, counted or not, goes to
+each lineup and each player on the court for any of its time, so one a substitution splits counts
+for both lineups. A stint's `possessions` stay pbpstats' counted ones, credited once, for the
+dashboard's own ratings (spec §7.3). Points are the stints'.
+
+Only the lineups and players NBA.com credits with at least `MIN_POSSESSIONS` (its `POSS`) are
+compared, and only on net rating, which NBA.com rounds to 0.1. A player is within ±0.5. A lineup
+is within `LINEUP_TOLERANCE_POSSESSIONS` possessions' worth of net rating: a substitution logged at
+the same clock time as a possession's start or end can fall on either side of it, which the clock
+cannot tell, and one possession moves a lineup's rating by about 110 / `POSS`.
 
 `leagueplayerondetails` lists only the On rows, so the on/off check is each player's on-court
 net rating.
@@ -26,16 +33,16 @@ the comparison holds only when the stints are loaded through the same games;
 
 import json
 from collections import defaultdict
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Literal, Self
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from closinglineup.db.models import Stint
-from closinglineup.parse.rows import StintRow
+from closinglineup.db.models import Possession, Stint
+from closinglineup.parse.rows import PossessionRow, StintRow
 from closinglineup.sources import nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_stats import SeasonType
@@ -46,8 +53,14 @@ type Kind = Literal["lineup", "on_court"]
 # A lineup's (team ID, lineup key), or a player's (team ID, player ID as text).
 type Key = tuple[int, str]
 
+# How NBA.com counts, measured on 2025-26 (NEU-1899): its team `POSS` is pbpstats' every possession
+# (+0.13%), not its counted ones (-0.69%) or the box-score estimate (+1.09%), and its players'
+# on-court `POSS` sum to 1.27% more than their teams', a possession split by a substitution
+# counting for both sides of it.
 MIN_POSSESSIONS = 100
-LINEUP_TOLERANCE = 0.1
+LINEUP_TOLERANCE_POSSESSIONS = 3
+# Points per possession, about the league's: what one possession is worth to a rating.
+POINTS_PER_POSSESSION = 1.1
 ON_COURT_TOLERANCE = 0.5
 TOP_GAMES = 3
 # Two numbers equal to 0.1 can differ by more than 0.1 in floating point.
@@ -71,19 +84,6 @@ class MissingResponseError(ReconcileError, LookupError):
 
 
 @dataclass(frozen=True, slots=True)
-class StintTotals:
-    """One team's view of a stint, with the opponent's possessions beside its own."""
-
-    game_id: str
-    team_id: int
-    lineup_key: str
-    possessions: int
-    opp_possessions: int
-    pts_for: int
-    pts_against: int
-
-
-@dataclass(frozen=True, slots=True)
 class Totals:
     """Possessions and points, either way, and the ratings per 100 possessions they make."""
 
@@ -91,10 +91,6 @@ class Totals:
     opp_possessions: int = 0
     pts_for: int = 0
     pts_against: int = 0
-
-    @classmethod
-    def of(cls, stint: StintTotals) -> Self:
-        return cls(stint.possessions, stint.opp_possessions, stint.pts_for, stint.pts_against)
 
     def __add__(self, other: Self) -> Self:
         return type(self)(
@@ -132,8 +128,8 @@ class Tally:
 
     by_game: dict[str, Totals] = field(default_factory=dict[str, Totals])
 
-    def add(self, stint: StintTotals) -> None:
-        self.by_game[stint.game_id] = self.by_game.get(stint.game_id, Totals()) + Totals.of(stint)
+    def add(self, game_id: str, totals: Totals) -> None:
+        self.by_game[game_id] = self.by_game.get(game_id, Totals()) + totals
 
     @property
     def total(self) -> Totals:
@@ -194,50 +190,52 @@ class Report:
         return [check for check in [*self.lineups, *self.on_court] if not check.within]
 
 
-def pair_stints(rows: Iterable[StintRow]) -> list[StintTotals]:
-    """Each team's view of each stint, with the possessions of the other team's view."""
-    by_stint: defaultdict[tuple[str, int, float], list[StintRow]] = defaultdict(list)
-    for row in rows:
-        by_stint[(row.game_id, row.period, row.start_sec)].append(row)
-    paired: list[StintTotals] = []
-    for (game_id, period, start_sec), views in by_stint.items():
-        if len(views) != 2:
-            raise ReconcileError(
-                f"game {game_id}: the stint at {start_sec} s of period {period} has "
-                f"{len(views)} team rows, not 2"
-            )
-        first, second = views
-        paired.extend([_with_opponent(first, second), _with_opponent(second, first)])
-    return paired
-
-
-def _with_opponent(row: StintRow, opponent: StintRow) -> StintTotals:
-    return StintTotals(
-        row.game_id,
-        row.team_id,
-        row.lineup_key,
-        row.possessions,
-        opponent.possessions,
-        row.pts_for,
-        row.pts_against,
-    )
-
-
-def lineup_tallies(stints: Iterable[StintTotals]) -> dict[Key, Tally]:
-    """Each team's 5-man lineups' totals."""
-    tallies: defaultdict[Key, Tally] = defaultdict(Tally)
+def tallies(
+    stints: Iterable[StintRow], possessions: Iterable[PossessionRow]
+) -> tuple[dict[Key, Tally], dict[Key, Tally]]:
+    """Each lineup's totals and each player's on-court totals, per team: the stints' points, and
+    every possession credited to each lineup and player on the court for any of its time."""
+    lineups: defaultdict[Key, Tally] = defaultdict(Tally)
+    players: defaultdict[Key, Tally] = defaultdict(Tally)
+    by_period: defaultdict[tuple[str, int, int], list[StintRow]] = defaultdict(list)
+    teams: defaultdict[str, set[int]] = defaultdict(set)
     for stint in stints:
-        tallies[(stint.team_id, stint.lineup_key)].add(stint)
-    return dict(tallies)
-
-
-def on_court_tallies(stints: Iterable[StintTotals]) -> dict[Key, Tally]:
-    """Each player's totals with him on the court, per team."""
-    tallies: defaultdict[Key, Tally] = defaultdict(Tally)
-    for stint in stints:
+        points = Totals(pts_for=stint.pts_for, pts_against=stint.pts_against)
+        lineups[(stint.team_id, stint.lineup_key)].add(stint.game_id, points)
         for player in stint.lineup_key.split("-"):
-            tallies[(stint.team_id, player)].add(stint)
-    return dict(tallies)
+            players[(stint.team_id, player)].add(stint.game_id, points)
+        by_period[(stint.game_id, stint.period, stint.team_id)].append(stint)
+        teams[stint.game_id].add(stint.team_id)
+    for possession in possessions:
+        for team_id in teams[possession.game_id]:
+            on_court = _on_court(
+                possession, by_period[(possession.game_id, possession.period, team_id)]
+            )
+            offense = team_id == possession.offense_team_id
+            credit = Totals(possessions=1) if offense else Totals(opp_possessions=1)
+            for key in on_court:
+                lineups[(team_id, key)].add(possession.game_id, credit)
+            for player in {player for key in on_court for player in key.split("-")}:
+                players[(team_id, player)].add(possession.game_id, credit)
+    return dict(lineups), dict(players)
+
+
+def _on_court(possession: PossessionRow, stints: list[StintRow]) -> set[str]:
+    """The lineups of `stints`, one team's in the possession's period, on the court for any of
+    its time. One with no time goes to the lineup on the court just before it: at a substitution
+    logged at that instant, the outgoing one."""
+    found = {
+        s.lineup_key
+        for s in stints
+        if s.start_sec < possession.end_sec and s.end_sec > possession.start_sec
+    }
+    if found or not stints:
+        return found
+    before = [s for s in stints if s.start_sec < possession.end_sec]
+    nearest = (
+        max(before, key=lambda s: s.start_sec) if before else min(stints, key=lambda s: s.start_sec)
+    )
+    return {nearest.lineup_key}
 
 
 def _rows(payload: Payload) -> list[dict[str, Any]]:
@@ -280,12 +278,21 @@ def _lineup_key(group_id: str) -> str:
     return "-".join(str(p) for p in sorted(int(p) for p in group_id.split("-") if p))
 
 
+def lineup_tolerance(nba: NbaRatings) -> float:
+    """`LINEUP_TOLERANCE_POSSESSIONS` possessions' worth of net rating, at NBA.com's possessions."""
+    return LINEUP_TOLERANCE_POSSESSIONS * POINTS_PER_POSSESSION * 100 / nba.possessions
+
+
+def on_court_tolerance(nba: NbaRatings) -> float:
+    return ON_COURT_TOLERANCE
+
+
 def compare(
     kind: Kind,
     ours: dict[Key, Tally],
     theirs: Iterable[NbaRatings],
     *,
-    tolerance: float,
+    tolerance: Callable[[NbaRatings], float],
     min_possessions: int = MIN_POSSESSIONS,
 ) -> list[Check]:
     """A check per NBA.com row with at least `min_possessions`, most possessions first."""
@@ -294,11 +301,9 @@ def compare(
         if nba.possessions < min_possessions:
             continue
         tally = ours.get((nba.team_id, nba.key), Tally())
-        check = Check(kind, nba, tally.total, len(tally.by_game), tolerance)
+        check = Check(kind, nba, tally.total, len(tally.by_game), tolerance(nba))
         if not check.within:
-            check = Check(
-                kind, nba, check.ours, check.games, tolerance, top_games(tally, nba.net_rating)
-            )
+            check = replace(check, top_games=top_games(tally, nba.net_rating))
         checks.append(check)
     return checks
 
@@ -321,26 +326,36 @@ def top_games(tally: Tally, target: float, limit: int = TOP_GAMES) -> tuple[str,
     return tuple(game_id for _, game_id in sorted(scored, key=lambda s: (-s[0], s[1]))[:limit])
 
 
-def season_stints(
+def season_rows(
     db: sessionmaker[Session], season: str, season_type: SeasonType, team_ids: Iterable[int]
-) -> list[StintTotals]:
-    """Every stint `team_ids` played in the season type, with the opponent's possessions.
-
-    Raises `ReconcileError` if a stint of their games lacks either team's row.
-    """
-    teams = list(team_ids)
+) -> tuple[list[StintRow], list[PossessionRow]]:
+    """Every stint and possession of the games `team_ids` played in the season type, both
+    teams'."""
     # `0022500001`: league `00`, season type, then the season's two-digit start year.
     prefix = f"00{SEASON_TYPE_DIGITS[season_type]}{season[2:4]}"
     games = (
         select(Stint.game_id)
-        .where(Stint.game_id.startswith(prefix), Stint.team_id.in_(teams))
+        .where(Stint.game_id.startswith(prefix), Stint.team_id.in_(list(team_ids)))
         .distinct()
     )
     with db() as session:
-        columns = [Stint.__table__.c[name] for name in StintRow.model_fields]
-        found = session.execute(select(*columns).where(Stint.game_id.in_(games))).mappings()
-        rows = [StintRow(**row) for row in found]
-    return [stint for stint in pair_stints(rows) if stint.team_id in teams]
+        stints = [
+            StintRow(**row)
+            for row in session.execute(
+                select(*_columns(Stint, StintRow)).where(Stint.game_id.in_(games))
+            ).mappings()
+        ]
+        possessions = [
+            PossessionRow(**row)
+            for row in session.execute(
+                select(*_columns(Possession, PossessionRow)).where(Possession.game_id.in_(games))
+            ).mappings()
+        ]
+    return stints, possessions
+
+
+def _columns(model: type[Stint | Possession], row: type[StintRow | PossessionRow]) -> list[Any]:
+    return [model.__table__.c[name] for name in row.model_fields]
 
 
 def _cached(cache: RawCache, endpoint: str, key: str) -> Payload:
@@ -363,7 +378,7 @@ def reconcile(
     ones.
 
     Raises `MissingResponseError` if `leaguedashlineups` or a team's `leagueplayerondetails` is
-    not cached, and `ReconcileError` if a stint lacks a team's row.
+    not cached.
     """
     teams = tuple(team_ids)
     lineups_key = nba_stats.league_dash_lineups_key(season, season_type)
@@ -372,23 +387,23 @@ def reconcile(
     for team_id in teams:
         key = nba_stats.league_player_on_details_key(team_id, season, season_type)
         on_court.extend(nba_on_court(_cached(cache, nba_stats.LEAGUE_PLAYER_ON_DETAILS, key)))
-    stints = season_stints(db, season, season_type, teams)
+    lineup_totals, on_court_totals = tallies(*season_rows(db, season, season_type, teams))
     return Report(
         season=season,
         season_type=season_type,
         team_ids=teams,
         lineups=compare(
             "lineup",
-            lineup_tallies(stints),
+            lineup_totals,
             [n for n in league_lineups if n.team_id in teams],
-            tolerance=LINEUP_TOLERANCE,
+            tolerance=lineup_tolerance,
             min_possessions=min_possessions,
         ),
         on_court=compare(
             "on_court",
-            on_court_tallies(stints),
+            on_court_totals,
             on_court,
-            tolerance=ON_COURT_TOLERANCE,
+            tolerance=on_court_tolerance,
             min_possessions=min_possessions,
         ),
     )
@@ -419,7 +434,8 @@ def describe(check: Check) -> str:
     delta = "n/a" if diff is None else f"{diff:+.2f}"
     ours, nba = check.ours, check.nba
     line = (
-        f"{subject}: net {_rating(ours.net_rating)} vs {nba.net_rating:.1f} ({delta}), "
+        f"{subject}: net {_rating(ours.net_rating)} vs {nba.net_rating:.1f} "
+        f"({delta}, tolerance ±{check.tolerance:.2f}), "
         f"ortg {_rating(ours.off_rating)} vs {nba.off_rating:.1f}, "
         f"drtg {_rating(ours.def_rating)} vs {nba.def_rating:.1f}, "
         f"poss {ours.possessions} vs {nba.possessions}, games {check.games} vs {nba.games}"

@@ -1,6 +1,5 @@
 import json
-from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,28 +10,26 @@ from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
 from closinglineup.cli import app
-from closinglineup.db.models import Game, Stint
+from closinglineup.db.models import Game, Possession, Stint
 from closinglineup.derive import reconcile
 from closinglineup.derive.reconcile import (
     Check,
     NbaRatings,
-    StintTotals,
     Tally,
     Totals,
     compare,
     describe,
-    lineup_tallies,
+    lineup_tolerance,
     nba_lineups,
     nba_on_court,
-    on_court_tallies,
-    pair_stints,
     sample_teams,
-    season_stints,
+    season_rows,
     season_type_of,
+    tallies,
     top_games,
 )
 from closinglineup.parse import pbp
-from closinglineup.parse.rows import StintRow
+from closinglineup.parse.rows import PossessionRow, StintRow
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_stats import SeasonType
@@ -44,97 +41,139 @@ from tests.test_pbp import GAMES, GSW, GSW_OVERTIME_FIVE, OVERTIME_GAME
 runner = CliRunner()
 
 type Payload = dict[str, Any]
+type GameRows = tuple[list[StintRow], list[PossessionRow]]
 
 DEN = 1610612743
 OVERTIME_FIVE = "-".join(str(p) for p in GSW_OVERTIME_FIVE)
+# NBA.com's `leaguedashlineups` for each team of the overtime game, on its date alone.
+GAME_LINEUPS = (
+    Path(__file__).parent / "fixtures" / "reconcile" / f"{OVERTIME_GAME}_leaguedashlineups.json"
+)
 
 
 @pytest.fixture(scope="module")
-def fixture_stints(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[StintRow]]:
-    """Every fixture game's stint rows, as `parse.pbp` emits them."""
+def fixture_rows(tmp_path_factory: pytest.TempPathFactory) -> dict[str, GameRows]:
+    """Every fixture game's stint and possession rows, as `parse.pbp` emits them."""
     cache = RawCache(tmp_path_factory.mktemp("data"))
-    stints: dict[str, list[StintRow]] = {}
+    rows: dict[str, GameRows] = {}
     for game_id in GAMES:
         body = (PBP_FIXTURES / nba_cdn.PLAYBYPLAY / f"{game_id}.json").read_bytes()
         cache.put(nba_cdn.SOURCE, nba_cdn.PLAYBYPLAY, game_id, body, url="u", status=200)
         pbp.materialize(cache, game_id)
-        stints[game_id] = pbp.stints_for_game(cache.root.parent, game_id)
-    return stints
+        data_dir = cache.root.parent
+        rows[game_id] = (
+            pbp.stints_for_game(data_dir, game_id),
+            pbp.possessions_for_game(data_dir, game_id),
+        )
+    return rows
 
 
 def test_the_overtime_fives_totals_match_the_hand_count(
-    fixture_stints: dict[str, list[StintRow]],
+    fixture_rows: dict[str, GameRows],
 ) -> None:
-    tallies = lineup_tallies(pair_stints(fixture_stints[OVERTIME_GAME]))
+    lineups, _ = tallies(*fixture_rows[OVERTIME_GAME])
 
-    tally = tallies[(GSW, OVERTIME_FIVE)]
+    tally = lineups[(GSW, OVERTIME_FIVE)]
     # Counted by hand from the play-by-play. 3:50 to 0:25.7 of the fourth, 109-116 to 117-120:
-    # GSW's shot-clock turnover, Curry's two trips to the line, his three and his missed layup
-    # are five possessions; DEN's two misses, its trip to the line, its miss and Gordon's three
-    # are five. All of overtime, 120-120 to 137-131: GSW's eleven possessions, the last running
-    # out the clock, and DEN's ten.
-    assert tally.by_game == {OVERTIME_GAME: Totals(16, 15, 25, 15)}
-    assert tally.total.off_rating == pytest.approx(156.25)
+    # GSW's shot-clock turnover, Curry's two trips to the line, his three, his missed layup, and
+    # the possession after Gordon's three at 0:26, which the five starts before GSW's timeout
+    # and substitutions at 0:25.7, are six possessions; DEN's two misses, its trip to the line,
+    # its miss and Gordon's three are five. All of overtime, 120-120 to 137-131: GSW's eleven
+    # possessions, the last running out the clock, and DEN's ten.
+    assert tally.by_game == {OVERTIME_GAME: Totals(17, 15, 25, 15)}
+    assert tally.total.off_rating == pytest.approx(25 / 17 * 100)
     assert tally.total.def_rating == pytest.approx(100.0)
-    assert tally.total.net_rating == pytest.approx(56.25)
 
 
-@pytest.mark.parametrize("game_id", GAMES)
-def test_every_lineups_possessions_add_up_to_its_teams_and_its_opponents(
-    fixture_stints: dict[str, list[StintRow]], game_id: str
+def _game_lineups() -> dict[tuple[int, str], NbaRatings]:
+    payloads: dict[str, Payload] = json.loads(GAME_LINEUPS.read_text())
+    return {(n.team_id, n.key): n for p in payloads.values() for n in nba_lineups(p)}
+
+
+def test_the_overtime_games_lineups_match_nba_coms_possessions_but_at_two_substitutions(
+    fixture_rows: dict[str, GameRows],
 ) -> None:
-    rows = fixture_stints[game_id]
-    possessions = Counter[int]()
-    for row in rows:
-        possessions[row.team_id] += row.possessions
-    (home, away) = possessions
+    lineups, _ = tallies(*fixture_rows[OVERTIME_GAME])
+    nba = _game_lineups()
 
-    tallies = lineup_tallies(pair_stints(rows))
+    differ = {
+        key: (tally.total.possessions, nba[key].possessions)
+        for key, tally in lineups.items()
+        if key in nba and tally.total.possessions != nba[key].possessions
+    }
 
-    for team, opponent in ((home, away), (away, home)):
-        totals = sum((t.total for (t_id, _), t in tallies.items() if t_id == team), Totals())
-        assert totals.possessions == possessions[team]
-        assert totals.opp_possessions == possessions[opponent]
-        assert totals.pts_for == sum(r.pts_for for r in rows if r.team_id == team)
-        assert totals.pts_against == sum(r.pts_against for r in rows if r.team_id == team)
-
-
-def test_each_players_on_court_totals_are_his_lineups(
-    fixture_stints: dict[str, list[StintRow]],
-) -> None:
-    stints = pair_stints(fixture_stints[OVERTIME_GAME])
-    lineups = lineup_tallies(stints)
-
-    on_court = on_court_tallies(stints)
-
-    for (team, player), tally in on_court.items():
-        his = [
-            t.total
-            for (t_id, key), t in lineups.items()
-            if t_id == team and player in key.split("-")
-        ]
-        assert tally.total == sum(his, Totals())
-    team_possessions = sum(s.possessions for s in stints if s.team_id == GSW)
-    gsw = [t.total.possessions for (t_id, _), t in on_court.items() if t_id == GSW]
-    assert sum(gsw) == 5 * team_possessions
+    assert len(nba) == 25
+    assert set(nba) <= set(lineups)
+    # Each is one DEN possession at a substitution logged at the same clock time as the
+    # possession's start or end, which the clock cannot place on either side of it.
+    assert differ == {
+        (DEN, "202685-203501-1627750-1628971-1631212"): (19, 20),
+        (DEN, "203932-203999-1627750-1629661-1631128"): (50, 51),
+    }
 
 
-def test_a_stint_with_one_team_row_is_refused() -> None:
-    row = StintRow(
-        game_id=OVERTIME_GAME,
-        period=1,
-        start_sec=0.0,
-        end_sec=10.0,
-        team_id=GSW,
-        lineup_key=OVERTIME_FIVE,
-        opp_lineup_key="1-2-3-4-5",
-        possessions=1,
-        pts_for=2,
-        pts_against=0,
-    )
+def test_a_possession_counts_for_every_lineup_and_player_on_the_court_during_it() -> None:
+    def stint(start: float, end: float, team_id: int, key: str, pf: int, pa: int) -> StintRow:
+        return StintRow(
+            game_id=OVERTIME_GAME,
+            period=1,
+            start_sec=start,
+            end_sec=end,
+            team_id=team_id,
+            lineup_key=key,
+            opp_lineup_key="",
+            possessions=0,
+            pts_for=pf,
+            pts_against=pa,
+        )
 
-    with pytest.raises(reconcile.ReconcileError, match="has 1 team rows, not 2"):
-        pair_stints([row])
+    def possession(number: int, offense: int, start: float, end: float) -> PossessionRow:
+        return PossessionRow(
+            game_id=OVERTIME_GAME,
+            period=1,
+            number=number,
+            offense_team_id=offense,
+            start_sec=start,
+            end_sec=end,
+            start_score_margin=0,
+            has_timeout=False,
+            previous_has_timeout=False,
+            end_type="FieldGoal",
+            # Not counted by pbpstats, as at the end of a period: NBA.com counts it all the same.
+            counted=number != 2,
+        )
+
+    # GSW's 1-5 then 1-4 and 6, against one DEN five throughout.
+    first, second, den = "1-2-3-4-5", "1-2-3-4-6", "11-12-13-14-15"
+    stints = [
+        stint(0, 10, GSW, first, 2, 0),
+        stint(0, 10, DEN, den, 0, 2),
+        stint(10, 20, GSW, second, 0, 3),
+        stint(10, 20, DEN, den, 3, 0),
+    ]
+    possessions = [
+        possession(1, GSW, 0, 5),
+        # Split by the substitution at 10 s.
+        possession(2, GSW, 5, 15),
+        possession(3, DEN, 15, 20),
+        # No time at all, at the substitution: the five on the court as it ends has it.
+        possession(4, GSW, 10, 10),
+    ]
+
+    lineups, players = tallies(stints, possessions)
+
+    assert lineups[(GSW, first)].total == Totals(3, 0, 2, 0)
+    assert lineups[(GSW, second)].total == Totals(1, 1, 0, 3)
+    assert lineups[(DEN, den)].total == Totals(1, 3, 3, 2)
+    # Possession 2 counts once for the four who played both sides of the substitution.
+    assert players[(GSW, "1")].total == Totals(3, 1, 2, 3)
+    assert players[(GSW, "5")].total == Totals(3, 0, 2, 0)
+    assert players[(GSW, "6")].total == Totals(1, 1, 0, 3)
+
+
+def test_lineup_tolerance_is_three_possessions_worth_of_net_rating() -> None:
+    assert lineup_tolerance(_nba("a", 0.0, possessions=110)) == pytest.approx(3.0)
+    assert lineup_tolerance(_nba("a", 0.0, possessions=1100)) == pytest.approx(0.3)
 
 
 def test_nba_lineups_keys_each_group_as_parse_pbp_keys_a_lineup() -> None:
@@ -175,23 +214,15 @@ def _nba(key: str, net: float, possessions: int = 200, team_id: int = GSW) -> Nb
     return NbaRatings(team_id, key, key, 2, possessions, 100.0 + net, 100.0, net)
 
 
-def _stint(game_id: str, totals: Totals, key: str = "a") -> StintTotals:
-    return StintTotals(
-        game_id,
-        GSW,
-        key,
-        totals.possessions,
-        totals.opp_possessions,
-        totals.pts_for,
-        totals.pts_against,
-    )
-
-
 def _tally(*games: tuple[str, Totals]) -> Tally:
     tally = Tally()
     for game_id, totals in games:
-        tally.add(_stint(game_id, totals))
+        tally.add(game_id, totals)
     return tally
+
+
+def _within(tolerance: float) -> Callable[[NbaRatings], float]:
+    return lambda nba: tolerance
 
 
 def test_compare_checks_only_rows_with_enough_possessions_most_first() -> None:
@@ -199,7 +230,7 @@ def test_compare_checks_only_rows_with_enough_possessions_most_first() -> None:
     ours = {(GSW, "a"): _tally(("g1", Totals(100, 100, 110, 100)))}
     theirs = [_nba("a", 10.1), _nba("b", 3.0, possessions=99), _nba("c", 0.0, possessions=300)]
 
-    checks = compare("lineup", ours, theirs, tolerance=0.1)
+    checks = compare("lineup", ours, theirs, tolerance=_within(0.1))
 
     assert [c.nba.key for c in checks] == ["c", "a"]
     c, a = checks
@@ -219,7 +250,7 @@ def test_a_row_outside_tolerance_names_the_games_that_pull_it_furthest() -> None
         )
     }
 
-    [check] = compare("lineup", ours, [_nba("a", 0.0)], tolerance=0.1)
+    [check] = compare("lineup", ours, [_nba("a", 0.0)], tolerance=_within(0.1))
 
     assert not check.within
     # Taking out g3 closes the gap; taking out g1 or g2 widens it.
@@ -251,7 +282,8 @@ def test_describe_puts_our_numbers_beside_nba_coms() -> None:
     )
 
     assert describe(check) == (
-        "GSW lineup 1-2-3-4-5 (1-2-3-4-5): net 10.0 vs 3.0 (+7.00), ortg 110.0 vs 103.0, "
+        "GSW lineup 1-2-3-4-5 (1-2-3-4-5): net 10.0 vs 3.0 (+7.00, tolerance ±0.10), "
+        "ortg 110.0 vs 103.0, "
         "drtg 100.0 vs 100.0, poss 100 vs 200, games 3 vs 2; top games g3, g1"
     )
 
@@ -314,16 +346,35 @@ def _stint_row(
     )
 
 
+def _possession_row(game_id: str, number: int, offense: int, start_sec: float) -> Possession:
+    return Possession(
+        game_id=game_id,
+        period=1,
+        number=number,
+        offense_team_id=offense,
+        start_sec=start_sec,
+        end_sec=start_sec + 4,
+        start_score_margin=0,
+        start_type=None,
+        has_timeout=False,
+        previous_has_timeout=False,
+        end_type="FieldGoal",
+        counted=True,
+    )
+
+
 def _clear(db: sessionmaker[Session]) -> None:
     games = (REGULAR_GAME, PLAYOFF_GAME)
     with db.begin() as session:
+        session.execute(delete(Possession).where(Possession.game_id.in_(games)))
         session.execute(delete(Stint).where(Stint.game_id.in_(games)))
         session.execute(delete(Game).where(Game.game_id.in_(games)))
 
 
 @pytest.fixture
 def stints(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
-    """GSW's five against two DEN fives in a regular-season game, and again in a playoff game."""
+    """GSW's five against two DEN fives in a regular-season game, with 15 GSW and 14 DEN
+    possessions, and against one in a playoff game, with a possession each."""
     _clear(db)
     with db.begin() as session:
         for game_id, phase, day in (
@@ -352,6 +403,13 @@ def stints(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 _stint_row(REGULAR_GAME, 60.0, DEN, DEN_OTHER_FIVE, GSW_FIVE, 5, 6, 4),
                 _stint_row(PLAYOFF_GAME, 0.0, GSW, GSW_FIVE, DEN_FIVE, 50, 60, 40),
                 _stint_row(PLAYOFF_GAME, 0.0, DEN, DEN_FIVE, GSW_FIVE, 50, 40, 60),
+                # Alternating from GSW, 4 s each; none spans the substitution at 60 s.
+                *(
+                    _possession_row(REGULAR_GAME, n + 1, GSW if n % 2 == 0 else DEN, 4.0 * n)
+                    for n in range(29)
+                ),
+                _possession_row(PLAYOFF_GAME, 1, GSW, 0.0),
+                _possession_row(PLAYOFF_GAME, 2, DEN, 4.0),
             ]
         )
     try:
@@ -360,30 +418,22 @@ def stints(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
         _clear(db)
 
 
-def test_season_stints_reads_the_teams_stints_of_the_season_type_with_opponent_possessions(
+def test_season_rows_reads_both_teams_rows_of_the_season_types_games(
     stints: sessionmaker[Session],
 ) -> None:
-    found = season_stints(stints, SEASON, SeasonType.REGULAR_SEASON, [GSW])
+    found, possessions = season_rows(stints, SEASON, SeasonType.REGULAR_SEASON, [GSW])
 
-    assert sorted(found, key=lambda s: s.possessions) == [
-        StintTotals(REGULAR_GAME, GSW, GSW_FIVE, 5, 5, 4, 6),
-        StintTotals(REGULAR_GAME, GSW, GSW_FIVE, 10, 9, 12, 8),
+    assert sorted((s.team_id, s.start_sec) for s in found) == [
+        (DEN, 0.0),
+        (DEN, 60.0),
+        (GSW, 0.0),
+        (GSW, 60.0),
     ]
-    playoffs = season_stints(stints, SEASON, SeasonType.PLAYOFFS, [GSW, DEN])
-    assert {(s.team_id, s.possessions, s.opp_possessions) for s in playoffs} == {
-        (GSW, 50, 50),
-        (DEN, 50, 50),
-    }
-
-
-def test_season_stints_refuses_a_stint_missing_a_teams_row(
-    stints: sessionmaker[Session],
-) -> None:
-    with stints.begin() as session:
-        session.add(_stint_row(REGULAR_GAME, 120.0, GSW, GSW_FIVE, DEN_FIVE, 1, 0, 0))
-
-    with pytest.raises(reconcile.ReconcileError, match=r"at 120\.0 s of period 1 has 1 team rows"):
-        season_stints(stints, SEASON, SeasonType.REGULAR_SEASON, [GSW])
+    assert len(possessions) == 29
+    assert {p.game_id for p in possessions} == {REGULAR_GAME}
+    playoff_stints, playoff_possessions = season_rows(stints, SEASON, SeasonType.PLAYOFFS, [DEN])
+    assert {s.game_id for s in playoff_stints} == {PLAYOFF_GAME}
+    assert [p.number for p in sorted(playoff_possessions, key=lambda p: p.number)] == [1, 2]
 
 
 def _result_set(endpoint: str, rows: list[dict[str, Any]]) -> bytes:
@@ -487,9 +537,10 @@ def test_reconcile_command_lists_rows_outside_tolerance_and_exits_1(
 
     assert result.exit_code == 1, result.output
     assert result.output.splitlines() == [
-        "OUTSIDE GSW on_court 9100002 (Two): net 6.7 vs 9.0 (-2.33), ortg 106.7 vs 106.7, "
-        f"drtg 100.0 vs 100.0, poss 15 vs 15, games 1 vs 1; top games {REGULAR_GAME}",
-        "reconcile 2017-18 regular-season: 1 lineups, 0 outside ±0.1; "
+        "OUTSIDE GSW on_court 9100002 (Two): net 6.7 vs 9.0 (-2.33, tolerance ±0.50), "
+        "ortg 106.7 vs 106.7, drtg 100.0 vs 100.0, poss 15 vs 15, games 1 vs 1; "
+        f"top games {REGULAR_GAME}",
+        "reconcile 2017-18 regular-season: 1 lineups, 0 outside 3 possessions' worth; "
         "2 players on court, 1 outside ±0.5",
     ]
 
