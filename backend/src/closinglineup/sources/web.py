@@ -1,5 +1,6 @@
-"""Plain httpx, for the sites that do not fingerprint TLS as NBA.com does: ESPN's injuries and
-darko.app. NBA.com's own requests go through `NbaSession` (`sources/nba_http.py`)."""
+"""Plain httpx, for the sites that do not fingerprint TLS as NBA.com does: ESPN's injuries,
+darko.app and Hoops Rumors. NBA.com's own requests go through `NbaSession`
+(`sources/nba_http.py`)."""
 
 import httpx
 

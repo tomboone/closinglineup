@@ -200,8 +200,8 @@ class Jobs:
     """Every job, with what they share; the worker schedules them and the CLI runs them once.
 
     `nba` opens a fresh `NbaSession` for each run, which the run closes; `http` likewise a fresh
-    plain httpx client, for the sources outside NBA.com: the injuries fallback's ESPN and
-    darko.app.
+    plain httpx client, for the sources outside NBA.com: the injuries fallback's ESPN, darko.app
+    and Hoops Rumors.
     """
 
     settings: Settings

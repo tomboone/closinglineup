@@ -79,6 +79,10 @@ A roster move on a date: sign, waive, trade, two-way conversion, G League assign
 One public (EPM, DARKO) or locally computed (BPM) impact metric value for a player on a date, with its offensive and defensive split and its minutes basis.
 _Avoid_: rating (reserved for on-court ORtg/DRtg/NetRtg)
 
+**Non-guaranteed contract**:
+A player's contract for a season whose salary is not yet fully guaranteed: non-guaranteed, partially guaranteed, Exhibit 9 or Exhibit 10. It carries the guaranteed amount now, the date the guarantee next rises (January 7 by default) and the amount it rises to. A player with no non-guaranteed contract in the week's snapshot is taken as fully guaranteed; two-way status is a badge from roster membership, not a contract fact (ADR-0004).
+_Avoid_: cap hit, contract status (a contract type is a badge)
+
 **Flag**:
 A named boolean condition on a player-team-date derived from windows and overlays (for example minutes cliff, earning trust, yo-yo), raised so the morning page can surface it.
 _Avoid_: alert

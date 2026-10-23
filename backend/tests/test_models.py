@@ -125,12 +125,13 @@ def test_a_snapshot_of_each_kind_with_listed_values_loads(db: sessionmaker[Sessi
                     player_id=JAYSON_TATUM,
                     team_id=BOS,
                     season="2025-26",
-                    salary=54_126_450,
-                    guaranteed=54_126_450,
-                    option_type="player",
-                    two_way=False,
+                    salary=None,
+                    minimum_salary=True,
+                    guaranteed=500_000,
+                    guarantee_date=date(2026, 1, 7),
+                    guaranteed_after=None,
                     as_of_date=date(2025, 10, 20),
-                    source="spotrac",
+                    source="hoopsrumors",
                 ),
             ]
         )
