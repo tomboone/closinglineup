@@ -180,10 +180,11 @@ def record_stats(options: Options) -> None:
             write_fixture(nba_stats.SOURCE, result.endpoint, game_id, json.loads(raw))
 
 
-# The full games `parse/pbp.py` is tested on (spec §11): the overtime game above, and MIN at OKC
+# The full games `parse/pbp.py` is tested on (spec §11): the overtime game above; MIN at OKC
 # on 2025-11-26, whose substitutions logged between free throws and end-of-quarter heave are the
-# ordering quirks the stint builder has to handle.
-PBP_GAME_IDS = (STATS_GAME_ID, "0022500064")
+# ordering quirks the stint builder has to handle; and OKC at SAS on 2026-10-20, in the 2026-27
+# feed, whose player-less actions have no `personId` and whose actions are out of order.
+PBP_GAME_IDS = (STATS_GAME_ID, "0022500064", "0022600003")
 PBP_FIXTURES = "pbp"
 
 
