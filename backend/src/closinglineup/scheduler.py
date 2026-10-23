@@ -2,8 +2,9 @@
 row as it starts and finishes (spec §3.3, §6.4).
 
 So far `nightly` refreshes the schedule, fetches, parses and loads, rebuilds the roster
-memberships from rosters, transactions and games, then reconciles a sample of two teams' stints
-with NBA.com's; the rest of derive joins it when it lands.
+memberships from rosters, transactions and games, writes the date's local BPM snapshot
+(`derive.bpm`), then reconciles a sample of two teams' stints with NBA.com's; the rest of derive
+joins it when it lands.
 `weekly` re-fetches, parses and loads the season's shot charts, then runs the weekly overlays;
 `injuries` and `daily_overlays` run theirs (`closinglineup.overlays`).
 """
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.clock import Clock
 from closinglineup.db.models import Game, JobRun, PlayerGame, RunStatus
+from closinglineup.derive.bpm import write_bpm
 from closinglineup.derive.reconcile import (
     ReconcileError,
     describe,
@@ -224,7 +226,9 @@ class Jobs:
         last load of a table failed or never ran is loaded again, and the roster memberships are
         rebuilt from the cached rosters, the transactions and every loaded game
         (`derive.roster`). A table that fails to load fails the job, and its failed `load_log` row
-        is there for the next run; so does a rebuild that fails.
+        is there for the next run; so does a rebuild that fails. Then the date's `bpm_local`
+        snapshot is written: every player's BPM over the season's regular-season games final
+        through the date (`derive.bpm`), the same rows on a re-run.
 
         Last, two teams' stints, a different two each day (`reconcile.sample_teams`), are
         reconciled with NBA.com's lineups and on/off, re-fetched for the purpose. A row outside
@@ -319,6 +323,7 @@ class Jobs:
         healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
         spans = rebuild_roster_membership(self.db, self.cache, self.settings.tz)
         raise_for_failures([*loaded, *healed, spans])
+        bpm = write_bpm(self.db, day)
         reconciled = (
             self._reconcile(season_label(day), season_type, teams, refresh)
             if season_type is not None
@@ -335,6 +340,7 @@ class Jobs:
             "loaded": {result.table: result.rows for result in loaded},
             "healed": [f"{result.table} {result.key}" for result in healed],
             "memberships": spans.rows,
+            "bpm": bpm,
             "reconcile": reconciled,
         }
 

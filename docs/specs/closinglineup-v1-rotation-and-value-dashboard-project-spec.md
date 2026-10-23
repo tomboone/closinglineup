@@ -184,7 +184,7 @@ The NBA publishes `https://ak-static.cms.nba.com/referee/injury/Injury-Report_<Y
 
 - EPM: Dunks & Threes player table, daily, `source='epm'`, with offensive and defensive EPM and minutes. Terms of use checked and recorded in the ticket before scheduling; `EPM_ENABLED` flag.
 - DARKO: darko.app's DPM leaderboard, daily, `source='darko'`, DPM with O/D split and projected minutes (`x_minutes`) as `minutes_basis`. Its "Download CSV" button serializes the board in the browser, so the fetch is the data file behind it, the leaderboard route's SvelteKit `/__data.json` (devalue-serialized; `sources/darko.py` documents the layout), which carries every player's `nba_id`; a line without one resolves by name and the alias table (NEU-1871). The Shiny app at apanalytics.shinyapps.io was taken offline in June 2026 and points to darko.app, which publishes no terms of use and no robots.txt (checked 2026-10-23). `DARKO_ENABLED` flag; off, the overlay is a no-op with no request.
-- BPM: Basketball Reference's published BPM 2.0 formula over `player_game` sums and team ratings, computed in `derive`, `source='bpm_local'`, always on.
+- BPM: Basketball Reference's published BPM 2.0 formula over `player_game` sums and team ratings, computed in `derive`, `source='bpm_local'`, always on. `derive/bpm.py` runs as a `nightly` step after load, over the season's regular-season games final through the date, with the team adjustment to the team's own net rating (not schedule-adjusted) and the lead correction from half its margin; every 2025-26 player with 1,000+ minutes lands within ±1.0 of the published value, and the league's minutes-weighted mean within ±0.2 of 0 (`tests/test_bpm.py`, NEU-1872).
 
 ### 4.6 Contracts (`sources/spotrac.py`)
 
