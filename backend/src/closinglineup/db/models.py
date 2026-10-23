@@ -1,5 +1,6 @@
 """ORM models. Alembic autogenerates migrations against `Base.metadata` (spec §6)."""
 
+# `dt.date` for a column named `date`, whose attribute would otherwise shadow the type.
 import datetime as dt
 from datetime import date, datetime
 from enum import StrEnum
@@ -388,7 +389,6 @@ class Transaction(Timestamps, Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    # `dt.date`: a bare `date` would name this attribute, not the type.
     date: Mapped[dt.date]
     type: Mapped[str] = mapped_column(String)
     player_id: Mapped[int]
@@ -415,17 +415,21 @@ class ImpactSnapshot(Timestamps, Base):
 
 class Contract(Timestamps, Base):
     """A player's contract for one season as a team's cap page showed it on `as_of_date` (spec
-    §4.6). `salary` and `guaranteed` are dollars: a partial guarantee is common."""
+    §4.6). `salary` and `guaranteed` are dollars: a partial guarantee is common.
+
+    `team_id`, the team whose page lists it, is in its natural key: a waived player is on his old
+    team's page as dead money and on his new team's with a live contract (NEU-1866)."""
 
     __tablename__ = "contract"
     __table_args__ = (
-        UniqueConstraint("player_id", "season", "as_of_date", "source"),
+        UniqueConstraint("player_id", "team_id", "season", "as_of_date", "source"),
         _one_of("option_type", OPTION_TYPES),
         _one_of("source", CONTRACT_SOURCES),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     player_id: Mapped[int]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
     season: Mapped[str] = mapped_column(String)
     salary: Mapped[int]
     guaranteed: Mapped[int]

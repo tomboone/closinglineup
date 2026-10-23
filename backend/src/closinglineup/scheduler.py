@@ -390,11 +390,12 @@ class Jobs:
         return detail
 
     def _weekly(self) -> Detail:
+        # One reading of the clock, so the shots and the overlays agree on the date.
         today = self._local_now().date()
-        return self._steps([("shots", self._shots), *self._overlay_steps("weekly", today)], {})
+        shots = partial(self._shots, season_label(today))
+        return self._steps([("shots", shots), *self._overlay_steps("weekly", today)], {})
 
-    def _shots(self) -> Detail:
-        season = season_label(self._local_now().date())
+    def _shots(self, season: str) -> Detail:
         players = shot_chart_players(self.db, season)
         with self.nba() as session:
             results = [

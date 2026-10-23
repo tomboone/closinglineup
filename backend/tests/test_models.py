@@ -123,6 +123,7 @@ def test_a_snapshot_of_each_kind_with_listed_values_loads(db: sessionmaker[Sessi
                 ),
                 Contract(
                     player_id=JAYSON_TATUM,
+                    team_id=BOS,
                     season="2025-26",
                     salary=54_126_450,
                     guaranteed=54_126_450,

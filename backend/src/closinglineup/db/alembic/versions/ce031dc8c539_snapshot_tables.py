@@ -22,6 +22,7 @@ def upgrade() -> None:
         "contract",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("player_id", sa.Integer(), nullable=False),
+        sa.Column("team_id", sa.Integer(), nullable=False),
         sa.Column("season", sa.String(), nullable=False),
         sa.Column("salary", sa.Integer(), nullable=False),
         sa.Column("guaranteed", sa.Integer(), nullable=False),
@@ -48,13 +49,17 @@ def upgrade() -> None:
             name=op.f("ck_contract_option_type"),
         ),
         sa.CheckConstraint("source IN ('spotrac', 'realgm')", name=op.f("ck_contract_source")),
+        sa.ForeignKeyConstraint(
+            ["team_id"], ["team.nba_team_id"], name=op.f("fk_contract_team_id_team")
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_contract")),
         sa.UniqueConstraint(
             "player_id",
+            "team_id",
             "season",
             "as_of_date",
             "source",
-            name=op.f("uq_contract_player_id_season_as_of_date_source"),
+            name=op.f("uq_contract_player_id_team_id_season_as_of_date_source"),
         ),
     )
     op.create_table(
