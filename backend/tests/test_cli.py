@@ -58,6 +58,7 @@ EXPECTED = [
 ]
 IMPLEMENTED = {
     "fetch",
+    "derive",
     "parse",
     "load",
     "health",
