@@ -197,8 +197,9 @@ def fetch_final_game(
 class Jobs:
     """Every job, with what they share; the worker schedules them and the CLI runs them once.
 
-    `nba` opens a fresh `NbaSession` for each run, which the run closes; `espn` likewise a fresh
-    client for ESPN, which only the injuries fallback uses.
+    `nba` opens a fresh `NbaSession` for each run, which the run closes; `http` likewise a fresh
+    plain httpx client, for the sources outside NBA.com: the injuries fallback's ESPN and
+    darko.app.
     """
 
     settings: Settings
@@ -206,7 +207,7 @@ class Jobs:
     cache: RawCache
     store: ParquetStore
     nba: Callable[[], NbaSession]
-    espn: Callable[[], httpx.Client]
+    http: Callable[[], httpx.Client]
     db: sessionmaker[Session]
     heartbeat: Heartbeat
     # Games `poll_finals` has seen go final, by game date, until `nightly` has run for the date.

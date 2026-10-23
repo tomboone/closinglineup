@@ -17,11 +17,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import delete, insert, or_, select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from closinglineup.db.models import Game, InjuryStatus, Player, RosterMembership
-from closinglineup.names import NameIndex, first_last, load_aliases
+from closinglineup.db.models import Game, InjuryStatus
+from closinglineup.names import NameIndex, first_last
+from closinglineup.resolve import Rosters, name_index, rosters
 from closinglineup.sources import espn_injuries
 from closinglineup.sources.espn_injuries import EspnInjuries
 from closinglineup.sources.injury_pdf import InjuryReport, discover, parse
@@ -35,8 +36,6 @@ ESPN_SOURCE = "espn"
 
 # (game date, away team ID, home team ID) → game ID.
 type GameKeys = Mapping[tuple[date, int, int], str]
-# (team ID, date) → the players on the team's roster that date.
-type Rosters = Mapping[tuple[int, date], Collection[int]]
 
 log = logging.getLogger(__name__)
 
@@ -155,7 +154,7 @@ def run(jobs: "Jobs", day: date) -> dict[str, Any]:
     dates = {line.game_date for line in report.rows}
     with jobs.db.begin() as session:
         resolved = resolve_rows(
-            report, _index(session), _games(session, dates), _rosters(session, dates)
+            report, name_index(session), _games(session, dates), rosters(session, dates)
         )
         _replace(session, report.report_datetime, PDF_SOURCE, resolved.rows)
     return {
@@ -172,11 +171,11 @@ def run(jobs: "Jobs", day: date) -> dict[str, Any]:
 
 
 def _run_espn(jobs: "Jobs", day: date, pdf_error: str) -> dict[str, Any]:
-    with jobs.espn() as client:
+    with jobs.http() as client:
         path = espn_injuries.fetch(client, jobs.cache, day)
     report = espn_injuries.parse(path)
     with jobs.db.begin() as session:
-        resolved = resolve_espn_rows(report, _index(session), _rosters(session, [day]), day)
+        resolved = resolve_espn_rows(report, name_index(session), rosters(session, [day]), day)
         _replace(session, report.report_datetime, ESPN_SOURCE, resolved.rows)
     return {
         "source": ESPN_SOURCE,
@@ -189,11 +188,6 @@ def _run_espn(jobs: "Jobs", day: date, pdf_error: str) -> dict[str, Any]:
         "unresolved": resolved.unresolved,
         "duplicates": resolved.duplicates,
     }
-
-
-def _index(session: Session) -> NameIndex:
-    players = session.execute(select(Player.nba_player_id, Player.name))
-    return NameIndex(players, load_aliases())
 
 
 def _replace(
@@ -217,25 +211,3 @@ def _has_games(jobs: "Jobs", day: date) -> bool:
 def _games(session: Session, dates: Collection[date]) -> dict[tuple[date, int, int], str]:
     games = session.scalars(select(Game).where(Game.game_date.in_(dates)))
     return {(g.game_date, g.away_team_id, g.home_team_id): g.game_id for g in games}
-
-
-def _rosters(session: Session, dates: Collection[date]) -> dict[tuple[int, date], set[int]]:
-    if not dates:
-        return {}
-    spans = session.execute(
-        select(
-            RosterMembership.player_id,
-            RosterMembership.team_id,
-            RosterMembership.start_date,
-            RosterMembership.end_date,
-        ).where(
-            RosterMembership.start_date <= max(dates),
-            or_(RosterMembership.end_date.is_(None), RosterMembership.end_date >= min(dates)),
-        )
-    )
-    rosters: dict[tuple[int, date], set[int]] = {}
-    for player_id, team_id, start, end in spans:
-        for day in dates:
-            if start <= day and (end is None or day <= end):
-                rosters.setdefault((team_id, day), set()).add(player_id)
-    return rosters
