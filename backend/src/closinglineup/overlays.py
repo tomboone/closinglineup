@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
 
-from closinglineup import injuries, transactions
+from closinglineup import darko, injuries, transactions
 
 if TYPE_CHECKING:
     from closinglineup.scheduler import Jobs
@@ -58,3 +58,4 @@ def by_name(name: str) -> Overlay:
 
 register_overlay("injuries", "injuries", injuries.run)
 register_overlay("transactions", "daily", transactions.run)
+register_overlay("darko", "daily", darko.run)

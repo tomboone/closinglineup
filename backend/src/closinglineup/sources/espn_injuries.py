@@ -1,9 +1,10 @@
 """ESPN's injuries JSON: the fallback when the official report cannot be had (spec §4.3).
 
 Ported from nba-today's ESPN client. ESPN does not fingerprint TLS as NBA.com does, so this is
-plain httpx. Every request sends `season` (ESPN's end year, `season.espn_season`) and
-`seasontype=2`; ESPN ignored both when nba-today probed it on 2026-10-20, but they are sent all the
-same. The report is ESPN's as of the response's own `timestamp`, which is when it was generated.
+plain httpx (`sources/web.py`). Every request sends `season` (ESPN's end year,
+`season.espn_season`) and `seasontype=2`; ESPN ignored both when nba-today probed it on
+2026-10-20, but they are sent all the same. The report is ESPN's as of the response's own
+`timestamp`, which is when it was generated.
 
 The response groups injuries by team, naming each by ESPN ID and display name only. Each injury
 names the athlete's own team too, and the two can disagree: on 2026-10-20 and again on 2026-10-23
@@ -36,7 +37,6 @@ SOURCE = "espn"
 ENDPOINT = "injuries"
 URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
 REGULAR_SEASON = 2
-TIMEOUT_SECONDS = 20.0
 # A snapshot's key: the instant it was fetched, in UTC, e.g. `20261023T144550Z`.
 KEY_FORMAT = "%Y%m%dT%H%M%SZ"
 # Spec §4.3: ESPN's statuses onto the official report's.
@@ -69,10 +69,6 @@ class EspnInjuries:
     rows: list[EspnInjuryRow]
     # Each line whose status has no mapping, as "First Last (TEAM): status".
     unmapped: list[str]
-
-
-def make_client() -> httpx.Client:
-    return httpx.Client(timeout=TIMEOUT_SECONDS)
 
 
 def fetch(client: httpx.Client, cache: RawCache, day: date) -> Path:
