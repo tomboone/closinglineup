@@ -1,10 +1,13 @@
 # Deploying closinglineup on kumadrome
 
 closinglineup runs on kumadrome as one compose project: `postgres`, `app` (the API and the built UI),
-`worker` (the job scheduler, same image) and a Watchtower scoped to this project that pulls new images
-from GHCR. kumadrome is the home Mac mini (Ubuntu, Docker with the Compose plugin, residential IP,
-which stats.nba.com requires; see ADR-0001). The database and the raw cache live on the USB drive at
-`/mnt/music`. The only outside account involved is [healthchecks.io](https://healthchecks.io) (alerting).
+`worker` (the job scheduler, same image), `tailscale` (the sidecar that serves `app` on the personal
+tailnet) and a Watchtower scoped to this project that pulls new images from GHCR. kumadrome is the home
+Mac mini (Ubuntu, Docker with the Compose plugin, residential IP, which stats.nba.com requires; see
+ADR-0001). The database and the raw cache live on the USB drive at `/mnt/music`, and a systemd timer
+on the host dumps the database nightly to B2. The outside accounts involved are
+[healthchecks.io](https://healthchecks.io) (the jobs' alerting), the personal tailnet, and the B2 bucket
+the Navidrome backup uses; the backup reports to the personal Uptime Kuma on kumadrome.
 
 Images are published by `.github/workflows/image.yml` on every push to `main`:
 
@@ -16,9 +19,9 @@ Images are published by `.github/workflows/image.yml` on every push to `main`:
 Commands below run on kumadrome (`ssh kumadrome`) unless they start with `ssh`. A step that needs `sudo` is
 written as `ssh -t kumadrome 'sudo …'` so it can prompt for the password.
 
-Not here yet: the Tailscale sidecar and the nightly `pg_dump` to B2 (M7). Until the sidecar lands, the UI
-is on kumadrome's loopback only; reach it through an SSH tunnel, `ssh -L 8010:127.0.0.1:8010 kumadrome`,
-then http://localhost:8010.
+The UI is at `https://closinglineup.<tailnet>.ts.net` from any personal-tailnet device. It is also on
+kumadrome's loopback, never the LAN; from a device off the tailnet, reach it through an SSH tunnel,
+`ssh -L 8010:127.0.0.1:8010 kumadrome`, then http://localhost:8010.
 
 ## 1. Make sure kumadrome can pull the image
 
@@ -56,6 +59,13 @@ app's user, and the `postgres` image's), so both directories must be owned by it
 ssh -t kumadrome 'sudo install -d -o 999 -g 999 /mnt/music/closinglineup/data /mnt/music/closinglineup/pg'
 ```
 
+The Tailscale sidecar keeps its node key in `tailscale/`, on the drive too, so a recreated container
+rejoins as the same node. It runs as root, so the directory stays root's:
+
+```sh
+ssh -t kumadrome 'sudo install -d -m 700 /mnt/music/closinglineup/tailscale'
+```
+
 ## 3. Create the healthchecks.io checks
 
 One check per job family. Create all three now. A check that has never been pinged stays **new** and
@@ -74,7 +84,27 @@ A job pings when it succeeds and pings `/fail`, with the exception summary in th
 `nightly` runs on days without games too. Between seasons it fails, because the CDN still serves the
 previous season's schedule, so pause the nightly check over the off-season.
 
-## 4. Configure `.env`
+## 4. Get a Tailscale auth key
+
+The sidecar is closinglineup's own node on the personal tailnet, `closinglineup`, the same pattern as
+Navidrome's. The host itself is on no tailnet, and one `tailscaled` is on one tailnet at a time, so each
+stack brings its own sidecar. Never run `tailscale up`, `login` or `switch` on the host for its sake.
+
+1. **Tailnet settings**, already on for Navidrome: in the personal tailnet's admin console, under *DNS*,
+   MagicDNS on and *HTTPS Certificates* enabled. Serve needs both for a `*.ts.net` certificate.
+2. **An auth key.** *Settings → Keys → Generate auth key*: **not reusable, not ephemeral.** An ephemeral
+   node is removed from the tailnet once it goes offline, so after a reboot or a recreate the sidecar
+   would come back as a new node, perhaps `closinglineup-1`. Copy it for `.env` (next step). It is used
+   once: `TS_AUTH_ONCE` logs in only while the state directory holds no node key.
+3. **After the node joins** (step 6), open it in *Machines* and choose *Disable key expiry*. Otherwise it
+   drops off the tailnet when the node key expires, after 180 days by default. If you would rather tag the
+   node: add `"tag:closinglineup": ["autogroup:admin"]` to the policy's `tagOwners`, generate the key with
+   that tag, and set `TS_EXTRA_ARGS=--advertise-tags=tag:closinglineup`. A tagged node's key never expires.
+
+If a node named `closinglineup` is already listed in *Machines*, remove it first, or the new one comes up
+as `closinglineup-1`.
+
+## 5. Configure `.env`
 
 ```sh
 cp .env.example .env
@@ -82,13 +112,14 @@ chmod 600 .env
 sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env
 ```
 
-Edit `.env` and paste the three `HEALTHCHECKS_URL_*` values. The data paths already match step 2. Every
-variable is described in `.env.example`; the app's full list of settings is in the project spec, §10.
+Edit `.env`: paste the three `HEALTHCHECKS_URL_*` values and the auth key as `TS_AUTHKEY`. The data and
+Tailscale state paths already match step 2. Every variable is described in `.env.example`; the app's full
+list of settings is in the project spec, §10.
 
 The password is set once, when Postgres creates its cluster in `pg/`. Changing it in `.env` later does not
 change the database's password.
 
-## 5. Start it
+## 6. Start it
 
 ```sh
 docker compose config -q   # validates the compose file and .env; prints nothing on success
@@ -99,9 +130,47 @@ docker compose ps
 `app` runs the database migrations (`alembic upgrade head`) before it starts serving, and its healthcheck
 requests the API (`/api/meta`), so it turns healthy only after they have run. `worker` waits for `app` to be healthy, so
 it never writes to a schema that is not there yet. Within about a minute
-`docker compose ps` shows all four services `healthy`.
+`docker compose ps` shows `postgres`, `app`, `worker` and `watchtower` `healthy`, and `tailscale` up (it
+has no healthcheck).
 
-## 6. First real fetch
+Then bring the tailnet side up:
+
+1. Check the sidecar joined, and that serve points at `app`:
+
+   ```sh
+   docker compose exec tailscale tailscale status | head -1
+   docker compose exec tailscale tailscale serve status   # https://closinglineup.<tailnet>.ts.net → http://app:8000
+   ```
+
+2. Blank `TS_AUTHKEY=` in `.env`. Because of `TS_AUTH_ONCE`, the used key is never needed again.
+3. Disable the node's key expiry, or tag it (step 4, item 3).
+4. From a personal-tailnet device, open `https://closinglineup.<tailnet>.ts.net`: the league page. The
+   first request can take a few seconds while the certificate is issued.
+
+A 502 there shows in `docker compose logs tailscale` as `proxy error: dial tcp <address>:8000`. Just
+after `docker compose up` it is `app` still migrating, and clears once `app` is healthy. If it persists
+and `<address>` is the sidecar's own (`docker compose exec tailscale hostname -i`), the proxy is dialling
+itself: a container's own hostname maps to its own address in `/etc/hosts`, which is why the sidecar's
+`hostname` is `closinglineup-tailscale` and must never be `app`.
+
+**Adding the sidecar to a deploy from before it.** The compose file requires `TS_STATE_HOST_DIR`, so
+once it is pulled every `docker compose` command fails until `.env` sets it. Make the state directory
+(step 2) and get a key (step 4) first, then pull and add the variables in one go, pasting the key where
+`<key>` is:
+
+```sh
+git pull && cat >>.env <<'EOF'
+TS_STATE_HOST_DIR=/mnt/music/closinglineup/tailscale
+TS_AUTHKEY=<key>
+TS_EXTRA_ARGS=
+EOF
+docker compose config -q
+docker compose up -d
+```
+
+and carry on from item 1 above. `up -d` only creates `tailscale`; the other services are unchanged.
+
+## 7. First real fetch
 
 Fetch one 2026-27 final game from the home IP, to prove stats.nba.com answers kumadrome. To list the
 regular-season games the schedule shows as final:
@@ -146,7 +215,7 @@ and cdn.nba.com feeds, and a ping to the nightly check):
 docker compose run --rm worker closinglineup nightly --date 2026-10-20
 ```
 
-## 7. Backfill
+## 8. Backfill
 
 The nightly job only fetches the day before, so the cache starts with whatever has been played since the
 worker went live. The backfill fills in 2025-26 whole and 2026-27 to date (spec §2): fetch every final
@@ -281,6 +350,95 @@ docker compose exec postgres psql -U closinglineup -c "
   GROUP BY 1 ORDER BY 1"
 ```
 
+## 9. Nightly backup to B2
+
+`backup/closinglineup-backup.sh` runs nightly at 05:30 Eastern (+ up to 15 min) from a systemd timer on
+the host, as `tom`, after the 03:30 nightly job and Monday's 04:30 weekly. It:
+
+- refuses to run unless `/mnt/music` is mounted;
+- runs `pg_dump --format=custom` in the `postgres` container (`docker compose exec -T`), into a dated
+  `closinglineup-<YYYYmmdd-HHMMSS>.dump` in `/mnt/music/closinglineup/backups`, checks it with
+  `pg_restore --list`, and deletes dumps older than `KEEP_DAYS` (14);
+- `rclone sync`s that directory to `closinglineup-backups/` in the B2 bucket the Navidrome backup uses.
+  The `b2` remote has `hard_delete = false`, so a dump aged out stays recoverable per the bucket's
+  lifecycle;
+- pings a push monitor on the personal Kuma: `up` after a good run, `down` with the reason on failure.
+
+| File | Purpose |
+|---|---|
+| `backup/closinglineup-backup.sh` | The job. POSIX `sh`. Reads `~/.config/closinglineup-backup.env`. |
+| `backup/closinglineup-backup.env.example` | Its settings: the paths, `KEEP_DAYS`, the B2 destination, and `PING_URL`. |
+| `backup/closinglineup-backup.service`, `.timer` | Oneshot service as `tom`, with `RequiresMountsFor=/mnt/music`. `Persistent` catches up after downtime. |
+
+### Install
+
+rclone and the `b2` remote are already on kumadrome, from the Navidrome backup (`rclone listremotes`
+lists `b2:`).
+
+1. **The dump directory**, on the drive, owned by `tom`:
+
+   ```sh
+   ssh -t kumadrome 'sudo install -d -o tom -g tom /mnt/music/closinglineup/backups'
+   ```
+
+2. **A push monitor** on the personal Kuma (`http://127.0.0.1:3002` on kumadrome): *Add New Monitor*,
+   type *Push*, name `kumadrome/closinglineup-backup`, heartbeat interval 25 h (90000 s), retries 0. Copy
+   its push URL.
+3. **Settings.** Fill in `<bucket>` (the Navidrome backup's, which `grep REMOTE
+   ~/.config/navidrome-backup.env` shows) and the push URL's `<token>`. Keep `PING_URL` in double
+   quotes: the file is sourced, and an unquoted `&` from Kuma's default `?status=up&msg=OK&ping=` query
+   would leave it unset and skip the ping silently.
+
+   ```sh
+   cp backup/closinglineup-backup.env.example ~/.config/closinglineup-backup.env
+   chmod 600 ~/.config/closinglineup-backup.env
+   $EDITOR ~/.config/closinglineup-backup.env
+   ```
+
+4. **Timer**, and a first run in the foreground:
+
+   ```sh
+   ssh -t kumadrome 'sudo cp ~tom/closinglineup/deploy/backup/closinglineup-backup.service ~tom/closinglineup/deploy/backup/closinglineup-backup.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now closinglineup-backup.timer'
+   ssh -t kumadrome 'sudo systemctl start closinglineup-backup.service'
+   systemctl status closinglineup-backup.service --no-pager; journalctl -u closinglineup-backup --since -1h
+   systemctl list-timers closinglineup-backup.timer
+   ls -l /mnt/music/closinglineup/backups
+   . ~/.config/closinglineup-backup.env && rclone ls "$REMOTE"
+   ```
+
+   The dump is in both listings, and `kumadrome/closinglineup-backup` shows an `up` heartbeat.
+
+The units run the script from this clone, so a `git pull` updates the job. After a change to a unit file,
+copy it again and `daemon-reload`.
+
+### Restore
+
+A dump from B2 first, if the drive's copy is gone:
+`rclone copy "$REMOTE/closinglineup-<ts>.dump" /mnt/music/closinglineup/backups/`.
+
+**Drill** into a scratch database, which leaves the live one alone. The counts match the live
+database's as of the dump:
+
+```sh
+dump=$(ls -t /mnt/music/closinglineup/backups/closinglineup-*.dump | head -1)
+docker compose exec -T postgres createdb -U closinglineup restore_drill
+docker compose exec -T postgres pg_restore -U closinglineup -d restore_drill --no-owner --exit-on-error <"$dump"
+docker compose exec -T postgres psql -U closinglineup -d restore_drill -c \
+  "SELECT (SELECT count(*) FROM game) AS games, (SELECT count(*) FROM player_game) AS player_games,
+          (SELECT version_num FROM alembic_version) AS revision"
+docker compose exec -T postgres dropdb -U closinglineup restore_drill
+```
+
+**For real**, stop the writers, restore over the live database in one transaction, and start them again.
+`app` migrates on start, so a dump from an older revision is brought up to head:
+
+```sh
+docker compose stop worker app
+docker compose exec -T postgres pg_restore -U closinglineup -d closinglineup --clean --if-exists \
+  --no-owner --single-transaction --exit-on-error <"$dump"
+docker compose start app worker
+```
+
 ## Day-to-day
 
 **Logs.** Every container logs structured JSON to stdout:
@@ -289,6 +447,8 @@ docker compose exec postgres psql -U closinglineup -c "
 docker compose logs -f worker        # jobs
 docker compose logs -f app           # migrations and API requests
 docker compose logs -f watchtower    # image updates
+docker compose logs -f tailscale     # the tailnet node and serve
+journalctl -u closinglineup-backup   # the nightly backup
 ```
 
 **Health:** `docker compose exec app closinglineup health; echo $?` exits 0 when the database answers
@@ -303,7 +463,8 @@ with its status and detail.
 **Updates** are automatic: Watchtower checks GHCR every 5 minutes and restarts `app` and `worker` on the new
 image, removing the old one, and `app` applies any new migration as it starts. Watchtower runs with
 `--scope closinglineup`, so it only touches containers labelled with that scope, and leaves `postgres`
-alone. To update by hand: `docker compose pull && docker compose up -d`.
+and `tailscale` alone. To update by hand, the sidecar included: `docker compose pull && docker compose up -d`.
+A sidecar restart interrupts tailnet access for a few seconds; the loopback port is not affected.
 
 Every other Watchtower on the host (nba-today's, mlb-today's) must be scoped too. An unscoped Watchtower
 updates every enabled container whatever its scope, and when it starts it stops every other Watchtower on
