@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { vi } from "vitest";
-import type { MetaResponse, TeamPage, TeamsResponse } from "../api/client";
+import type { MetaResponse, PlayerPage, TeamPage, TeamsResponse } from "../api/client";
 import { routes } from "../routes";
 
 /** A mocked API reply: a JSON body with a status (200 if omitted), or a request that never ends. */
@@ -140,6 +140,76 @@ export const TEAM_PAGE: TeamPage = {
       guarantee_date: "2026-04-10",
       guaranteed_after: 2_000_000,
       days_until_guarantee: 21,
+    },
+  ],
+};
+
+const shotZone = (
+  zone: PlayerPage["shot_profile"][number]["zone"],
+  freq: number,
+): PlayerPage["shot_profile"][number] => ({
+  zone,
+  freq,
+  fg_pct: 0.5,
+  season_freq: freq + 0.02,
+  season_fg_pct: 0.48,
+  prior_freq: null,
+  prior_fg_pct: null,
+});
+
+/**
+ * Jaylen Brown's page over his last 10 games, three of them here, with an injury and a transaction
+ * annotation on two of their dates.
+ */
+export const PLAYER_PAGE: PlayerPage = {
+  date: "2026-03-20",
+  window: "10",
+  garbage_time: "exclude",
+  header: { player: BROWN, tricode: "BOS", position: "G-F", tier: "starter", badges: [] },
+  series: {
+    minutes: series([34.5, 12, 36]),
+    minutes_share: series([0.144, 0.05, 0.15]),
+    on_court_net: series([8.2, -3, 11]),
+    on_off_net: series([4.1, -6, 7.5]),
+    ts_pct: series([0.61, null, 0.58]),
+    usg_pct: series([0.29, null, 0.31]),
+    impact: [
+      { source: "epm", points: series([2.1, 2.0, 2.2]) },
+      { source: "darko", points: series([1.4, 1.4, 1.5]) },
+    ],
+  },
+  annotations: [
+    { game_date: "2026-03-11", kind: "injury", label: "Available → Questionable (knee)" },
+    { game_date: "2026-03-12", kind: "transaction", label: "Signed extension" },
+  ],
+  shot_profile: [shotZone("rim", 0.3), shotZone("corner_3", 0.1)],
+  teammates: [
+    { player: TATUM, possessions: 412, net_rating: 9.1 },
+    { player: WHITE, possessions: 380, net_rating: -2.4 },
+  ],
+  matchups: {
+    defenders: [
+      {
+        player: player(1628384, "OG Anunoby"),
+        partial_poss: 41.5,
+        pts: 12,
+        fgm: 5,
+        fga: 11,
+        fg3m: 1,
+        fg3a: 4,
+        ast: 2,
+        tov: 1,
+      },
+    ],
+    guarded: [],
+  },
+  flags: [
+    {
+      game_date: "2026-03-12",
+      flag: "minutes_cliff",
+      player: BROWN,
+      tricode: "BOS",
+      detail: { share_5: 0.08, share_20: 0.14, ratio: 0.57 },
     },
   ],
 };

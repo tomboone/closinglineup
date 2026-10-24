@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { mockApi, renderApp, TEAM_PAGE } from "./test/app";
+import { mockApi, PLAYER_PAGE, renderApp, TEAM_PAGE } from "./test/app";
 import { allOptions } from "./test/echarts";
 
 vi.mock("./components/charts/echarts", () => import("./test/echarts"));
@@ -21,11 +21,11 @@ const PAGES = [
     content: "Boston Celtics, as of 2026-03-19.",
   },
   {
-    path: "/players/1628369",
-    api: "/api/players/1628369",
+    path: "/players/1627759",
+    api: "/api/players/1627759",
     heading: "Player",
-    body: { date: "2026-03-20", header: { player: { player_id: 1628369, name: "Jayson Tatum" } } },
-    content: "Jayson Tatum, as of 2026-03-20.",
+    body: PLAYER_PAGE,
+    content: "as of 2026-03-20",
   },
   {
     path: "/games/0022500001",

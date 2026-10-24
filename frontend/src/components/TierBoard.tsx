@@ -2,6 +2,7 @@ import type { components } from "../api/types";
 import SparklineCell from "./charts/SparklineCell";
 import { TIER_COLOURS } from "./charts/theme";
 import { percent } from "./format";
+import { BADGE_LABELS, IMPACT_LABELS, TIER_LABELS } from "./labels";
 import PlayerLink from "./PlayerLink";
 
 type Schemas = components["schemas"];
@@ -10,21 +11,6 @@ type Tier = Schemas["Tier"];
 
 /** The tiers in the order they are evaluated, the first match winning (spec §7.5). */
 const TIER_ORDER: Tier[] = ["injured", "starter", "core", "fringe", "out"];
-
-const TIER_LABELS: Record<Tier, string> = {
-  injured: "Injured",
-  starter: "Starter",
-  core: "Core",
-  fringe: "Fringe",
-  out: "Out",
-};
-
-const BADGE_LABELS: Record<Schemas["Badge"], string> = {
-  two_way: "Two-way",
-  ten_day: "10-day",
-  exhibit_10: "Exhibit 10",
-  g_league: "G League",
-};
 
 // `active` is the usual case, and `g_league` already shows as a badge, so neither shows here.
 const AVAILABILITY_LABELS: Record<Schemas["Availability"], string> = {
@@ -37,12 +23,6 @@ const AVAILABILITY_LABELS: Record<Schemas["Availability"], string> = {
   inactive: "Inactive",
   suspended: "Suspended",
   g_league: "",
-};
-
-const IMPACT_LABELS: Record<NonNullable<Row["impact_source"]>, string> = {
-  epm: "EPM",
-  darko: "DARKO",
-  bpm_local: "BPM",
 };
 
 const COLUMNS = 6;
