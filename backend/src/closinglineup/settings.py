@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     )
     # Started at least N of the last K games played, from `"N/K"` (spec §7.5).
     tier_starter_min: Annotated[tuple[int, int], NoDecode] = (4, 5)
-    tier_core_share: float = Field(default=0.18, gt=0, le=1)
+    # A share of the team's player-minutes (§7.1): 0.036 is 18% of one player's 48, 8.6 a game.
+    tier_core_share: float = Field(default=0.036, gt=0, le=1)
     tier_fringe_played_rate: float = Field(default=0.5, ge=0, le=1)
 
     log_level: LogLevel = "INFO"

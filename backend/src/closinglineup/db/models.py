@@ -17,7 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Deterministic constraint names, so migrations can drop and alter what they created.
@@ -68,6 +68,21 @@ TRANSACTION_TYPES = (
 IMPACT_SOURCES = ("epm", "darko", "bpm_local")
 # Spec §4.6: Hoops Rumors' non-guaranteed list, with no fallback (ADR-0004).
 CONTRACT_SOURCES = ("hoopsrumors",)
+# Spec §7.5, in order of precedence.
+ROTATION_TIERS = ("injured", "starter", "core", "fringe", "out")
+# CONTEXT.md, "Availability": the injury report's statuses, lowercased, and what the box score or
+# a G League assignment says of a player no report lists.
+AVAILABILITIES = (
+    "active",
+    "out",
+    "doubtful",
+    "questionable",
+    "probable",
+    "available",
+    "inactive",
+    "suspended",
+    "g_league",
+)
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> CheckConstraint:
@@ -438,3 +453,31 @@ class Contract(Timestamps, Base):
     guaranteed_after: Mapped[int | None]
     as_of_date: Mapped[date]
     source: Mapped[str] = mapped_column(String)
+
+
+# Derived (spec §6.4): what `derive` writes from the tables and views above (ADR-0003).
+
+
+class RotationState(Timestamps, Base):
+    """A player's rotation tier on a team on one of its game dates, with the inputs the tier rule
+    read (spec §7.5, `derive.rotation`). `badges` are contract and assignment facts beside the
+    tier, never a tier themselves."""
+
+    __tablename__ = "rotation_state"
+    __table_args__ = (
+        Index(None, "team_id", "game_date"),
+        _one_of("tier", ROTATION_TIERS),
+        _one_of("availability", AVAILABILITIES),
+    )
+
+    player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"), primary_key=True)
+    game_date: Mapped[date] = mapped_column(primary_key=True)
+    tier: Mapped[str] = mapped_column(String)
+    minutes_share_10: Mapped[float | None]
+    starter_rate_5: Mapped[float | None]
+    played_rate_10: Mapped[float | None]
+    availability: Mapped[str] = mapped_column(String)
+    badges: Mapped[list[str]] = mapped_column(ARRAY(String))
+    is_short: Mapped[bool]
+    inputs: Mapped[dict[str, Any]]
