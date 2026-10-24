@@ -2,7 +2,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { vi } from "vitest";
-import type { MetaResponse, PlayerPage, TeamPage, TeamsResponse } from "../api/client";
+import type {
+  LeaguePage,
+  MetaResponse,
+  PlayerPage,
+  TeamPage,
+  TeamsResponse,
+} from "../api/client";
 import { routes } from "../routes";
 
 /** A mocked API reply: a JSON body with a status (200 if omitted), or a request that never ends. */
@@ -212,6 +218,122 @@ export const PLAYER_PAGE: PlayerPage = {
       detail: { share_5: 0.08, share_20: 0.14, ratio: 0.57 },
     },
   ],
+};
+
+const mover = (
+  ref: { player_id: number; name: string },
+  tricode: string,
+  value: number,
+  delta: number,
+  source: LeaguePage["impact_risers"][number]["source"] = null,
+): LeaguePage["minutes_risers"][number] => ({ player: ref, tricode, value, delta, source });
+
+const signal = (name: string, label: string, value: number | string) => ({ name, label, value });
+
+/**
+ * The morning of 2026-03-20: two teams' tier transitions, a mover each way of both kinds, a flag of
+ * two kinds, an injury change and a transaction.
+ */
+export const LEAGUE_PAGE: LeaguePage = {
+  date: "2026-03-20",
+  rotation_events: [
+    {
+      tricode: "BOS",
+      events: [
+        {
+          player: PRITCHARD,
+          game_date: "2026-03-20",
+          from_tier: "fringe",
+          to_tier: "core",
+          signals: [
+            signal("minutes_share", "minutes share up 4.1 pts vs 20-game", 0.041),
+            signal("injury", "back from Out 2 days ago", "Out → Available"),
+            signal("starter_rate", "starter rate up 20.0 pts vs 20-game", 0.2),
+          ],
+        },
+        {
+          player: PORZINGIS,
+          game_date: "2026-03-20",
+          from_tier: "starter",
+          to_tier: "injured",
+          signals: [
+            signal("injury", "listed Out today", "Available → Out"),
+            signal("minutes_volatility", "minutes volatility up 6.2 min vs 20-game", 6.2),
+            signal("usage", "usage down 2.0 pts vs prior 10 games", -0.02),
+          ],
+        },
+      ],
+    },
+    {
+      tricode: "LAL",
+      events: [
+        {
+          player: player(1642000, "Dalton Knecht"),
+          game_date: "2026-03-20",
+          from_tier: null,
+          to_tier: "fringe",
+          signals: [
+            signal("transaction", "signed today", "signing"),
+            signal("minutes_share", "minutes share up 2.0 pts vs 20-game", 0.02),
+            signal("on_court_net", "on-court net down 3.1 vs prior 10 games", -3.1),
+          ],
+        },
+      ],
+    },
+  ],
+  minutes_risers: [mover(PRITCHARD, "BOS", 0.12, 0.041)],
+  minutes_fallers: [mover(HOLIDAY, "BOS", 0.08, -0.05)],
+  flags: [
+    {
+      game_date: "2026-03-20",
+      flag: "minutes_cliff",
+      player: HOLIDAY,
+      tricode: "BOS",
+      detail: { share_5: 0.05, share_20: 0.12, ratio: 0.42 },
+    },
+    {
+      game_date: "2026-03-20",
+      flag: "contract_pressure",
+      player: DAVISON,
+      tricode: "BOS",
+      detail: { reason: "two_way", active_games: 46, limit: 50 },
+    },
+  ],
+  injury_changes: [
+    {
+      player: PORZINGIS,
+      tricode: "BOS",
+      from_status: null,
+      to_status: "Out",
+      reason: "Injury/Illness - Left Ankle; Sprain",
+      report_datetime: "2026-03-20T17:30:00-04:00",
+    },
+  ],
+  transactions: [
+    {
+      date: "2026-03-20",
+      type: "sign",
+      detail: "Los Angeles Lakers signed Dalton Knecht to a 10-day contract.",
+      player: player(1642000, "Dalton Knecht"),
+      from_tricode: null,
+      to_tricode: "LAL",
+    },
+  ],
+  impact_risers: [mover(TATUM, "BOS", 6.1, 0.8, "epm")],
+  impact_fallers: [mover(BROWN, "BOS", 2.0, -0.6, "darko")],
+};
+
+/** A date no team played: every list empty (spec §8). */
+export const EMPTY_LEAGUE_PAGE: LeaguePage = {
+  date: "2026-03-21",
+  rotation_events: [],
+  minutes_risers: [],
+  minutes_fallers: [],
+  flags: [],
+  injury_changes: [],
+  transactions: [],
+  impact_risers: [],
+  impact_fallers: [],
 };
 
 /**

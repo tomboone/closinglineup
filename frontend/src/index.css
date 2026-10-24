@@ -232,3 +232,71 @@ body {
   font-variant-numeric: tabular-nums;
   color: #57606a;
 }
+
+.league-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.league-page .league-events {
+  grid-row: span 2;
+}
+
+.league-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.league-page th,
+.league-page td {
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #eee;
+}
+
+.league-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.league-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.league-page .chart-sparkline {
+  display: inline-block;
+  vertical-align: middle;
+  width: 60px;
+}
+
+.league-page .tier {
+  padding-left: 6px;
+  border-left: 4px solid;
+  font-weight: 600;
+}
+
+.rotation-events,
+.league-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rotation-events > li,
+.league-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.signals {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: #57606a;
+  font-size: 0.85em;
+}

@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { FRESH_META, mockApi, renderApp, TEAM_PAGE as BODY } from "../test/app";
+import { FRESH_META, LEAGUE_PAGE, mockApi, renderApp, TEAM_PAGE as BODY } from "../test/app";
 
 vi.mock("../components/charts/echarts", () => import("../test/echarts"));
 
@@ -55,7 +55,7 @@ describe("Layout", () => {
   });
 
   it("shows no stale banner when every source is fresh", async () => {
-    mockApi({ "/api/league": { body: { date: "2026-03-20" } } });
+    mockApi({ "/api/league": { body: LEAGUE_PAGE } });
     renderApp("/");
     await screen.findByText("Morning feed for 2026-03-20.");
 
@@ -96,7 +96,7 @@ describe("Layout", () => {
       ...FRESH_META,
       freshness: [...FRESH_META.freshness, { source: "darko", latest: null }],
     };
-    mockApi({ "/api/meta": { body: meta }, "/api/league": { body: { date: "2026-03-20" } } });
+    mockApi({ "/api/meta": { body: meta }, "/api/league": { body: LEAGUE_PAGE } });
     renderApp("/");
     await screen.findByText("Morning feed for 2026-03-20.");
 
