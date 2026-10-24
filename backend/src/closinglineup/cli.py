@@ -138,14 +138,25 @@ def fetch(
     season_type: Annotated[SeasonType, typer.Option(help="Season type.")] = (
         SeasonType.REGULAR_SEASON
     ),
+    missing: Annotated[
+        bool,
+        typer.Option(
+            "--missing",
+            help="Re-try stats.nba.com for every game a past nightly fell back to cdn.nba.com "
+            "for, then parse and load their dates again.",
+        ),
+    ] = False,
     force: Annotated[bool, typer.Option(help="Re-fetch responses already cached.")] = False,
 ) -> None:
-    modes = sum([game_id is not None, rosters, shots, aggregates])
+    modes = sum([game_id is not None, rosters, shots, aggregates, missing])
     walk = modes == 0 and season is not None
     if modes != 1 and not walk:
         raise typer.BadParameter(
-            "pass exactly one of --game-id, --rosters, --shots, --aggregates, or --season alone"
+            "pass exactly one of --game-id, --rosters, --shots, --aggregates, --missing, "
+            "or --season alone"
         )
+    if missing and (season is not None or force):
+        raise typer.BadParameter("--missing takes no --season and no --force")
     if shots and player_id is None:
         raise typer.BadParameter("--shots needs --player-id")
     if (start is not None or end is not None) and not walk:
@@ -154,6 +165,9 @@ def fetch(
         raise typer.BadParameter("--from is after --to")
     settings = Settings()
     clock = SystemClock()
+    if missing:
+        _fetch_missing(settings, clock)
+        return
     cache = RawCache(settings.data_dir, clock)
     season = season or season_label(clock.now().astimezone(settings.tz).date())
     if walk:
@@ -180,6 +194,31 @@ def fetch(
         reason = f": {result.error}" if result.error else ""
         typer.echo(f"{result.endpoint} {result.key}: {result.status}{reason}")
     if any(result.status is FetchStatus.FAILED for result in results):
+        raise typer.Exit(1)
+
+
+def _fetch_missing(settings: Settings, clock: Clock) -> None:
+    """`fetch --missing`: a line per game stats.nba.com still fails for."""
+    with _open_jobs(settings, clock) as jobs:
+        try:
+            detail = jobs.fetch_missing()
+        except Exception as exc:
+            typer.echo(f"fetch --missing: failed: {type(exc).__name__}: {exc}", err=True)
+            raise typer.Exit(1) from None
+    still = [
+        (day, game_id, endpoints)
+        for day, games in detail["still_failed"].items()
+        for game_id, endpoints in games.items()
+    ]
+    for day, game_id, endpoints in still:
+        typer.echo(f"{day} {game_id}: stats.nba.com failed again for {', '.join(endpoints)}")
+    for failed_game, error in detail["parse_failed"].items():
+        typer.echo(f"parse {failed_game}: failed: {error}")
+    typer.echo(
+        f"fetch --missing: {len(detail['games'])} stats_failed games, "
+        f"{len(detail['games']) - len(still)} fetched, {len(still)} still failing"
+    )
+    if still:
         raise typer.Exit(1)
 
 
@@ -536,6 +575,8 @@ def nightly(
         typer.echo(f"{failure['endpoint']} {failure['key']}: failed: {failure['error']}")
     for failed_game, error in detail["parse_failed"].items():
         typer.echo(f"parse {failed_game}: failed: {error}")
+    for warning in detail["warnings"]:
+        typer.echo(f"warning: {warning}")
     reconciled = detail["reconcile"]
     if reconciled is not None:
         if "skipped" in reconciled:

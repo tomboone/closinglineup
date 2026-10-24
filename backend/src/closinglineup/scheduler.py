@@ -4,7 +4,8 @@ row as it starts and finishes (spec §3.3, §6.4).
 `nightly` refreshes the schedule, fetches, parses and loads, rebuilds the roster memberships from
 rosters, transactions and games, then derives the date (`derive.run`): garbage time, windows,
 rotation state, events, flags, local BPM, and a sample of two teams' stints reconciled with
-NBA.com's.
+NBA.com's. A game stats.nba.com fails for is marked `stats_failed` in `load_log` and parsed from
+cdn.nba.com's live box (spec §4.2); `fetch_missing` re-tries stats.nba.com for those games.
 `weekly` re-fetches, parses and loads the season's shot charts, then runs the weekly overlays;
 `injuries` and `daily_overlays` run theirs (`closinglineup.overlays`).
 """
@@ -30,13 +31,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.clock import Clock
-from closinglineup.db.models import Game, JobRun, PlayerGame, RunStatus
+from closinglineup.db.models import Game, JobRun, LoadLog, PlayerGame, RunStatus
 from closinglineup.derive.reconcile import sample_teams, season_type_of
 from closinglineup.derive.roster import rebuild_roster_membership
 from closinglineup.derive.run import RECONCILE, DeriveRules, derive, missing_dates
 from closinglineup.derive.run import raise_for_failures as raise_for_derive_failures
 from closinglineup.heartbeat import Heartbeat, JobFamily
-from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures
+from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures, write_load_log
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.overlays import OverlayFamily, by_name, overlays_in
 from closinglineup.pipeline import SHOT_TABLE, parse_date, parse_shot_charts
@@ -56,6 +57,7 @@ from closinglineup.sources.nba_stats import (
 )
 
 NIGHTLY = "nightly"
+FETCH_MISSING = "fetch_missing"
 POLL_FINALS = "poll_finals"
 WEEKLY = "weekly"
 INJURIES = "injuries"
@@ -133,13 +135,65 @@ def final_games(schedule: dict[str, Any], day: date) -> set[str]:
 NEVER_CACHED = frozenset({nba_stats.PLAYBYPLAY_V2})
 
 
+def stats_missing(cache: RawCache, game_id: str) -> list[str]:
+    """The stats.nba.com per-game endpoints of `game_id` but `NEVER_CACHED` not in the cache."""
+    return [
+        endpoint
+        for endpoint in nba_stats.GAME_ENDPOINTS
+        if endpoint not in NEVER_CACHED and not cache.exists(nba_stats.SOURCE, endpoint, game_id)
+    ]
+
+
 def fully_cached(cache: RawCache, game_id: str) -> bool:
     """Whether every per-game endpoint of `game_id` but `NEVER_CACHED` is in the cache."""
-    return all(
-        cache.exists(nba_stats.SOURCE, endpoint, game_id)
-        for endpoint in nba_stats.GAME_ENDPOINTS
-        if endpoint not in NEVER_CACHED
-    ) and all(cache.exists(nba_cdn.SOURCE, endpoint, game_id) for endpoint in CDN_GAME_ENDPOINTS)
+    return not stats_missing(cache, game_id) and all(
+        cache.exists(nba_cdn.SOURCE, endpoint, game_id) for endpoint in CDN_GAME_ENDPOINTS
+    )
+
+
+# The `load_log` row of a date's stats.nba.com fetch: failed while any of its games is
+# `stats_failed`, with each such game's uncached endpoints in its detail, else succeeded.
+STATS_TABLE = "player_game"
+STATS_STEP = "fetch_stats"
+STATS_FAILED = "stats_failed"
+
+
+def record_stats_fetch(
+    db: sessionmaker[Session],
+    day: date,
+    stats_failed: dict[str, list[str]],
+    started_at: datetime,
+    finished_at: datetime,
+) -> None:
+    """Record `day`'s stats.nba.com fetch: `stats_failed` maps each game it failed for to the
+    endpoints still not cached."""
+    status = RunStatus.FAILED if stats_failed else RunStatus.SUCCEEDED
+    with db.begin() as session:
+        write_load_log(
+            session,
+            STATS_TABLE,
+            day,
+            status,
+            started_at,
+            finished_at,
+            {STATS_FAILED: stats_failed},
+            step=STATS_STEP,
+        )
+
+
+def stats_failed_games(db: sessionmaker[Session]) -> dict[date, list[str]]:
+    """The `stats_failed` games of every date whose stats.nba.com fetch last failed, by date."""
+    with db() as session:
+        found = session.execute(
+            select(LoadLog.game_date, LoadLog.detail)
+            .where(
+                LoadLog.table_name == STATS_TABLE,
+                LoadLog.step == STATS_STEP,
+                LoadLog.status == RunStatus.FAILED,
+            )
+            .order_by(LoadLog.game_date)
+        )
+        return {day: sorted((detail or {}).get(STATS_FAILED, {})) for day, detail in found}
 
 
 def shot_chart_players(db: sessionmaker[Session], season: str) -> list[tuple[int, SeasonType]]:
@@ -229,8 +283,26 @@ class Jobs:
         NBA.com's lineups and on/off, re-fetched for the purpose. A row outside tolerance is
         logged as a warning and listed in the detail; it does not fail the job, nor does a
         response that failed to fetch, which skips the reconciliation.
+
+        A game with a stats.nba.com endpoint still not cached after the fetch, `playbyplayv2`
+        aside, is `stats_failed`: the date's `fetch_stats` row of `load_log` lists it, and it is
+        logged as a warning and listed under `warnings`, without failing the job. Its box score
+        is parsed from cdn.nba.com's live box when stats.nba.com's traditional box is not cached
+        (`pipeline`). `fetch_missing` re-tries it.
         """
         return self._run(NIGHTLY, lambda: self._nightly(day), family="nightly")
+
+    def fetch_missing(self) -> Detail:
+        """Re-try stats.nba.com for every `stats_failed` game a past `nightly` recorded, then parse
+        and load each of their dates again, so a game whose stats.nba.com box is now cached has
+        its cdn.nba.com rows replaced. Each date's `fetch_stats` row then lists the games still
+        failing, or none.
+
+        The dates are not derived again: their minutes and starters are the same from either
+        source, and the next `nightly` refreshes the windows and BPM over the season. A table
+        that fails to load fails the job, as in `nightly`.
+        """
+        return self._run(FETCH_MISSING, self._fetch_missing)
 
     def nightly_yesterday(self) -> Detail:
         """`nightly` for yesterday in `TZ`, as the worker runs it at 03:30."""
@@ -284,6 +356,7 @@ class Jobs:
         return self._run(POLL_FINALS, self._poll_finals)
 
     def _nightly(self, day: date) -> Detail:
+        started_at = self.clock.now()
         with self.nba() as session:
             schedule = nba_cdn.fetch_schedule(session, self.cache, season_label(day), force=True)
             noted = {g for g in self.finals.get(day, set()) if is_counted(_Game(g, ""))}
@@ -311,7 +384,16 @@ class Jobs:
             if r.status is FetchStatus.FAILED
         ]
         self.finals.pop(day, None)
+        stats_failed = {g: missing for g in games if (missing := stats_missing(self.cache, g))}
+        record_stats_fetch(self.db, day, stats_failed, started_at, self.clock.now())
         parsed = parse_date(self.cache, self.store, day, self.settings.tz)
+        warnings = [
+            f"{game_id}: stats.nba.com failed for {', '.join(missing)}"
+            + ("; box score from cdn.nba.com" if game_id in parsed.fallback else "")
+            for game_id, missing in stats_failed.items()
+        ]
+        for warning in warnings:
+            log.warning("stats_failed: %s", warning, extra={"date": day.isoformat()})
         loaded = load_dates(self.db, self.store, self.clock, [day])
         # Self-heals any earlier date a past run left without a successful load (spec §3.2).
         earlier = [d for d in self.store.dates() if d != day]
@@ -338,7 +420,10 @@ class Jobs:
             "games": games,
             "fetched": pending,
             "failed": failed,
+            "stats_failed": sorted(stats_failed),
+            "warnings": warnings,
             "parsed": parsed.parsed,
+            "parse_fallback": parsed.fallback,
             "parse_failed": parsed.failed,
             "parse_missing": parsed.missing,
             "loaded": {result.table: result.rows for result in loaded},
@@ -347,6 +432,30 @@ class Jobs:
             "derived": [d.isoformat() for d in days],
             "derive": {r.step.name: r.detail for r in derived if r.day == day},
             "reconcile": next((r.detail for r in derived if r.step == RECONCILE), None),
+        }
+
+    def _fetch_missing(self) -> Detail:
+        started_at = self.clock.now()
+        pending = stats_failed_games(self.db)
+        with self.nba() as session:
+            for games in pending.values():
+                for game_id in games:
+                    fetch_game(session, self.cache, game_id, skip=NEVER_CACHED)
+        still: dict[str, dict[str, list[str]]] = {}
+        for day, games in pending.items():
+            failing = {g: missing for g in games if (missing := stats_missing(self.cache, g))}
+            record_stats_fetch(self.db, day, failing, started_at, self.clock.now())
+            still[day.isoformat()] = failing
+        days = sorted(pending)
+        parsed = [parse_date(self.cache, self.store, day, self.settings.tz) for day in days]
+        loaded = load_dates(self.db, self.store, self.clock, days)
+        raise_for_failures(loaded)
+        return {
+            "dates": [day.isoformat() for day in days],
+            "games": sorted(g for games in pending.values() for g in games),
+            "still_failed": {day: sorted(failing) for day, failing in still.items() if failing},
+            "fallback": sorted(g for report in parsed for g in report.fallback),
+            "parse_failed": {g: e for report in parsed for g, e in report.failed.items()},
         }
 
     def _local_now(self) -> datetime:
