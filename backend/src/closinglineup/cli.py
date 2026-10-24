@@ -657,6 +657,9 @@ def nightly(
             raise typer.Exit(1) from None
     for failure in detail["failed"]:
         typer.echo(f"{failure['endpoint']} {failure['key']}: failed: {failure['error']}")
+    for caught in detail["caught_up"]:
+        endpoints = ", ".join(caught["endpoints"])
+        typer.echo(f"caught up {caught['game_id']} ({caught['date']}): {endpoints}")
     for failed_game, error in detail["parse_failed"].items():
         typer.echo(f"parse {failed_game}: failed: {error}")
     for warning in detail["warnings"]:

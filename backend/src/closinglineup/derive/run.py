@@ -19,7 +19,8 @@ as an arrival. `missing_dates` lists the loaded game dates whose steps have not 
 which `derive --missing` and `nightly` run again, oldest first. Deriving a date again does not
 derive the later ones again, whose events read its rotation state; `nightly` never derives past an
 underived date, so it leaves none behind. Reconciliation is a check, not a write, and a missed one
-is not run again: a sample it cannot read (`ReconcileError`, a response not cached) is recorded as
+is not run again but by a later `nightly` of the same date, which skips one already done
+(`reconciled`): a sample it cannot read (`ReconcileError`, a response not cached) is recorded as
 succeeded with the reason under `skipped`, and rows outside tolerance are logged as warnings, as
 before.
 """
@@ -136,6 +137,17 @@ def missing_dates(
         return list(session.scalars(query.order_by(LoadLog.game_date)))
 
 
+def reconciled(db: sessionmaker[Session], day: date) -> bool:
+    """Whether `day`'s reconciliation has run and compared NBA.com's rows, not been skipped."""
+    with db() as session:
+        row = session.get(LoadLog, (RECONCILE.table, day, RECONCILE.name))
+        return (
+            row is not None
+            and row.status == RunStatus.SUCCEEDED
+            and "skipped" not in (row.detail or {})
+        )
+
+
 def reconcile_sample(
     db: sessionmaker[Session],
     cache: RawCache,
@@ -230,10 +242,12 @@ def derive(
     rules: DeriveRules,
     *,
     season_type: SeasonType | None = None,
+    reconcile: bool = True,
     reconcile_skip: str | None = None,
 ) -> list[StepResult]:
     """Run every derive step over `days`, as the module docstring describes, and return each
     step's outcome per date, in the order they ran; the run stops at the first that fails.
+    Without `reconcile` the reconciliation is left out, its last `load_log` row as it was.
     `season_type` and `reconcile_skip` go to `reconcile_sample`."""
     ordered = sorted(set(days))
     if not ordered:
@@ -250,11 +264,14 @@ def derive(
         run.step(FLAGS, [day], partial(compute_flags, db, day, rules.flags))
         run.step(BPM, [day], partial(write_bpm, db, day))
     last = ordered[-1]
-    run.step(
-        RECONCILE,
-        [last],
-        partial(reconcile_sample, db, cache, last, season_type=season_type, skip=reconcile_skip),
-    )
+    if reconcile:
+        run.step(
+            RECONCILE,
+            [last],
+            partial(
+                reconcile_sample, db, cache, last, season_type=season_type, skip=reconcile_skip
+            ),
+        )
     return run.results
 
 

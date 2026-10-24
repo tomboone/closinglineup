@@ -73,7 +73,7 @@ does not alert, so the `daily` and `weekly` checks wait quietly until their jobs
 
 | Check | Pinged by | Period | Grace |
 |---|---|---|---|
-| `closinglineup-nightly` | `nightly`, 03:30 every day | 1 day | 3 hours |
+| `closinglineup-nightly` | `nightly`, 03:30 every day (and hourly 04:00–12:00 for now, see [Nightly schedule](#nightly-schedule)) | 1 day | 3 hours |
 | `closinglineup-daily` | `injuries` and `daily_overlays`, 09:00–18:30 | 1 day | 6 hours |
 | `closinglineup-weekly` | `weekly`, Mondays 04:30 | 7 days | 1 day |
 
@@ -235,7 +235,8 @@ Each game is eight requests (six stats.nba.com endpoints and two cdn.nba.com fee
 left out, since it only ever fails) at `NBA_RPS`, so about 8 s a game at the default of 1. 2025-26 has
 1,322 counted games, about **3 hours**; 2026-27 a few minutes. Run it in `tmux` (or `screen`) so an SSH
 drop does not stop it. The worker's own jobs keep their own rate limit, so while one runs the two together
-send about twice `NBA_RPS`: start the 2025-26 fetch after the 03:30 nightly run.
+send about twice `NBA_RPS`: start the 2025-26 fetch after the morning's nightly runs (see
+[Nightly schedule](#nightly-schedule)).
 
 It is safe to stop at any point: Ctrl-C, a dropped connection, a reboot. Run the same command again and it
 skips every game already cached, and resumes the game it stopped in at its first endpoint not cached.
@@ -438,6 +439,45 @@ docker compose exec -T postgres pg_restore -U closinglineup -d closinglineup --c
   --no-owner --single-transaction --exit-on-error <"$dump"
 docker compose start app worker
 ```
+
+## Nightly schedule
+
+`nightly` runs for the day before at 03:30 and, for now, again every hour from 04:00 through 12:00
+Eastern (`scheduler.nightly_trigger`). The hourly runs are a measurement, not the schedule: NEU-1918
+replaces them with the final one.
+
+**Why.** At 03:30, stats.nba.com has not yet published the hustle box (`boxscorehustlev2`) or the
+matchups (`boxscorematchupsv3`) of any game: the first three 03:30 runs (`job_run` 10, 28 and 53, for
+2026-10-21 to 10-23) list both as failed for every game. They had landed by 20:29 Eastern on 10-22, when a
+manual `fetch --season` got them; when in between, nothing recorded.
+
+**What each run does.** Every run catches up. A game of its date, or of the `NIGHTLY_LOOKBACK_DAYS`
+(default 3) before it, that an earlier run left with endpoints missing has just those requested again
+(`playbyplayv2` aside), and its date is parsed and loaded again. The run's `detail -> 'caught_up'` lists
+each game that got one, with its endpoints. A run with nothing left to fetch requests the schedule alone:
+a date already reconciled is not reconciled again, though one whose reconciliation was skipped (NBA.com's
+lineups failed to refresh, say) is, on the next run. So a re-run costs a schedule refresh, a request per
+endpoint still missing, and a derive of the date. A game whose late
+endpoints have not come by the end of the lookback is left `stats_failed` for `fetch --missing`.
+
+**Reading the measurement.** The first run that lists an endpoint under `caught_up` is the hour it landed:
+
+```sql
+select (started_at at time zone 'America/New_York')::timestamp(0) as ran,
+       c->>'date' as game_date, c->'endpoints' as endpoints, count(*) as games
+from job_run, jsonb_array_elements(detail -> 'caught_up') as c
+where job = 'nightly'
+group by 1, 2, 3
+order by 1;
+```
+
+After at least seven nights, NEU-1918 picks (a) 03:30 and one later run, (b) a single later run, or
+(c) 03:30 alone, and replaces this section with the choice and these numbers.
+
+**While it lasts.** Every run pings the nightly check, so a failed run alerts and the next good one
+clears it. To count `nightly` successes (the NEU-1893 soak), count the 03:30 runs alone:
+`… and extract(hour from started_at at time zone 'America/New_York') = 3`. The 05:30 backup can overlap a
+re-run, which is harmless: `pg_dump` reads a consistent snapshot.
 
 ## Day-to-day
 
