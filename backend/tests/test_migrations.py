@@ -28,6 +28,7 @@ DATA_TABLES = {
     "impact_snapshot",
     "contract",
     "rotation_state",
+    "rotation_event",
 }
 
 

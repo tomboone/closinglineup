@@ -18,7 +18,7 @@ _Avoid_: role, depth-chart position, two-way (a badge, not a tier)
 A contract or assignment fact shown beside a tier: two-way, 10-day, Exhibit 10, G League assignment. Badges explain a tier; they never replace one.
 
 **Rotation event**:
-A change of rotation tier between two consecutive team game dates, with the before and after tiers and the top contributing signals.
+A change of rotation tier between two consecutive team game dates, or a player's arrival on a team (no tier on its previous game date, so no before tier), with the before and after tiers and the top contributing signals.
 _Avoid_: transition (fine in prose, but the entity is an event)
 
 **Closer**:

@@ -481,3 +481,26 @@ class RotationState(Timestamps, Base):
     badges: Mapped[list[str]] = mapped_column(ARRAY(String))
     is_short: Mapped[bool]
     inputs: Mapped[dict[str, Any]]
+
+
+class RotationEvent(Timestamps, Base):
+    """A change in a player's rotation tier on a team between its game dates, or his arrival on it,
+    with the signals that most explain it (spec §7.6, `derive.events`). `from_tier` and
+    `prev_game_date` are NULL for an arrival."""
+
+    __tablename__ = "rotation_event"
+    __table_args__ = (
+        UniqueConstraint("player_id", "team_id", "game_date"),
+        Index(None, "game_date"),
+        _one_of("from_tier", ROTATION_TIERS),
+        _one_of("to_tier", ROTATION_TIERS),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    player_id: Mapped[int]
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
+    game_date: Mapped[date]
+    prev_game_date: Mapped[date | None]
+    from_tier: Mapped[str | None] = mapped_column(String)
+    to_tier: Mapped[str] = mapped_column(String)
+    signals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
