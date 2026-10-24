@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { mockApi, renderApp } from "./test/app";
+import { mockApi, renderApp, TEAM_PAGE } from "./test/app";
 import { allOptions } from "./test/echarts";
 
 vi.mock("./components/charts/echarts", () => import("./test/echarts"));
@@ -17,7 +17,7 @@ const PAGES = [
     path: "/teams/BOS",
     api: "/api/teams/BOS",
     heading: "Team BOS",
-    body: { name: "Boston Celtics", date: "2026-03-20", tier_date: "2026-03-19" },
+    body: TEAM_PAGE,
     content: "Boston Celtics, as of 2026-03-19.",
   },
   {

@@ -1,8 +1,10 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { FRESH_META, mockApi, renderApp } from "../test/app";
+import { describe, expect, it, vi } from "vitest";
+import { FRESH_META, mockApi, renderApp, TEAM_PAGE as BODY } from "../test/app";
 
-const TEAM_PAGE = { body: { name: "Boston Celtics", date: "2026-03-20", tier_date: null } };
+vi.mock("../components/charts/echarts", () => import("../test/echarts"));
+
+const TEAM_PAGE = { body: BODY };
 
 describe("Layout", () => {
   it("defaults the date picker to the latest derived date", async () => {
@@ -15,7 +17,7 @@ describe("Layout", () => {
   it("puts a picked date in ?date= and refetches the page with it", async () => {
     const fetchMock = mockApi({ "/api/teams/BOS": TEAM_PAGE });
     const router = renderApp("/teams/BOS");
-    await screen.findByText(/Boston Celtics/);
+    await screen.findByText("Boston Celtics, as of 2026-03-19.");
     expect(fetchMock).toHaveBeenCalledWith("/api/teams/BOS?garbage_time=exclude");
 
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-03-01" } });
@@ -30,7 +32,7 @@ describe("Layout", () => {
   it("puts the garbage-time toggle in ?garbage_time= and refetches the page with it", async () => {
     const fetchMock = mockApi({ "/api/teams/BOS": TEAM_PAGE });
     const router = renderApp("/teams/BOS?date=2026-03-01");
-    await screen.findByText(/Boston Celtics/);
+    await screen.findByText("Boston Celtics, as of 2026-03-19.");
 
     fireEvent.click(screen.getByLabelText("Include garbage time"));
 
