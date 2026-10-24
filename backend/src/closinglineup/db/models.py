@@ -36,9 +36,12 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    # `load_log` only: a fetched response not of its endpoint's shape (`sources.drift`).
+    DRIFT = "drift"
 
 
 _STATUS_CHECK = "status IN ('running', 'succeeded', 'failed')"
+_LOAD_STATUS_CHECK = "status IN ('running', 'succeeded', 'failed', 'drift')"
 
 # Categorical columns are text with a CHECK rather than Postgres enums, so a new value is a
 # constraint change rather than an enum type migration (NEU-1860).
@@ -120,7 +123,7 @@ class LoadLog(Timestamps, Base):
     to self-heal skipped dates (spec §3.2)."""
 
     __tablename__ = "load_log"
-    __table_args__ = (CheckConstraint(_STATUS_CHECK, name="status"),)
+    __table_args__ = (CheckConstraint(_LOAD_STATUS_CHECK, name="status"),)
 
     table_name: Mapped[str] = mapped_column(String, primary_key=True)
     game_date: Mapped[date] = mapped_column(primary_key=True)

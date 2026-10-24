@@ -56,20 +56,6 @@ EXPECTED = [
     "reparse",
     "reconcile",
 ]
-IMPLEMENTED = {
-    "fetch",
-    "derive",
-    "parse",
-    "load",
-    "health",
-    "api",
-    "worker",
-    "nightly",
-    "weekly",
-    "reconcile",
-    "overlays",
-}
-STUBS = [command for command in EXPECTED if command not in IMPLEMENTED]
 
 
 def test_help_lists_every_command() -> None:
@@ -80,14 +66,6 @@ def test_help_lists_every_command() -> None:
     assert list(COMMANDS) == EXPECTED
     for command in EXPECTED:
         assert re.search(rf"^\W*{command}\s", output, re.MULTILINE), command
-
-
-@pytest.mark.parametrize("command", STUBS)
-def test_stub_reports_not_implemented_and_exits_1(command: str) -> None:
-    result = runner.invoke(app, [command])
-
-    assert result.exit_code == 1
-    assert f"{command}: not implemented" in result.output
 
 
 def test_health_exits_1_when_the_database_is_down(monkeypatch: pytest.MonkeyPatch) -> None:

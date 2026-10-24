@@ -35,6 +35,7 @@ cdn.nba.com's, which `nightly` refreshes, or stats.nba.com's, which `fetch --sea
 """
 
 import json
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any
@@ -116,6 +117,12 @@ def _schedule(cache: RawCache, season: str) -> list[GameRow]:
     payload = _payload(cache, source, endpoint, season)
     assert payload is not None
     return parse_schedule(payload)
+
+
+def games_on(cache: RawCache, day: date) -> list[GameRow]:
+    """The counted games of `day`, from its season's cached schedule; raises `NotCachedError` if
+    the schedule is not cached."""
+    return [game for game in _schedule(cache, season_label(day)) if game.game_date == day]
 
 
 def game_date_of(cache: RawCache, game_id: str) -> date:
@@ -223,14 +230,21 @@ def _reference_rows(
     return players, memberships
 
 
-def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> ParseReport:
-    """Parse `day`'s games and its season's reference rows into the date's parquet files.
+def parse_date(
+    cache: RawCache,
+    store: ParquetStore,
+    day: date,
+    tz: tzinfo,
+    tables: Collection[str] | None = None,
+) -> ParseReport:
+    """Parse `day`'s games and its season's reference rows into the date's parquet files, or
+    only into those of `tables`.
 
     `tz` dates each roster's fetch. Raises `NotCachedError` if the season's schedule is not
     cached, since without it the date has no games.
     """
     season = season_label(day)
-    games = [game for game in _schedule(cache, season) if game.game_date == day]
+    games = games_on(cache, day)
     report = ParseReport(day)
     box_rows: list[PlayerGameRow] = []
     matchup_rows: list[MatchupRow] = []
@@ -275,7 +289,7 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         players, memberships = _reference_rows(cache, season, tz)
     except PAYLOAD_ERRORS as exc:
         report.failed[REFERENCE] = f"{type(exc).__name__}: {exc}"
-    tables: dict[str, list[Row]] = {
+    rows_by_table: dict[str, list[Row]] = {
         "game": [*games],
         "player": [*players],
         "roster_membership": [*memberships],
@@ -285,9 +299,10 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         "possession": [*possession_rows],
         "possession_lineup": [*possession_lineup_rows],
     }
-    for table, rows in tables.items():
-        store.write_rows(table, day, rows)
-        report.rows[table] = len(rows)
+    for table, rows in rows_by_table.items():
+        if tables is None or table in tables:
+            store.write_rows(table, day, rows)
+            report.rows[table] = len(rows)
     return report
 
 

@@ -30,22 +30,24 @@ from closinglineup.derive.reconcile import (
     reconcile,
 )
 from closinglineup.derive.roster import rebuild_roster_membership
-from closinglineup.derive.run import DeriveRules, missing_dates
+from closinglineup.derive.run import DeriveRules, StepResult, missing_dates
 from closinglineup.derive.run import derive as run_derive
-from closinglineup.health import STALE_HOURS, unhealthy_reason
+from closinglineup.health import DRIFT_HOURS, STALE_HOURS, unhealthy_reason
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
-from closinglineup.load.parquet import ParquetStore
+from closinglineup.load.parquet import ROW_MODELS, ParquetStore
 from closinglineup.logging import configure_logging
 from closinglineup.overlays import UnknownOverlayError, by_name
 from closinglineup.pipeline import (
     SHOT_TABLE,
     NotCachedError,
+    ParseReport,
     game_date_of,
     parse_date,
     parse_shot_charts,
     shot_chart_keys,
 )
+from closinglineup.reparse import UncachedError, reparse
 from closinglineup.scheduler import Jobs, build_scheduler
 from closinglineup.season import season_label
 from closinglineup.settings import Settings
@@ -79,9 +81,10 @@ COMMANDS = {
     "nightly": "Run the nightly job once: refresh the schedule, fetch, parse, load and derive a "
     "date.",
     "weekly": "Run the weekly job once: re-fetch, parse and load the season's shot charts.",
-    "health": "Check that the database answers and the latest derived date is within "
-    f"{STALE_HOURS} h of the latest final game.",
-    "reparse": "Re-parse cached raw responses after a parser change.",
+    "health": f"Check that the database answers, no response has drifted in the last {DRIFT_HOURS} "
+    f"h, and the latest derived date is within {STALE_HOURS} h of the latest final game.",
+    "reparse": "Parse, load and derive a run of dates again from the raw cache alone, after a "
+    "parser change.",
     "reconcile": "Compare lineup and on-court ratings from stints with NBA.com's.",
 }
 
@@ -193,7 +196,7 @@ def fetch(
     for result in results:
         reason = f": {result.error}" if result.error else ""
         typer.echo(f"{result.endpoint} {result.key}: {result.status}{reason}")
-    if any(result.status is FetchStatus.FAILED for result in results):
+    if any(result.status in (FetchStatus.FAILED, FetchStatus.DRIFT) for result in results):
         raise typer.Exit(1)
 
 
@@ -334,14 +337,19 @@ def parse(
             typer.echo(f"parse {day}: failed: {exc}")
             failed = True
             continue
-        for failed_game, error in report.failed.items():
-            typer.echo(f"parse {day} {failed_game}: failed: {error}")
-        for missing_game in report.missing:
-            typer.echo(f"parse {day} {missing_game}: final, but no box score cached")
-        typer.echo(f"parse {day}: {len(report.parsed)} games parsed")
+        _echo_parse(report)
         failed = failed or bool(report.failed)
     if failed:
         raise typer.Exit(1)
+
+
+def _echo_parse(report: ParseReport) -> None:
+    day = report.game_date
+    for failed_game, error in report.failed.items():
+        typer.echo(f"parse {day} {failed_game}: failed: {error}")
+    for missing_game in report.missing:
+        typer.echo(f"parse {day} {missing_game}: final, but no box score cached")
+    typer.echo(f"parse {day}: {len(report.parsed)} games parsed")
 
 
 @app.command("load", help=COMMANDS["load"])
@@ -439,6 +447,14 @@ def derive(
         )
     finally:
         engine.dispose()
+    _echo_derive(results)
+    if not results:
+        typer.echo("derive: nothing to derive")
+    if any(result.status is RunStatus.FAILED for result in results):
+        raise typer.Exit(1)
+
+
+def _echo_derive(results: list[StepResult]) -> None:
     for result in results:
         label = f"derive {result.day} {result.step.name}"
         if result.status is RunStatus.FAILED:
@@ -450,9 +466,75 @@ def derive(
         typer.echo(f"{label}: {result.status}, {_summary(result.detail)}")
         for line in result.detail.get("outside", []):
             typer.echo(f"{label}: outside tolerance: {line}")
-    if not results:
-        typer.echo("derive: nothing to derive")
-    if any(result.status is RunStatus.FAILED for result in results):
+
+
+@app.command("reparse", help=COMMANDS["reparse"])
+def reparse_command(
+    start: FromOption = None,
+    end: ToOption = None,
+    tables: Annotated[
+        str | None,
+        typer.Option(
+            help="Comma-separated tables to parse and load, e.g. player_game,stint. Defaults to "
+            "every one; the dates are derived either way."
+        ),
+    ] = None,
+) -> None:
+    days = _days(None, start, end)
+    if days is None:
+        raise typer.BadParameter("pass --from and --to")
+    chosen: list[str] | None = None
+    if tables is not None:
+        chosen = [name.strip() for name in tables.split(",")]
+        if unknown := sorted(set(chosen) - set(ROW_MODELS)):
+            raise typer.BadParameter(
+                f"unknown tables {', '.join(unknown)}; pick from {', '.join(ROW_MODELS)}"
+            )
+    settings = Settings()
+    clock = SystemClock()
+    engine = make_engine(settings)
+    try:
+        report = reparse(
+            make_session_factory(engine),
+            RawCache(settings.data_dir, clock),
+            ParquetStore(settings.data_dir),
+            clock,
+            days,
+            DeriveRules.from_settings(settings),
+            settings.tz,
+            chosen,
+        )
+    except UncachedError as exc:
+        for day, games in exc.missing.items():
+            for game_id, lacks in games.items():
+                typer.echo(f"reparse {day} {game_id}: not in the raw cache: {'; '.join(lacks)}")
+        typer.echo(f"reparse: refused: {exc}; fetch them first")
+        raise typer.Exit(1) from None
+    except NotCachedError as exc:
+        typer.echo(f"reparse: refused: {exc}")
+        raise typer.Exit(1) from None
+    finally:
+        engine.dispose()
+    for parsed in report.parsed:
+        _echo_parse(parsed)
+    loads = [*report.loaded, report.memberships]
+    for result in loads:
+        if result.status is RunStatus.FAILED:
+            typer.echo(f"load {result.table} {result.key}: failed: {result.error}")
+    _echo_derive(report.derived)
+    load_failed = any(result.status is RunStatus.FAILED for result in loads)
+    if load_failed:
+        typer.echo("reparse: not derived, since a load failed")
+    games = sum(len(parsed.parsed) for parsed in report.parsed)
+    typer.echo(
+        f"reparse {days[0]} to {days[-1]}: {len(days)} dates, {games} games parsed, "
+        f"{sum(result.changed for result in report.loaded)} rows changed"
+    )
+    if (
+        load_failed
+        or any(parsed.failed for parsed in report.parsed)
+        or any(result.status is RunStatus.FAILED for result in report.derived)
+    ):
         raise typer.Exit(1)
 
 
@@ -502,8 +584,8 @@ def reconcile_command(
                 typer.echo(f"reconcile: stopped: {exc}")
                 raise typer.Exit(1) from None
         for result in results:
-            if result.status is FetchStatus.FAILED:
-                typer.echo(f"{result.endpoint} {result.key}: failed: {result.error}")
+            if result.status in (FetchStatus.FAILED, FetchStatus.DRIFT):
+                typer.echo(f"{result.endpoint} {result.key}: {result.status}: {result.error}")
     engine = make_engine(settings)
     try:
         report = reconcile(
@@ -679,18 +761,3 @@ def api(
         # uvicorn's loggers propagate to the root JSON handler `asgi` installs.
         log_config=None,
     )
-
-
-def _stub(name: str, help_text: str) -> None:
-    def command() -> None:
-        typer.echo(f"{name}: not implemented", err=True)
-        raise typer.Exit(1)
-
-    app.command(name, help=help_text)(command)
-
-
-# Each later ticket replaces a stub by registering the real command above.
-_implemented = {command.name for command in app.registered_commands}
-for _name, _help in COMMANDS.items():
-    if _name not in _implemented:
-        _stub(_name, _help)

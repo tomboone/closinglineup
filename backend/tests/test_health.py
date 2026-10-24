@@ -12,6 +12,7 @@ from closinglineup.api.app import create_app
 from closinglineup.cli import app as cli
 from closinglineup.db.models import Game, LoadLog
 from closinglineup.derive.run import WRITES
+from closinglineup.scheduler import DRIFT_STEP
 from closinglineup.settings import Settings
 from closinglineup.sources.injury_pdf import EASTERN
 
@@ -128,4 +129,48 @@ def test_the_health_command_applies_the_same_rule(
 
     assert result.exit_code == exit_code, result.output
     expected = "health: ok" if exit_code == 0 else "behind the latest final game's"
+    assert expected in result.output
+
+
+def _seed_drift(db: sessionmaker[Session], age: timedelta) -> None:
+    """A `drift` row of `FINAL`'s fetch, finished `age` ago; `_clear` removes it."""
+    finished = datetime.now(EASTERN) - age
+    with db.begin() as session:
+        session.execute(
+            insert(LoadLog),
+            [
+                {
+                    "table_name": "nba_stats/boxscoretraditionalv2",
+                    "game_date": FINAL,
+                    "step": DRIFT_STEP,
+                    "status": "drift",
+                    "started_at": finished,
+                    "finished_at": finished,
+                    "detail": {"drift": {GAME_ID: "missing PlayerStats column MIN"}},
+                }
+            ],
+        )
+
+
+@pytest.mark.parametrize(("hours", "exit_code"), [(1, 1), (25, 0)])
+def test_the_health_command_exits_1_while_a_drift_row_is_under_24_h_old(
+    seed: Seed,
+    db: sessionmaker[Session],
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    hours: int,
+    exit_code: int,
+) -> None:
+    seed(0)
+    _seed_drift(db, timedelta(hours=hours))
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    result = CliRunner().invoke(cli, ["health"])
+
+    assert result.exit_code == exit_code, result.output
+    expected = (
+        "health: ok"
+        if exit_code == 0
+        else "health: schema drift in the last 24 h: nba_stats/boxscoretraditionalv2"
+    )
     assert expected in result.output

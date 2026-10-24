@@ -31,6 +31,7 @@ from curl_cffi import requests
 from closinglineup.clock import Clock
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.drift import SchemaDrift, Shape
 
 IMPERSONATE = "chrome"
 NBA_HEADERS = {
@@ -182,12 +183,15 @@ def fetch_json(
     *,
     force: bool = False,
     check: Callable[[dict[str, Any]], None] | None = None,
+    shape: Shape | None = None,
 ) -> dict[str, Any]:
     """The cached response for `key`, fetching and caching it first on a miss or with `force`.
 
     Only a 200 whose body is a JSON object, and which `check` accepts by returning rather than
     raising `NbaHttpError`, is cached; anything else raises, so a bad response is retried on the
-    next run instead of being kept forever.
+    next run instead of being kept forever. A response that has drifted from `shape` raises
+    `SchemaDrift` before `check` runs, since a renamed key would otherwise read as no data
+    (`sources.drift`).
     """
     if not force and (cached := cache.get(source, endpoint, key)) is not None:
         return _json_object(cached, url)
@@ -195,6 +199,8 @@ def fetch_json(
     if response.status_code != 200:
         raise NbaHttpError(f"HTTP {response.status_code} from {url}")
     data = _json_object(response.content, url)
+    if shape is not None and (differences := shape.diff(data)):
+        raise SchemaDrift(source, endpoint, key, differences)
     if check is not None:
         check(data)
     cache.put(

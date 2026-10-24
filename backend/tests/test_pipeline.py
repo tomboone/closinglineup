@@ -343,3 +343,18 @@ def test_a_shot_chart_a_parser_cannot_read_is_reported_and_left_out(tmp_path: Pa
 
     assert report.failed == {SHOT_CHART: "ParseError: payload has no Shot_Chart_Detail result set"}
     assert store.keys("shot") == []
+
+
+def test_parse_with_tables_writes_only_their_files(tmp_path: Path) -> None:
+    cache = cache_fixture_game(tmp_path)
+    store = ParquetStore(tmp_path)
+
+    report = parse_date(cache, store, DAY, TZ, {"game", "matchup"})
+
+    assert list(report.rows) == ["game", "matchup"]
+    assert [
+        table for table in ("game", "matchup", "stint") if store.path(table, DAY).is_file()
+    ] == [
+        "game",
+        "matchup",
+    ]

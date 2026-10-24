@@ -171,7 +171,8 @@ def test_fetch_season_stops_at_an_interrupted_game_and_resumes_it_where_it_stopp
     ]
     assert games[1].results == [
         *(EndpointResult(e, FINAL_A, FetchStatus.CACHED) for e in WITH_DATA[:3]),
-        *(EndpointResult(e, FINAL_A, FetchStatus.FETCHED) for e in [*resumed, *CDN]),
+        *(EndpointResult(e, FINAL_A, FetchStatus.FETCHED) for e in resumed),
+        *(EndpointResult(e, FINAL_A, FetchStatus.FETCHED, source=nba_cdn.SOURCE) for e in CDN),
     ]
     assert fetched_games(second) == {"stats": {FINAL_A, FINAL_B}, "cdn": {FINAL_A, FINAL_B}}
 

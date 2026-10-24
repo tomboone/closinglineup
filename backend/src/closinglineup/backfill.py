@@ -49,7 +49,12 @@ class SeasonGame:
 
     @property
     def failed(self) -> list[EndpointResult]:
-        return [result for result in self.results if result.status is FetchStatus.FAILED]
+        """The endpoints that failed, or whose response has drifted from its shape."""
+        return [
+            result
+            for result in self.results
+            if result.status in (FetchStatus.FAILED, FetchStatus.DRIFT)
+        ]
 
 
 def _no_report(day: date, game_id: str, wait: timedelta) -> None:
