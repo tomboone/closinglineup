@@ -203,11 +203,11 @@ LATE = 980005  # A guarantee 31 days after DAY; an older snapshot's, 5 days afte
 SHOOTER = 980006  # 5 of SAC's 50 attempts for 10 points in games 1 to 10, then 10 for 10.
 TWO_WAY = 980007  # 10 minutes a game on a two-way; inactive in game 1, DNP-CD in game 2.
 BLEED = 980008  # On the floor for SAC's bad first quarters in games 11 to 20.
-YO_YO = 980009  # Three tier changes in the last 20 games.
-ARRIVER = 980010  # An arrival and two changes in them, and a change before them.
+YO_YO = 980009  # An arrival and two tier changes in the last 20 games.
+TWICE = 980010  # Two tier changes in them, and one before them.
 SAC_BENCH = 980011  # The rest of SAC's minutes and attempts.
 POR_BENCH = 980012
-NAMED = [CLIFF, HURT, TRUST, GUARANTEE, LATE, SHOOTER, TWO_WAY, BLEED, YO_YO, ARRIVER]
+NAMED = [CLIFF, HURT, TRUST, GUARANTEE, LATE, SHOOTER, TWO_WAY, BLEED, YO_YO, TWICE]
 PLAYERS = [*NAMED, SAC_BENCH, POR_BENCH]
 SAC_FILLERS = [980031, 980032, 980033, 980034]
 POR_FIVE = "-".join(str(player_id) for player_id in range(980041, 980046))
@@ -427,19 +427,20 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
             [
                 _contract(LATE, DAY - timedelta(days=10), 5, 600_000),
                 _contract(GUARANTEE, DAY - timedelta(days=3), 30, None),
+                # Settled before DAY: the snapshot's upcoming guarantee is the one read.
+                {**_contract(GUARANTEE, DAY - timedelta(days=3), -5, 400_000), "season": "2014-15"},
                 _contract(LATE, DAY - timedelta(days=3), 31, 600_000),
             ],
         )
         session.execute(
             insert(RotationEvent),
             [
-                _event(YO_YO, _day(2), "core", "fringe"),
+                _event(YO_YO, _day(2), None, "fringe"),
                 _event(YO_YO, _day(8), "fringe", "core"),
                 _event(YO_YO, _day(20), "core", "fringe"),
-                _event(ARRIVER, FIRST - timedelta(days=5), "fringe", "core"),
-                _event(ARRIVER, _day(1), None, "core"),
-                _event(ARRIVER, _day(5), "core", "fringe"),
-                _event(ARRIVER, _day(12), "fringe", "core"),
+                _event(TWICE, FIRST - timedelta(days=5), "fringe", "core"),
+                _event(TWICE, _day(5), "core", "fringe"),
+                _event(TWICE, _day(12), "fringe", "core"),
             ],
         )
     refresh_windows(db)
@@ -480,7 +481,7 @@ def test_each_flag_is_raised_on_its_player_and_no_other(seeded: sessionmaker[Ses
         TWO_WAY: {"contract_pressure"},
         BLEED: {"bleeding"},
         YO_YO: {"yo_yo"},
-        ARRIVER: set(),
+        TWICE: set(),
         SAC_BENCH: set(),
     }
 
@@ -526,7 +527,14 @@ def test_flag_details_carry_the_numbers(seeded: sessionmaker[Session]) -> None:
             pytest.approx(1200 / GAME_SECONDS, abs=1e-4),
         ]
     }
-    assert found[YO_YO]["yo_yo"]["events"] == 3
+    assert found[YO_YO]["yo_yo"] == {
+        "events": 3,
+        "changes": [
+            {"game_date": _day(2).isoformat(), "from_tier": None, "to_tier": "fringe"},
+            {"game_date": _day(8).isoformat(), "from_tier": "fringe", "to_tier": "core"},
+            {"game_date": _day(20).isoformat(), "from_tier": "core", "to_tier": "fringe"},
+        ],
+    }
 
 
 def test_a_two_way_six_games_from_the_limit_is_not_flagged(

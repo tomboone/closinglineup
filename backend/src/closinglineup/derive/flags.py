@@ -16,15 +16,15 @@ numbers that raised it in `detail`:
 - `earning_trust`: his minutes share rises across three consecutive non-overlapping 5-game role
   windows, the latest ending on the date, each higher than the one before; all three must lie in
   his current spell with the team this season;
-- `yo_yo`: at least `yo_yo_events` (3) tier changes on the team in its last `yo_yo_games` (20)
-  final games this season, the date included; an arrival, which has no tier to change from, is not
-  one;
+- `yo_yo`: at least `yo_yo_events` (3) rotation events on the team, arrivals among them, in its
+  last `yo_yo_games` (20) final games this season, the date included;
 - `contract_pressure`: in the latest weekly `contract` snapshot on or before the date, a contract
   with the team whose `guarantee_date` is within `guarantee_days` (30) of the date, the date
   itself included, and whose `guaranteed_after` exceeds `guaranteed`, or is NULL, an unpriced
   minimum deal; or a two-way contract (`roster_membership`) within `two_way_margin` (5) of
-  `two_way_limit`, the regular-season games he has been active for (a box score line he played in
-  or sat out by the coach's decision) with the team since his two-way span started, this season.
+  `two_way_limit`, the regular-season games, NBA Cup knockouts included, he has been active for
+  (a box score line he played in or sat out by the coach's decision) with the team since his
+  two-way span started, this season. The limit is not prorated for a mid-season signing.
 
 A threshold the spec states inclusively ("at least", "within") is inclusive; the cliff's "below"
 is strict. A comparison treats values within `EPSILON` of each other as equal, so a boundary the
@@ -53,6 +53,8 @@ from closinglineup.db.models import (
 EPSILON = 1e-9
 # Box-score lines that put him on the active list: he played, or sat by the coach's decision.
 ACTIVE_DNP_REASONS = frozenset({"cd"})
+# Phases of the regular season: an NBA Cup knockout is one of its games, but for the final.
+REGULAR_SEASON = ("regular", "cup_knockout")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,10 +87,10 @@ class Guarantee:
 
 @dataclass(frozen=True, slots=True)
 class TierChange:
-    """A tier change on the team: when, from and to."""
+    """A rotation event on the team: when, from (None for an arrival) and to."""
 
     game_date: date
-    from_tier: str
+    from_tier: str | None
     to_tier: str
 
 
@@ -411,8 +413,8 @@ def _team_dates(session: Session, day: date, team_ids: set[int], games: int) -> 
 def _tier_changes(
     session: Session, day: date, keys: set[tuple[int, int]], games: int
 ) -> dict[tuple[int, int], tuple[TierChange, ...]]:
-    """Each player-team's tier changes, arrivals aside, over the team's last `games` final game
-    dates through `day` this season, the oldest first."""
+    """Each player-team's rotation events, arrivals included, over the team's last `games` final
+    game dates through `day` this season, the oldest first."""
     since = _team_dates(session, day, {team_id for _, team_id in keys}, games)
     if not since:
         return {}
@@ -425,14 +427,13 @@ def _tier_changes(
             RotationEvent.to_tier,
         )
         .where(tuple_(RotationEvent.player_id, RotationEvent.team_id).in_(list(keys)))
-        .where(RotationEvent.from_tier.is_not(None))
         .where(RotationEvent.game_date >= min(since.values()), RotationEvent.game_date <= day)
         .order_by(RotationEvent.game_date)
     )
     changes: dict[tuple[int, int], list[TierChange]] = defaultdict(list)
     for player_id, team_id, game_date, from_tier, to_tier in found:
         start = since.get(team_id)
-        if start is not None and game_date >= start and from_tier is not None:
+        if start is not None and game_date >= start:
             changes[(player_id, team_id)].append(TierChange(game_date, from_tier, to_tier))
     return {key: tuple(listed) for key, listed in changes.items()}
 
@@ -440,8 +441,9 @@ def _tier_changes(
 def _guarantees(
     session: Session, day: date, keys: set[tuple[int, int]]
 ) -> dict[tuple[int, int], Guarantee]:
-    """Each player-team's contract in the latest weekly snapshot on or before `day`; a player the
-    snapshot does not list is fully guaranteed, whatever earlier ones said."""
+    """Each player-team's next guarantee on or after `day` in the latest weekly snapshot on or
+    before it, the earliest where the snapshot holds more than one; a player the snapshot does not
+    list is fully guaranteed, whatever earlier ones said."""
     as_of = session.scalar(select(func.max(Contract.as_of_date)).where(Contract.as_of_date <= day))
     if as_of is None:
         return {}
@@ -453,7 +455,7 @@ def _guarantees(
             Contract.guaranteed,
             Contract.guaranteed_after,
         )
-        .where(Contract.as_of_date == as_of)
+        .where(Contract.as_of_date == as_of, Contract.guarantee_date >= day)
         .where(tuple_(Contract.player_id, Contract.team_id).in_(list(keys)))
         .order_by(Contract.guarantee_date)
     )
@@ -485,7 +487,7 @@ def _two_way_active(
         select(PlayerGame.player_id, PlayerGame.team_id, Game.game_date)
         .join(Game, Game.game_id == PlayerGame.game_id)
         .where(tuple_(PlayerGame.player_id, PlayerGame.team_id).in_(list(started)))
-        .where(Game.season == season, Game.phase == "regular", Game.status == "final")
+        .where(Game.season == season, Game.phase.in_(REGULAR_SEASON), Game.status == "final")
         .where(Game.game_date >= min(started.values()), Game.game_date <= day)
         .where(
             or_(
