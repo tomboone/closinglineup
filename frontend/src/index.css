@@ -300,3 +300,45 @@ body {
   color: #57606a;
   font-size: 0.85em;
 }
+
+.game-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.game-page .game-timeline {
+  grid-column: 1 / -1;
+}
+
+.game-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+.game-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.game-page th,
+.game-page td {
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #eee;
+}
+
+.game-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.game-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
