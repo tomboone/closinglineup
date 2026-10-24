@@ -15,6 +15,12 @@ export function signed(value: number | null | undefined) {
   return value > 0 ? `+${fixed}` : `−${fixed}`;
 }
 
+/** Seconds played as the box score shows them: 2052 → "34:12". */
+export function minutes(seconds: number | null | undefined) {
+  if (seconds == null) return DASH;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 const DOLLARS = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",

@@ -99,6 +99,44 @@ describe("GamePage", () => {
     expect(within(lineups).getByText("+19.2")).toBeInTheDocument();
   });
 
+  it("gives a row to anyone with stints but no box-score line, named from the lineups", async () => {
+    const pritchard = { player_id: 1630202, name: "Payton Pritchard" };
+    const stint = (player_id: number) => ({
+      player_id,
+      team_id: GAME_PAGE.home.team_id,
+      period: 2,
+      start_sec: 0,
+      end_sec: 300,
+      is_garbage_time: false,
+    });
+    const page = {
+      ...GAME_PAGE,
+      home: {
+        ...GAME_PAGE.home,
+        lineups: [
+          ...GAME_PAGE.home.lineups,
+          { ...GAME_PAGE.home.lineups[0], players: [pritchard], net_rating: null },
+        ],
+      },
+      stints: [...GAME_PAGE.stints, stint(1630202), stint(1631000), stint(1630202)],
+    };
+    mockApi({ "/api/games/0022500990": { body: page } });
+    renderApp("/games/0022500990");
+    const stints = await screen.findByRole("region", { name: "Stints" });
+
+    expect((lastOption().yAxis as { data: string[] }).data.slice(-3)).toEqual([
+      "JD Davison",
+      "Payton Pritchard",
+      "Player 1631000",
+    ]);
+    const celtics = within(stints).getByRole("table", { name: "BOS" });
+    expect(within(celtics).getByRole("link", { name: "Payton Pritchard" })).toHaveAttribute(
+      "href",
+      "/players/1630202",
+    );
+    expect(within(celtics).getAllByText("No box score")).toHaveLength(2);
+  });
+
   it("refetches with garbage_time=include when garbage time is toggled on", async () => {
     const fetchMock = mockApi({ "/api/games/0022500990": { body: GAME_PAGE } });
     renderApp("/games/0022500990");

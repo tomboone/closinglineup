@@ -5,25 +5,41 @@ import { useGame } from "../api/hooks";
 import type { components } from "../api/types";
 import StintTimeline from "../components/charts/StintTimeline";
 import type { StintRow } from "../components/charts/StintTimeline";
-import { signed } from "../components/format";
+import { minutes, signed } from "../components/format";
+import { GAME_STATUS_LABELS } from "../components/labels";
 import PlayerLink, { PlayerList } from "../components/PlayerLink";
 import TeamLink from "../components/TeamLink";
 import { useShellParams } from "../shell/params";
 import QueryStatus from "./QueryStatus";
 
-type GameTeam = components["schemas"]["GameTeam"];
+type Schemas = components["schemas"];
+type GameTeam = Schemas["GameTeam"];
+
+/** A timeline row: a player and his box-score line, null when he has stints but no line. */
+type TeamRow = { player: Schemas["PlayerRef"]; line: Schemas["GamePlayer"] | null };
 
 const REGULATION_PERIODS = 4;
 
-const STATUS_LABELS: Record<GamePageData["status"], string> = {
-  scheduled: "Scheduled",
-  final: "Final",
-  postponed: "Postponed",
-};
-
-/** Seconds played as the box score shows them: 2052 → "34:12". */
-function minutes(seconds: number) {
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+/**
+ * A team's timeline rows: its box-score lines in the API's order, then anyone on the floor in its
+ * stints without one, so a stint the box score disagrees with still shows. Such a player's name
+ * comes from the lineups or closing five when either has him.
+ */
+function teamRows(team: GameTeam, stints: GamePageData["stints"]): TeamRow[] {
+  const rows: TeamRow[] = team.players.map((line) => ({ player: line.player, line }));
+  const listed = new Set(rows.map((row) => row.player.player_id));
+  const known = new Map(
+    [...team.lineups.flatMap((lineup) => lineup.players), ...(team.closing ?? [])].map(
+      (player) => [player.player_id, player],
+    ),
+  );
+  for (const stint of stints) {
+    if (stint.team_id !== team.team_id || listed.has(stint.player_id)) continue;
+    listed.add(stint.player_id);
+    const player = known.get(stint.player_id) ?? { player_id: stint.player_id, name: null };
+    rows.push({ player, line: null });
+  }
+  return rows;
 }
 
 /**
@@ -47,21 +63,26 @@ function GamePage() {
 function GamePageBody({ page }: { page: GamePageData }) {
   const { away, home } = page;
   const garbage = page.garbage_time === "include" ? "included" : "excluded";
+  const [awayRows, homeRows] = useMemo(
+    () => [teamRows(away, page.stints), teamRows(home, page.stints)],
+    [away, home, page.stints],
+  );
 
   return (
     <>
       <p className="game-header">
-        {STATUS_LABELS[page.status]}, {page.game_date}: <TeamLink tricode={away.tricode} />{" "}
-        {away.score ?? "—"}, <TeamLink tricode={home.tricode} /> {home.score ?? "—"}.
+        {GAME_STATUS_LABELS[page.status]}, {page.game_date}:{" "}
+        <TeamLink tricode={away.tricode} /> {away.score ?? "—"},{" "}
+        <TeamLink tricode={home.tricode} /> {home.score ?? "—"}.
       </p>
       <div className="game-page">
         <section className="game-timeline" aria-labelledby="game-timeline">
           <h2 id="game-timeline">Stints</h2>
           <p className="note">Every stint of both teams, garbage time included and shaded.</p>
-          <Timeline page={page} />
+          <Timeline page={page} awayRows={awayRows} homeRows={homeRows} />
           <div className="game-teams">
-            <PlayersTable team={away} />
-            <PlayersTable team={home} />
+            <PlayersTable team={away} rows={awayRows} />
+            <PlayersTable team={home} rows={homeRows} />
           </div>
         </section>
         <section aria-labelledby="game-closing">
@@ -79,28 +100,38 @@ function GamePageBody({ page }: { page: GamePageData }) {
   );
 }
 
-/** The gantt of both teams' stints, away first, a row per player in his box-score order. */
-function Timeline({ page }: { page: GamePageData }) {
-  const rows = useMemo(() => timelineRows(page), [page]);
+/** The gantt of both teams' stints, away first, a row per player in his team's row order. */
+function Timeline({
+  page,
+  awayRows,
+  homeRows,
+}: {
+  page: GamePageData;
+  awayRows: TeamRow[];
+  homeRows: TeamRow[];
+}) {
+  const rows = useMemo(
+    () =>
+      ([[page.away, awayRows], [page.home, homeRows]] as const).flatMap(([team, teamRows]) =>
+        teamRows.map(
+          ({ player }): StintRow => ({
+            label: player.name ?? `Player ${player.player_id}`,
+            team: team.tricode,
+            stints: page.stints.filter(
+              (stint) => stint.player_id === player.player_id && stint.team_id === team.team_id,
+            ),
+          }),
+        ),
+      ),
+    [page, awayRows, homeRows],
+  );
   const periods = Math.max(REGULATION_PERIODS, ...page.stints.map((stint) => stint.period));
   if (page.stints.length === 0) return <p>No stints for this game yet.</p>;
   return <StintTimeline rows={rows} periods={periods} garbageTimeFrom={page.garbage_time_from} />;
 }
 
-function timelineRows(page: GamePageData): StintRow[] {
-  return [page.away, page.home].flatMap((team) =>
-    team.players.map(({ player }) => ({
-      label: player.name ?? `Player ${player.player_id}`,
-      team: team.tricode,
-      stints: page.stints.filter(
-        (stint) => stint.player_id === player.player_id && stint.team_id === team.team_id,
-      ),
-    })),
-  );
-}
-
 /** A team's timeline rows as a table, each name linking to its player page. */
-function PlayersTable({ team }: { team: GameTeam }) {
+function PlayersTable({ team, rows }: { team: GameTeam; rows: TeamRow[] }) {
   return (
     <table className="game-players">
       <caption>{team.tricode}</caption>
@@ -111,13 +142,14 @@ function PlayersTable({ team }: { team: GameTeam }) {
         </tr>
       </thead>
       <tbody>
-        {team.players.map((line) => (
-          <tr key={line.player.player_id}>
+        {rows.map(({ player, line }) => (
+          <tr key={player.player_id}>
             <td>
-              <PlayerLink player={line.player} />
-              {line.is_starter && <span className="badge">Starter</span>}
+              <PlayerLink player={player} />
+              {line?.is_starter && <span className="badge">Starter</span>}
+              {!line && <span className="badge">No box score</span>}
             </td>
-            <td className="number">{minutes(line.seconds)}</td>
+            <td className="number">{minutes(line?.seconds)}</td>
           </tr>
         ))}
       </tbody>
