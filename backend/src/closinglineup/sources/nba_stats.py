@@ -13,6 +13,10 @@ detected: only final games are fetched (spec §3.3).
 
 The season-wide endpoints are keyed by season, and season type where they take one, so they hold
 whatever the season looked like when first fetched; a refresh during the season passes `force`.
+
+Each function declares the shape it expects of its response (`sources.drift`): its result sets'
+names and columns for a v2 response, its top-level keys for a v3 one. A response missing any of
+them is not cached and raises `SchemaDrift`, which the batch fetches report as DRIFT.
 """
 
 from collections.abc import Callable, Collection, Iterable
@@ -23,6 +27,7 @@ from typing import Any, Protocol
 
 from closinglineup.season import NBA_LEAGUE_ID
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.drift import SchemaDrift, Shape, result_sets, top_level
 from closinglineup.sources.nba_http import NbaHttpError, NbaSession, fetch_json
 from closinglineup.teams import TEAMS
 
@@ -99,6 +104,95 @@ STATS_DASH_FILTERS = {
 # `scoreboardv3`'s `gameStatus`: 1 scheduled, 2 in progress, 3 final.
 GAME_FINAL = 3
 
+# The shape of each endpoint's response, as recorded under `tests/fixtures/nba_stats/`. The stats
+# dashboards' shapes vary with the measure type, so they are in `DASH_SHAPES` instead.
+# `playbyplayv2` answers `{}` for every game, so it has no shape on record and none is checked.
+SHAPES: dict[str, Shape] = {
+    BOXSCORE_TRADITIONAL_V3: top_level("boxScoreTraditional"),
+    BOXSCORE_TRADITIONAL_V2: result_sets(
+        PlayerStats=(
+            "GAME_ID TEAM_ID TEAM_ABBREVIATION TEAM_CITY PLAYER_ID PLAYER_NAME NICKNAME "
+            "START_POSITION COMMENT MIN FGM FGA FG_PCT FG3M FG3A FG3_PCT FTM FTA FT_PCT OREB DREB "
+            "REB AST STL BLK TO PF PTS PLUS_MINUS"
+        ),
+        TeamStats=(
+            "GAME_ID TEAM_ID TEAM_NAME TEAM_ABBREVIATION TEAM_CITY MIN FGM FGA FG_PCT FG3M FG3A "
+            "FG3_PCT FTM FTA FT_PCT OREB DREB REB AST STL BLK TO PF PTS PLUS_MINUS"
+        ),
+        TeamStarterBenchStats=(
+            "GAME_ID TEAM_ID TEAM_NAME TEAM_ABBREVIATION TEAM_CITY STARTERS_BENCH MIN FGM FGA "
+            "FG_PCT FG3M FG3A FG3_PCT FTM FTA FT_PCT OREB DREB REB AST STL BLK TO PF PTS"
+        ),
+    ),
+    BOXSCORE_ADVANCED_V3: top_level("boxScoreAdvanced"),
+    BOXSCORE_HUSTLE_V2: top_level("boxScoreHustle"),
+    BOXSCORE_MATCHUPS_V3: top_level("boxScoreMatchups"),
+    BOXSCORE_USAGE_V3: top_level("boxScoreUsage"),
+    PLAYBYPLAY_V3: top_level("game"),
+    SCOREBOARD_V3: top_level("scoreboard"),
+    SCHEDULE_LEAGUE_V2: top_level("leagueSchedule"),
+    COMMON_TEAM_ROSTER: result_sets(
+        CommonTeamRoster=(
+            "TeamID SEASON LeagueID PLAYER NICKNAME PLAYER_SLUG NUM POSITION HEIGHT WEIGHT "
+            "BIRTH_DATE AGE EXP SCHOOL PLAYER_ID HOW_ACQUIRED"
+        ),
+        Coaches=(
+            "TEAM_ID SEASON COACH_ID FIRST_NAME LAST_NAME COACH_NAME IS_ASSISTANT COACH_TYPE "
+            "SORT_SEQUENCE SUB_SORT_SEQUENCE"
+        ),
+    ),
+    COMMON_ALL_PLAYERS: result_sets(
+        CommonAllPlayers=(
+            "PERSON_ID DISPLAY_LAST_COMMA_FIRST DISPLAY_FIRST_LAST ROSTERSTATUS FROM_YEAR TO_YEAR "
+            "PLAYERCODE PLAYER_SLUG TEAM_ID TEAM_CITY TEAM_NAME TEAM_ABBREVIATION TEAM_CODE "
+            "TEAM_SLUG GAMES_PLAYED_FLAG OTHERLEAGUE_EXPERIENCE_CH"
+        ),
+    ),
+    PLAYER_GAME_LOGS: result_sets(
+        PlayerGameLogs=(
+            "SEASON_YEAR PLAYER_ID PLAYER_NAME NICKNAME TEAM_ID TEAM_ABBREVIATION TEAM_NAME "
+            "GAME_ID GAME_DATE MATCHUP WL MIN FGM FGA FG_PCT FG3M FG3A FG3_PCT FTM FTA FT_PCT "
+            "OREB DREB REB AST TOV STL BLK BLKA PF PFD PTS PLUS_MINUS NBA_FANTASY_PTS DD2 TD3 "
+            "WNBA_FANTASY_PTS FP_HIGH_SCORE GP_RANK W_RANK L_RANK W_PCT_RANK MIN_RANK FGM_RANK "
+            "FGA_RANK FG_PCT_RANK FG3M_RANK FG3A_RANK FG3_PCT_RANK FTM_RANK FTA_RANK FT_PCT_RANK "
+            "OREB_RANK DREB_RANK REB_RANK AST_RANK TOV_RANK STL_RANK BLK_RANK BLKA_RANK PF_RANK "
+            "PFD_RANK PTS_RANK PLUS_MINUS_RANK NBA_FANTASY_PTS_RANK DD2_RANK TD3_RANK "
+            "WNBA_FANTASY_PTS_RANK FP_HIGH_SCORE_RANK AVAILABLE_FLAG MIN_SEC TEAM_COUNT"
+        ),
+    ),
+    SHOT_CHART_DETAIL: result_sets(
+        Shot_Chart_Detail=(
+            "GRID_TYPE GAME_ID GAME_EVENT_ID PLAYER_ID PLAYER_NAME TEAM_ID TEAM_NAME PERIOD "
+            "MINUTES_REMAINING SECONDS_REMAINING EVENT_TYPE ACTION_TYPE SHOT_TYPE SHOT_ZONE_BASIC "
+            "SHOT_ZONE_AREA SHOT_ZONE_RANGE SHOT_DISTANCE LOC_X LOC_Y SHOT_ATTEMPTED_FLAG "
+            "SHOT_MADE_FLAG GAME_DATE HTM VTM"
+        ),
+        LeagueAverages="GRID_TYPE SHOT_ZONE_BASIC SHOT_ZONE_AREA SHOT_ZONE_RANGE FGA FGM FG_PCT",
+    ),
+    LEAGUE_DASH_LINEUPS: result_sets(
+        Lineups=(
+            "GROUP_SET GROUP_ID GROUP_NAME TEAM_ID TEAM_ABBREVIATION GP W L W_PCT MIN "
+            "E_OFF_RATING OFF_RATING E_DEF_RATING DEF_RATING E_NET_RATING NET_RATING AST_PCT "
+            "AST_TO AST_RATIO OREB_PCT DREB_PCT REB_PCT TM_TOV_PCT EFG_PCT TS_PCT E_PACE PACE "
+            "PACE_PER40 POSS PIE GP_RANK W_RANK L_RANK W_PCT_RANK MIN_RANK OFF_RATING_RANK "
+            "DEF_RATING_RANK NET_RATING_RANK AST_PCT_RANK AST_TO_RANK AST_RATIO_RANK "
+            "OREB_PCT_RANK DREB_PCT_RANK REB_PCT_RANK TM_TOV_PCT_RANK EFG_PCT_RANK TS_PCT_RANK "
+            "PACE_RANK PIE_RANK SUM_TIME_PLAYED"
+        ),
+    ),
+    LEAGUE_PLAYER_ON_DETAILS: result_sets(
+        PlayersOnCourtLeaguePlayerDetails=(
+            "GROUP_SET TEAM_ID TEAM_ABBREVIATION TEAM_NAME VS_PLAYER_ID VS_PLAYER_NAME "
+            "COURT_STATUS GP W L W_PCT MIN E_OFF_RATING OFF_RATING E_DEF_RATING DEF_RATING "
+            "E_NET_RATING NET_RATING AST_PCT AST_TO AST_RATIO OREB_PCT DREB_PCT REB_PCT "
+            "TM_TOV_PCT EFG_PCT TS_PCT E_PACE PACE PACE_PER40 POSS PIE GP_RANK W_RANK L_RANK "
+            "W_PCT_RANK MIN_RANK OFF_RATING_RANK DEF_RATING_RANK NET_RATING_RANK AST_PCT_RANK "
+            "AST_TO_RANK AST_RATIO_RANK OREB_PCT_RANK DREB_PCT_RANK REB_PCT_RANK TM_TOV_PCT_RANK "
+            "EFG_PCT_RANK TS_PCT_RANK PACE_RANK PIE_RANK"
+        ),
+    ),
+}
+
 type Payload = dict[str, Any]
 type Check = Callable[[Payload], None]
 
@@ -123,6 +217,37 @@ class MeasureType(StrEnum):
     ADVANCED = "Advanced"
 
 
+# The stats dashboards' shapes, by measure type: only `Advanced` is on record.
+DASH_SHAPES: dict[tuple[str, MeasureType], Shape] = {
+    (LEAGUE_DASH_PLAYER_STATS, MeasureType.ADVANCED): result_sets(
+        LeagueDashPlayerStats=(
+            "PLAYER_ID PLAYER_NAME NICKNAME TEAM_ID TEAM_ABBREVIATION AGE GP W L W_PCT MIN "
+            "E_OFF_RATING OFF_RATING sp_work_OFF_RATING E_DEF_RATING DEF_RATING "
+            "sp_work_DEF_RATING E_NET_RATING NET_RATING sp_work_NET_RATING AST_PCT AST_TO "
+            "AST_RATIO OREB_PCT DREB_PCT REB_PCT TM_TOV_PCT E_TOV_PCT EFG_PCT TS_PCT USG_PCT "
+            "E_USG_PCT E_PACE PACE PACE_PER40 sp_work_PACE PIE POSS FGM FGA FGM_PG FGA_PG "
+            "FG_PCT GP_RANK W_RANK L_RANK W_PCT_RANK MIN_RANK E_OFF_RATING_RANK "
+            "OFF_RATING_RANK sp_work_OFF_RATING_RANK E_DEF_RATING_RANK DEF_RATING_RANK "
+            "sp_work_DEF_RATING_RANK E_NET_RATING_RANK NET_RATING_RANK "
+            "sp_work_NET_RATING_RANK AST_PCT_RANK AST_TO_RANK AST_RATIO_RANK OREB_PCT_RANK "
+            "DREB_PCT_RANK REB_PCT_RANK TM_TOV_PCT_RANK E_TOV_PCT_RANK EFG_PCT_RANK "
+            "TS_PCT_RANK USG_PCT_RANK E_USG_PCT_RANK E_PACE_RANK PACE_RANK sp_work_PACE_RANK "
+            "PIE_RANK FGM_RANK FGA_RANK FGM_PG_RANK FGA_PG_RANK FG_PCT_RANK TEAM_COUNT"
+        ),
+    ),
+    (LEAGUE_DASH_TEAM_STATS, MeasureType.ADVANCED): result_sets(
+        LeagueDashTeamStats=(
+            "TEAM_ID TEAM_NAME GP W L W_PCT MIN E_OFF_RATING OFF_RATING E_DEF_RATING "
+            "DEF_RATING E_NET_RATING NET_RATING AST_PCT AST_TO AST_RATIO OREB_PCT DREB_PCT "
+            "REB_PCT TM_TOV_PCT EFG_PCT TS_PCT E_PACE PACE PACE_PER40 POSS PIE GP_RANK W_RANK "
+            "L_RANK W_PCT_RANK MIN_RANK OFF_RATING_RANK DEF_RATING_RANK NET_RATING_RANK "
+            "AST_PCT_RANK AST_TO_RANK AST_RATIO_RANK OREB_PCT_RANK DREB_PCT_RANK REB_PCT_RANK "
+            "TM_TOV_PCT_RANK EFG_PCT_RANK TS_PCT_RANK PACE_RANK PIE_RANK"
+        ),
+    ),
+}
+
+
 @dataclass(frozen=True, slots=True)
 class Request:
     """One stats.nba.com request: where it is cached, what it sends, and what counts as data."""
@@ -131,6 +256,8 @@ class Request:
     key: str
     params: dict[str, str]
     check: Check
+    # What the response must look like; None checks nothing (`sources.drift`).
+    shape: Shape | None = None
 
 
 def _fetch(session: NbaSession, cache: RawCache, request: Request, *, force: bool) -> Payload:
@@ -145,6 +272,7 @@ def _fetch(session: NbaSession, cache: RawCache, request: Request, *, force: boo
         request.params,
         force=force,
         check=request.check,
+        shape=request.shape,
     )
 
 
@@ -172,6 +300,11 @@ def _v2_check(endpoint: str, subject: str) -> Check:
     return check
 
 
+def _v2_request(endpoint: str, key: str, params: dict[str, str]) -> Request:
+    """A v2 request, which has no data with no rows, of the shape `SHAPES` declares for it."""
+    return Request(endpoint, key, params, _v2_check(endpoint, key), SHAPES.get(endpoint))
+
+
 def _fetch_game_endpoint(
     session: NbaSession,
     cache: RawCache,
@@ -182,7 +315,8 @@ def _fetch_game_endpoint(
     *,
     force: bool,
 ) -> Payload:
-    request = Request(endpoint, game_id, {"GameID": game_id, **params}, check)
+    params = {"GameID": game_id, **params}
+    request = Request(endpoint, game_id, params, check, SHAPES.get(endpoint))
     return _fetch(session, cache, request, force=force)
 
 
@@ -298,6 +432,8 @@ class FetchStatus(StrEnum):
     CACHED = "cached"
     FETCHED = "fetched"
     FAILED = "failed"
+    # Fetched, but not of the shape its endpoint declares, so not cached (`SchemaDrift`).
+    DRIFT = "drift"
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,19 +442,23 @@ class EndpointResult:
     # The cache key fetched, e.g. the game ID.
     key: str
     status: FetchStatus
-    # Why a FAILED endpoint failed; None otherwise.
+    # Why a FAILED endpoint failed, or how a DRIFT one differs; None otherwise.
     error: str | None = None
+    source: str = SOURCE
 
 
 def _attempt(
     cache: RawCache, endpoint: str, key: str, fetch: Callable[[], object], *, force: bool
 ) -> EndpointResult:
-    """Run `fetch` for one cache key and report it, turning `NbaHttpError` into FAILED."""
+    """Run `fetch` for one cache key and report it, turning `NbaHttpError` into FAILED and
+    `SchemaDrift` into DRIFT."""
     cached = not force and cache.exists(SOURCE, endpoint, key)
     try:
         fetch()
     except NbaHttpError as exc:
         return EndpointResult(endpoint, key, FetchStatus.FAILED, str(exc))
+    except SchemaDrift as exc:
+        return EndpointResult(endpoint, key, FetchStatus.DRIFT, str(exc))
     return EndpointResult(endpoint, key, FetchStatus.CACHED if cached else FetchStatus.FETCHED)
 
 
@@ -334,7 +474,8 @@ def fetch_game(
     order.
 
     An endpoint that answers badly (`NbaHttpError`) is reported as FAILED and the rest still run,
-    so one endpoint's outage costs only its own data; `NbaUnreachableError`, raised once
+    so one endpoint's outage costs only its own data, as is one whose response has drifted
+    (`SchemaDrift`), as DRIFT; `NbaUnreachableError`, raised once
     `NbaSession` has retried a connection error or timeout, propagates.
     """
     return [
@@ -366,7 +507,8 @@ def _scoreboard_v3(game_date: date) -> Request:
         if not_final := [g.get("gameId") for g in games if g.get("gameStatus") != GAME_FINAL]:
             raise NbaHttpError(f"{SCOREBOARD_V3} for {day} has games not final: {not_final}")
 
-    return Request(SCOREBOARD_V3, day, {"GameDate": day, "LeagueID": NBA_LEAGUE_ID}, check)
+    params = {"GameDate": day, "LeagueID": NBA_LEAGUE_ID}
+    return Request(SCOREBOARD_V3, day, params, check, SHAPES[SCOREBOARD_V3])
 
 
 def _schedule_league_v2(season: str) -> Request:
@@ -376,20 +518,20 @@ def _schedule_league_v2(season: str) -> Request:
             raise NbaHttpError(f"{SCHEDULE_LEAGUE_V2} has no data for {season}")
 
     params = {"LeagueID": NBA_LEAGUE_ID, "Season": season}
-    return Request(SCHEDULE_LEAGUE_V2, season, params, check)
+    return Request(SCHEDULE_LEAGUE_V2, season, params, check, SHAPES[SCHEDULE_LEAGUE_V2])
 
 
 def _common_team_roster(team_id: int, season: str) -> Request:
     key = _key(str(team_id), season)
     params = {"TeamID": str(team_id), "Season": season, "LeagueID": NBA_LEAGUE_ID}
-    return Request(COMMON_TEAM_ROSTER, key, params, _v2_check(COMMON_TEAM_ROSTER, key))
+    return _v2_request(COMMON_TEAM_ROSTER, key, params)
 
 
 def _common_all_players(season: str) -> Request:
     # `IsOnlyCurrentSeason=0` lists every player NBA.com knows, not only this season's, so a
     # player who has not yet appeared still resolves.
     params = {"IsOnlyCurrentSeason": "0", "LeagueID": NBA_LEAGUE_ID, "Season": season}
-    return Request(COMMON_ALL_PLAYERS, season, params, _v2_check(COMMON_ALL_PLAYERS, season))
+    return _v2_request(COMMON_ALL_PLAYERS, season, params)
 
 
 def _player_game_logs(season: str, season_type: SeasonType) -> Request:
@@ -417,7 +559,7 @@ def _player_game_logs(season: str, season_type: SeasonType) -> Request:
         "VsConference": "",
         "VsDivision": "",
     }
-    return Request(PLAYER_GAME_LOGS, key, params, _v2_check(PLAYER_GAME_LOGS, key))
+    return _v2_request(PLAYER_GAME_LOGS, key, params)
 
 
 def _shot_chart_detail(player_id: int, season: str, season_type: SeasonType) -> Request:
@@ -457,7 +599,7 @@ def _shot_chart_detail(player_id: int, season: str, season_type: SeasonType) -> 
         "VsConference": "",
         "VsDivision": "",
     }
-    return Request(SHOT_CHART_DETAIL, key, params, _v2_check(SHOT_CHART_DETAIL, key))
+    return _v2_request(SHOT_CHART_DETAIL, key, params)
 
 
 def _league_dash_lineups(season: str, season_type: SeasonType, last_n_games: int) -> Request:
@@ -472,7 +614,7 @@ def _league_dash_lineups(season: str, season_type: SeasonType, last_n_games: int
         "Season": season,
         "SeasonType": season_type,
     }
-    return Request(LEAGUE_DASH_LINEUPS, key, params, _v2_check(LEAGUE_DASH_LINEUPS, key))
+    return _v2_request(LEAGUE_DASH_LINEUPS, key, params)
 
 
 def _league_player_on_details(team_id: int, season: str, season_type: SeasonType) -> Request:
@@ -484,7 +626,7 @@ def _league_player_on_details(team_id: int, season: str, season_type: SeasonType
         "Season": season,
         "SeasonType": season_type,
     }
-    return Request(LEAGUE_PLAYER_ON_DETAILS, key, params, _v2_check(LEAGUE_PLAYER_ON_DETAILS, key))
+    return _v2_request(LEAGUE_PLAYER_ON_DETAILS, key, params)
 
 
 def _league_dash_player_stats(
@@ -503,7 +645,10 @@ def _league_dash_player_stats(
         "Season": season,
         "SeasonType": season_type,
     }
-    return Request(LEAGUE_DASH_PLAYER_STATS, key, params, _v2_check(LEAGUE_DASH_PLAYER_STATS, key))
+    shape = DASH_SHAPES.get((LEAGUE_DASH_PLAYER_STATS, measure_type))
+    return Request(
+        LEAGUE_DASH_PLAYER_STATS, key, params, _v2_check(LEAGUE_DASH_PLAYER_STATS, key), shape
+    )
 
 
 def _league_dash_team_stats(
@@ -516,7 +661,10 @@ def _league_dash_team_stats(
         "Season": season,
         "SeasonType": season_type,
     }
-    return Request(LEAGUE_DASH_TEAM_STATS, key, params, _v2_check(LEAGUE_DASH_TEAM_STATS, key))
+    shape = DASH_SHAPES.get((LEAGUE_DASH_TEAM_STATS, measure_type))
+    return Request(
+        LEAGUE_DASH_TEAM_STATS, key, params, _v2_check(LEAGUE_DASH_TEAM_STATS, key), shape
+    )
 
 
 def fetch_scoreboard_v3(

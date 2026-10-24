@@ -68,9 +68,17 @@ SCHEDULE: Payload = {
 }
 
 
-def cache_fixture_game(data_dir: Path, *, rosters: bool = True, pbp: bool = True) -> RawCache:
-    """The fixture game's schedule and box scores in a raw cache under `data_dir`; with `pbp`,
-    its live play-by-play, and with `rosters`, the GSW roster and the player list."""
+def cache_fixture_game(
+    data_dir: Path,
+    *,
+    rosters: bool = True,
+    pbp: bool = True,
+    stats: bool = True,
+    live_box: bool = False,
+) -> RawCache:
+    """The fixture game's schedule in a raw cache under `data_dir`; with `stats`, its
+    stats.nba.com box scores, with `live_box` its cdn.nba.com live one, with `pbp` its live
+    play-by-play, and with `rosters`, the GSW roster and the player list."""
     cache = RawCache(data_dir, FakeClock(ROSTERS_FETCHED))
     cache.put(
         nba_cdn.SOURCE,
@@ -80,8 +88,11 @@ def cache_fixture_game(data_dir: Path, *, rosters: bool = True, pbp: bool = True
         url=nba_cdn.SCHEDULE_URL,
         status=200,
     )
-    for endpoint in WITH_DATA:
+    for endpoint in WITH_DATA if stats else ():
         cache.put(nba_stats.SOURCE, endpoint, GAME, fixture_body(endpoint), url="u", status=200)
+    if live_box:
+        body = (PBP_FIXTURES / nba_cdn.BOXSCORE / f"{GAME}.json").read_bytes()
+        cache.put(nba_cdn.SOURCE, nba_cdn.BOXSCORE, GAME, body, url="u", status=200)
     if pbp:
         body = (PBP_FIXTURES / nba_cdn.PLAYBYPLAY / f"{GAME}.json").read_bytes()
         cache.put(nba_cdn.SOURCE, nba_cdn.PLAYBYPLAY, GAME, body, url="u", status=200)
@@ -135,6 +146,29 @@ def test_a_game_without_its_play_by_play_keeps_its_box_rows_and_is_reported(
     assert report.rows["player_game"] == PLAYER_GAMES
     assert report.rows["stint"] == report.rows["possession"] == 0
     assert report.rows["possession_lineup"] == 0
+
+
+def test_a_game_stats_nba_com_failed_for_parses_from_the_live_box(tmp_path: Path) -> None:
+    store = ParquetStore(tmp_path)
+
+    report = parse_date(cache_fixture_game(tmp_path, stats=False, live_box=True), store, DAY, TZ)
+
+    assert (report.parsed, report.fallback, report.failed) == ([GAME], [GAME], {})
+    player_games = store.read("player_game", DAY)
+    assert player_games.num_rows == PLAYER_GAMES
+    assert set(player_games.column("source").to_pylist()) == {"cdn"}
+    # No stats.nba.com matchups; the stints come from the live play-by-play as for any game.
+    assert report.rows["matchup"] == 0
+    assert report.rows["stint"] > 0
+
+
+def test_the_stats_box_is_preferred_to_the_live_box_when_both_are_cached(tmp_path: Path) -> None:
+    store = ParquetStore(tmp_path)
+
+    report = parse_date(cache_fixture_game(tmp_path, live_box=True), store, DAY, TZ)
+
+    assert (report.parsed, report.fallback) == ([GAME], [])
+    assert set(store.read("player_game", DAY).column("source").to_pylist()) == {"stats"}
 
 
 def test_a_roster_opens_on_the_day_it_was_fetched_in_tz(tmp_path: Path) -> None:
@@ -309,3 +343,18 @@ def test_a_shot_chart_a_parser_cannot_read_is_reported_and_left_out(tmp_path: Pa
 
     assert report.failed == {SHOT_CHART: "ParseError: payload has no Shot_Chart_Detail result set"}
     assert store.keys("shot") == []
+
+
+def test_parse_with_tables_writes_only_their_files(tmp_path: Path) -> None:
+    cache = cache_fixture_game(tmp_path)
+    store = ParquetStore(tmp_path)
+
+    report = parse_date(cache, store, DAY, TZ, {"game", "matchup"})
+
+    assert list(report.rows) == ["game", "matchup"]
+    assert [
+        table for table in ("game", "matchup", "stint") if store.path(table, DAY).is_file()
+    ] == [
+        "game",
+        "matchup",
+    ]

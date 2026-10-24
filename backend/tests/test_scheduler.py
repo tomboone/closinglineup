@@ -1,3 +1,4 @@
+import copy
 import json
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -8,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import respx
+from curl_cffi import requests as curl_requests
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -32,8 +34,9 @@ from closinglineup.scheduler import (
     shot_chart_players,
 )
 from closinglineup.settings import Settings
-from closinglineup.sources import nba_cdn, nba_stats
+from closinglineup.sources import nba_cdn, nba_http, nba_stats
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.drift import SchemaDrift
 from closinglineup.sources.nba_http import (
     NbaHttpError,
     NbaSession,
@@ -43,7 +46,12 @@ from closinglineup.sources.nba_http import (
 from closinglineup.sources.nba_stats import EndpointResult, SeasonType
 from closinglineup.teams import by_nba_team_id
 from tests.fakes import Connect, FakeOverlay, RoutedGet
+from tests.test_loader import clear_fixture_game
 from tests.test_nba_stats import GAME_ID, fixture_body, season_fixture_body
+from tests.test_pipeline import DAY as FIXTURE_DAY
+from tests.test_pipeline import GAME as FIXTURE_GAME
+from tests.test_pipeline import PBP_FIXTURES, PLAYER_GAMES
+from tests.test_pipeline import SCHEDULE as FIXTURE_SCHEDULE
 
 CDN_FIXTURES = Path(__file__).parent / "fixtures" / "cdn"
 NIGHTLY_URL = "https://hc-ping.com/nightly-123"
@@ -244,7 +252,10 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
                 LoadLog.game_date == DAY, LoadLog.step != LOAD_STEP
             )
         ).all()
-    assert sorted(logged) == sorted((step.name, "succeeded") for step in [*WRITES, RECONCILE])
+    # Every stats.nba.com endpoint answered, so the date's stats fetch succeeded too.
+    expected = [(scheduler.STATS_STEP, "succeeded")]
+    expected += [(step.name, "succeeded") for step in [*WRITES, RECONCILE]]
+    assert sorted(logged) == sorted(expected)
     assert ok.call_count == 1
 
 
@@ -391,6 +402,220 @@ def test_nightly_that_raises_records_the_run_failed_and_pings_fail(
     assert fail.call_count == 1
     assert fail.calls.last.request.content == reason.encode()
     assert ok.call_count == 0
+
+
+@pytest.fixture
+def no_drift(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
+    """`db` with no `drift` rows before or after, which would fail `health` for 24 h, and no
+    `DAY` stats fetch row left failed after, which would leave its games `stats_failed`."""
+
+    def clear() -> None:
+        with db.begin() as session:
+            session.execute(delete(LoadLog).where(LoadLog.status == RunStatus.DRIFT))
+            session.execute(
+                delete(LoadLog).where(
+                    LoadLog.game_date == DAY, LoadLog.step == scheduler.STATS_STEP
+                )
+            )
+
+    clear()
+    yield db
+    clear()
+
+
+@respx.mock
+def test_a_renamed_column_records_drift_pings_fail_and_the_rest_of_the_run_still_happens(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    no_drift: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    db = no_drift
+    fail = respx.post(f"{NIGHTLY_URL}/fail").respond(200)
+    ok = respx.get(NIGHTLY_URL).respond(200)
+    endpoint = nba_stats.BOXSCORE_TRADITIONAL_V2
+    payload = json.loads(fixture_body(endpoint))
+    [players] = [rs for rs in payload["resultSets"] if rs["name"] == "PlayerStats"]
+    players["headers"] = ["MINUTES" if h == "MIN" else h for h in players["headers"]]
+    routes = nba_routes(SCHEDULE, FINAL_A, FINAL_B)
+    routes[f"{nba_stats.STATS_BASE}/{endpoint}"] = json.dumps(payload).encode()
+    get = RoutedGet(routes)
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({"nightly": NIGHTLY_URL}, http))
+
+    with pytest.raises(JobFailedError, match="missing PlayerStats column MIN") as raised:
+        jobs.nightly(DAY)
+
+    difference = "missing PlayerStats column MIN; unexpected PlayerStats column MINUTES"
+    errors = [f"nba_stats/{endpoint} {g}: schema drift: {difference}" for g in (FINAL_A, FINAL_B)]
+    # Both games, and every other endpoint of each, were still fetched, parsed, loaded and derived.
+    detail = raised.value.detail
+    assert detail["drift"] == errors
+    assert fetched_games(get) == {"stats": {FINAL_A, FINAL_B}, "cdn": {FINAL_A, FINAL_B}}
+    assert detail["loaded"]["game"] == 3
+    assert detail["derived"][-1] == DAY.isoformat()
+    # The drifted response is not cached, so the game is `stats_failed` for `fetch_missing`.
+    assert detail["stats_failed"] == [FINAL_A, FINAL_B]
+    with db() as session:
+        row = session.get_one(LoadLog, (f"nba_stats/{endpoint}", DAY, scheduler.DRIFT_STEP))
+    by_game = dict(zip((FINAL_A, FINAL_B), errors, strict=True))
+    assert (row.status, row.detail) == ("drift", {"drift": by_game})
+    [run] = runs(db)
+    assert run.status == "failed"
+    assert fail.call_count == 1
+    assert fail.calls.last.request.content.decode() == f"2 responses drifted: {'; '.join(errors)}"
+    assert ok.call_count == 0
+
+
+def test_a_drifted_schedule_is_recorded_and_the_run_goes_on_with_the_copy_cached_before_it(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    no_drift: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    db = no_drift
+    drifted = {"meta": {}, "schedule": SCHEDULE["leagueSchedule"]}
+    get = RoutedGet(nba_routes(drifted, FINAL_A, FINAL_B))
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+    table = f"cdn/{nba_cdn.SCHEDULE}"
+
+    # With no copy cached before it, the run stops, the drift recorded.
+    with pytest.raises(SchemaDrift, match="missing key leagueSchedule"):
+        jobs.nightly(DAY)
+    with db() as session:
+        assert session.get_one(LoadLog, (table, DAY, scheduler.DRIFT_STEP)).status == "drift"
+
+    body = json.dumps(SCHEDULE).encode()
+    jobs.cache.put(nba_cdn.SOURCE, nba_cdn.SCHEDULE, "2026-27", body, url="u", status=200)
+    with pytest.raises(JobFailedError, match="1 responses drifted") as raised:
+        jobs.nightly(DAY)
+
+    assert raised.value.detail["games"] == [FINAL_A, FINAL_B]
+    assert raised.value.detail["loaded"]["game"] == 3
+
+
+def _stats_routes() -> dict[str, bytes]:
+    return {
+        f"{nba_stats.STATS_BASE}/{endpoint}": fixture_body(endpoint)
+        for endpoint in nba_stats.GAME_ENDPOINTS
+    }
+
+
+def _sources(db: sessionmaker[Session], game_id: str) -> list[str]:
+    with db() as session:
+        return list(session.scalars(select(PlayerGame.source).where(PlayerGame.game_id == game_id)))
+
+
+def _stats_fetch_log(db: sessionmaker[Session], day: date) -> tuple[str, Any]:
+    with db() as session:
+        log = session.get_one(LoadLog, (scheduler.STATS_TABLE, day, scheduler.STATS_STEP))
+        return log.status, log.detail
+
+
+def test_a_game_stats_nba_com_fails_for_loads_from_cdn_until_fetch_missing_replaces_it(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    clear_fixture_game(db)
+    # The stats.nba.com fixture game alone, final on its date.
+    schedule = copy.deepcopy(FIXTURE_SCHEDULE)
+    [game_date] = schedule["leagueSchedule"]["gameDates"]
+    game_date["games"] = [g for g in game_date["games"] if g["gameId"] == FIXTURE_GAME]
+    # cdn.nba.com answers; every stats.nba.com request is a 404.
+    get = RoutedGet(
+        {
+            nba_cdn.SCHEDULE_URL: json.dumps(schedule).encode(),
+            **{
+                cdn_game_url(endpoint, FIXTURE_GAME): (
+                    PBP_FIXTURES / endpoint / f"{FIXTURE_GAME}.json"
+                ).read_bytes()
+                for endpoint in (nba_cdn.BOXSCORE, nba_cdn.PLAYBYPLAY)
+            },
+        }
+    )
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    detail = jobs.nightly(FIXTURE_DAY)
+
+    [run] = runs(db)
+    assert (run.job, run.status) == (NIGHTLY, "succeeded")
+    assert detail["stats_failed"] == [FIXTURE_GAME]
+    assert detail["parse_fallback"] == detail["parsed"] == [FIXTURE_GAME]
+    [warning] = detail["warnings"]
+    assert warning.startswith(f"{FIXTURE_GAME}: stats.nba.com failed for boxscoretraditionalv3")
+    assert warning.endswith("; box score from cdn.nba.com")
+    assert _sources(db, FIXTURE_GAME) == ["cdn"] * PLAYER_GAMES
+    status, logged = _stats_fetch_log(db, FIXTURE_DAY)
+    assert status == "failed"
+    assert list(logged[scheduler.STATS_FAILED]) == [FIXTURE_GAME]
+    assert scheduler.stats_failed_games(db) == {FIXTURE_DAY: [FIXTURE_GAME]}
+
+    # stats.nba.com answers again.
+    get.routes.update(_stats_routes())
+    healed = jobs.fetch_missing()
+
+    assert (healed["dates"], healed["games"]) == ([FIXTURE_DAY.isoformat()], [FIXTURE_GAME])
+    assert (healed["still_failed"], healed["fallback"]) == ({}, [])
+    assert _sources(db, FIXTURE_GAME) == ["stats"] * PLAYER_GAMES
+    assert _stats_fetch_log(db, FIXTURE_DAY) == ("succeeded", {scheduler.STATS_FAILED: {}})
+    assert scheduler.stats_failed_games(db) == {}
+    assert [(r.job, r.status) for r in runs(db)] == [
+        (NIGHTLY, "succeeded"),
+        (scheduler.FETCH_MISSING, "succeeded"),
+    ]
+
+
+class StatsDownGet(RoutedGet):
+    """`RoutedGet` with stats.nba.com never answering: every request to it times out."""
+
+    def __call__(self, url: str, params: dict[str, str] | None = None) -> Any:
+        if url.startswith(nba_stats.STATS_BASE):
+            self.calls.append((url, params))
+            raise curl_requests.exceptions.Timeout("Operation timed out")
+        return super().__call__(url, params)
+
+
+def test_nightly_with_stats_nba_com_not_answering_loads_every_game_from_cdn(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    clear_fixture_game(db)
+    schedule = copy.deepcopy(FIXTURE_SCHEDULE)
+    [game_date] = schedule["leagueSchedule"]["gameDates"]
+    game_date["games"] = [g for g in game_date["games"] if g["gameId"] == FIXTURE_GAME]
+    get = StatsDownGet(
+        {
+            nba_cdn.SCHEDULE_URL: json.dumps(schedule).encode(),
+            **{
+                cdn_game_url(endpoint, FIXTURE_GAME): (
+                    PBP_FIXTURES / endpoint / f"{FIXTURE_GAME}.json"
+                ).read_bytes()
+                for endpoint in (nba_cdn.BOXSCORE, nba_cdn.PLAYBYPLAY)
+            },
+        }
+    )
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    detail = jobs.nightly(FIXTURE_DAY)
+
+    [run] = runs(db)
+    assert (run.job, run.status) == (NIGHTLY, "succeeded")
+    assert detail["stats_failed"] == detail["parse_fallback"] == [FIXTURE_GAME]
+    assert [(f["endpoint"], f["key"]) for f in detail["failed"]] == [
+        (scheduler.STATS_UNREACHABLE, FIXTURE_GAME),
+        ("reconcile", FIXTURE_DAY.isoformat()),
+    ]
+    # The first endpoint's tries, and none after: reconciliation is not refreshed either.
+    stats_calls = [url for url, _ in get.calls if url.startswith(nba_stats.STATS_BASE)]
+    assert len(stats_calls) == 1 + nba_http.RETRIES
+    assert _sources(db, FIXTURE_GAME) == ["cdn"] * PLAYER_GAMES
 
 
 def test_nightly_skips_a_game_already_fully_cached(

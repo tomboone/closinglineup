@@ -56,20 +56,6 @@ EXPECTED = [
     "reparse",
     "reconcile",
 ]
-IMPLEMENTED = {
-    "fetch",
-    "derive",
-    "parse",
-    "load",
-    "health",
-    "api",
-    "worker",
-    "nightly",
-    "weekly",
-    "reconcile",
-    "overlays",
-}
-STUBS = [command for command in EXPECTED if command not in IMPLEMENTED]
 
 
 def test_help_lists_every_command() -> None:
@@ -80,14 +66,6 @@ def test_help_lists_every_command() -> None:
     assert list(COMMANDS) == EXPECTED
     for command in EXPECTED:
         assert re.search(rf"^\W*{command}\s", output, re.MULTILINE), command
-
-
-@pytest.mark.parametrize("command", STUBS)
-def test_stub_reports_not_implemented_and_exits_1(command: str) -> None:
-    result = runner.invoke(app, [command])
-
-    assert result.exit_code == 1
-    assert f"{command}: not implemented" in result.output
 
 
 def test_health_exits_1_when_the_database_is_down(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -205,6 +183,8 @@ def test_fetch_shots_fetches_the_player_for_the_season_type(
     [
         ([], "pass exactly one of"),
         (["--rosters", "--aggregates"], "pass exactly one of"),
+        (["--missing", "--rosters"], "pass exactly one of"),
+        (["--missing", "--force"], "--missing takes no --season and no --force"),
         (["--game-id", GAME_ID, "--shots"], "pass exactly one of"),
         (["--shots"], "--shots needs --player-id"),
         (["--rosters", "--from", "2025-10-23"], "--from and --to go with --season alone"),
@@ -592,6 +572,52 @@ def test_nightly_date_fetches_parses_and_loads_the_fixture_game(
     assert run.detail is not None
     assert run.detail["loaded"]["player_game"] == 28
     assert run.detail["memberships"] >= 28
+
+
+def test_fetch_missing_replaces_the_cdn_rows_of_a_game_nightly_could_not_fetch_from_stats(
+    monkeypatch: pytest.MonkeyPatch, load_env: Path, db: sessionmaker[Session]
+) -> None:
+    monkeypatch.delenv("HEALTHCHECKS_URL_NIGHTLY", raising=False)
+    schedule = copy.deepcopy(FIXTURE_SCHEDULE)
+    [game_date] = schedule["leagueSchedule"]["gameDates"]
+    game_date["games"] = [g for g in game_date["games"] if g["gameId"] == GAME]
+    pbp = Path(__file__).parent / "fixtures" / "pbp"
+    # Only cdn.nba.com answers.
+    get = RoutedGet(
+        {
+            nba_cdn.SCHEDULE_URL: json.dumps(schedule).encode(),
+            **{
+                cdn_game_url(endpoint, GAME): (pbp / endpoint / f"{GAME}.json").read_bytes()
+                for endpoint in (nba_cdn.BOXSCORE, nba_cdn.PLAYBYPLAY)
+            },
+        }
+    )
+    _route_nba(monkeypatch, get)
+
+    def sources() -> list[str]:
+        with db() as session:
+            query = select(PlayerGame.source).where(PlayerGame.game_id == GAME)
+            return list(session.scalars(query))
+
+    nightly = runner.invoke(app, ["nightly", "--date", "2025-10-23"])
+
+    assert nightly.exit_code == 0, nightly.output
+    assert f"warning: {GAME}: stats.nba.com failed for boxscoretraditionalv3" in nightly.output
+    assert sources() == ["cdn"] * 28
+
+    get.routes.update(
+        {
+            f"{nba_stats.STATS_BASE}/{endpoint}": fixture_body(endpoint)
+            for endpoint in nba_stats.GAME_ENDPOINTS
+        }
+    )
+    healed = runner.invoke(app, ["fetch", "--missing"])
+
+    assert healed.exit_code == 0, healed.output
+    assert healed.output.splitlines()[-1] == (
+        "fetch --missing: 1 stats_failed games, 1 fetched, 0 still failing"
+    )
+    assert sources() == ["stats"] * 28
 
 
 def test_load_memberships_rebuilds_the_spans_from_the_loaded_games(

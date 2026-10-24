@@ -107,13 +107,19 @@ def _v3_box_shell(root: str) -> dict[str, Any]:
     return {"meta": {}, root: {"gameId": GAME_ID, "homeTeam": team, "awayTeam": team}}
 
 
-def _v2_shell() -> dict[str, Any]:
-    return {"resultSets": [{"name": "PlayerStats", "headers": ["GAME_ID"], "rowSet": []}]}
+def _v2_shell(endpoint: str) -> dict[str, Any]:
+    """A v2 response as stats.nba.com returns it with no rows: the endpoint's recorded result
+    sets, headers and all, each with no rows."""
+    (path,) = (FIXTURES / endpoint).glob("*.json")
+    payload: dict[str, Any] = json.loads(path.read_bytes())
+    for result_set in payload["resultSets"]:
+        result_set["rowSet"] = []
+    return payload
 
 
 EMPTY_SHELLS: dict[str, bytes] = {
     "boxscoretraditionalv3": json.dumps(_v3_box_shell("boxScoreTraditional")).encode(),
-    "boxscoretraditionalv2": json.dumps(_v2_shell()).encode(),
+    "boxscoretraditionalv2": json.dumps(_v2_shell("boxscoretraditionalv2")).encode(),
     "boxscoreadvancedv3": json.dumps(_v3_box_shell("boxScoreAdvanced")).encode(),
     "boxscorehustlev2": json.dumps(_v3_box_shell("boxScoreHustle")).encode(),
     "boxscorematchupsv3": json.dumps(_v3_box_shell("boxScoreMatchups")).encode(),
@@ -425,8 +431,10 @@ def test_season_wide_fetch_sends_the_spec_params_and_caches_under_the_key(
     assert (tmp_path / "raw" / "nba_stats" / endpoint / f"{key}.json").read_bytes() == body
 
 
-# The result-set endpoints; `scoreboardv3` is the one season-wide endpoint in the v3 shape.
-RESULT_SET_CASES = [case for case in SEASON_CASES if case[0] != "scoreboardv3"]
+# The result-set endpoints; `scoreboardv3` and `scheduleleaguev2` are the season-wide endpoints in
+# the v3 shape.
+V3_SEASON_ENDPOINTS = {"scoreboardv3", "scheduleleaguev2"}
+RESULT_SET_CASES = [case for case in SEASON_CASES if case[0] not in V3_SEASON_ENDPOINTS]
 RESULT_SET_IDS = [f"{endpoint}-{key}" for endpoint, key, _, _ in RESULT_SET_CASES]
 
 
@@ -445,11 +453,25 @@ def test_a_season_wide_response_with_no_rows_is_not_cached(
     fetch: SeasonFetch,
 ) -> None:
     # As stats.nba.com answers a season with no games yet, or a team-season that does not exist.
-    _script(session, monkeypatch, json.dumps(_v2_shell()).encode())
+    _script(session, monkeypatch, json.dumps(_v2_shell(endpoint)).encode())
 
     with pytest.raises(NbaHttpError, match=f"{endpoint} has no data for {key}"):
         fetch(session, cache)
     assert not cache.exists("nba_stats", endpoint, key)
+
+
+def test_a_schedule_with_no_games_is_not_cached(
+    session: NbaSession, cache: RawCache, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty: dict[str, Any] = {
+        "meta": {},
+        "leagueSchedule": {"seasonYear": "2026-27", "gameDates": []},
+    }
+    _script(session, monkeypatch, json.dumps(empty).encode())
+
+    with pytest.raises(NbaHttpError, match="scheduleleaguev2 has no data for 2026-27"):
+        nba_stats.fetch_schedule_league_v2(session, cache, "2026-27")
+    assert not cache.exists("nba_stats", "scheduleleaguev2", "2026-27")
 
 
 def test_a_schedule_of_another_season_is_not_cached(
@@ -549,7 +571,7 @@ def test_fetch_aggregates_fetches_each_league_wide_pull_and_every_team_on_off(
 def test_fetch_player_shots_reports_a_player_with_no_shots_as_failed(
     session: NbaSession, cache: RawCache, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _script(session, monkeypatch, json.dumps(_v2_shell()).encode())
+    _script(session, monkeypatch, json.dumps(_v2_shell("shotchartdetail")).encode())
 
     results = nba_stats.fetch_player_shots(session, cache, CURRY, "2026-27", SeasonType.PLAYOFFS)
 

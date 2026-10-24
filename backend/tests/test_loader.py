@@ -34,7 +34,7 @@ from closinglineup.parse.rows import PlayerGameRow, ShotRow, StintRow
 from closinglineup.parse.shots import parse_shots
 from closinglineup.pipeline import ParseReport, parse_date
 from closinglineup.sources import nba_stats
-from tests.test_nba_stats import fixture_body, season_fixture_body
+from tests.test_nba_stats import WITH_DATA, fixture_body, season_fixture_body
 from tests.test_pipeline import (
     DAY,
     DEN,
@@ -274,6 +274,28 @@ def test_a_reparsed_games_stints_replace_the_ones_loaded_before(
     assert (result.rows, result.changed, result.removed) == (len(rows) - 1, 1, 2)
     expected = sorted((r.team_id, r.period, r.start_sec) for r in [moved, *rows[2:]])
     assert _stints(clean_db) == expected
+
+
+def test_a_game_reparsed_from_stats_nba_com_replaces_its_live_box_rows(
+    clean_db: sessionmaker[Session], tmp_path: Path, store: ParquetStore, clock: FakeClock
+) -> None:
+    cache = cache_fixture_game(tmp_path, stats=False, live_box=True)
+    parse_date(cache, store, DAY, TZ)
+    rows = [PlayerGameRow.model_validate(r) for r in store.read("player_game", DAY).to_pylist()]
+    # A player the live box lists and the stats.nba.com box does not.
+    stray = rows[0].model_copy(update={"player_id": 1})
+    store.write_rows("player_game", DAY, [*rows, stray])
+    raise_for_failures(load_dates(clean_db, store, clock, [DAY]))
+    for endpoint in WITH_DATA:
+        cache.put(nba_stats.SOURCE, endpoint, GAME, fixture_body(endpoint), url="u", status=200)
+    parse_date(cache, store, DAY, TZ)
+
+    [result] = [r for r in load_dates(clean_db, store, clock, [DAY]) if r.table == "player_game"]
+
+    assert (result.rows, result.removed) == (PLAYER_GAMES, 1)
+    with clean_db() as session:
+        sources = session.scalars(select(PlayerGame.source).where(PlayerGame.game_id == GAME))
+        assert list(sources) == ["stats"] * PLAYER_GAMES
 
 
 CURRY_SHOTS = "201939_2025-26_regular-season"

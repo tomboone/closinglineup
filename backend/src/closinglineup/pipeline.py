@@ -2,13 +2,21 @@
 commands run it (spec §3.2).
 
 `parse_date` reads the date's games from the season's cached schedule, runs the box score and
-matchup parsers over each game whose traditional box score is cached, then pbpstats over its live
+matchup parsers over each game whose box score is cached, then pbpstats over its live
 play-by-play for its stints, possessions and possession lineups, and rewrites the date's parquet
 file for every table, whole. A game a parser cannot read is reported and left out, so one bad
 payload does not hold back the rest of the date; a final game with no cached box score is
 reported as missing. A game whose box score parses but whose play-by-play does not (it is not
 cached, or pbpstats needs an override for it) keeps its box rows and is reported as failed, with
 no stints, possessions or possession lineups.
+
+A game's box score is stats.nba.com's traditional box where it is cached, and cdn.nba.com's live
+box where only that is, when stats.nba.com failed for the game (spec §4.2); the game is then
+reported under `fallback`, and its rows have `source` `cdn` and no rates, ratings or hustle
+numbers (`parse.box`). Once a re-fetch caches the stats.nba.com box, a re-parse takes it instead.
+The play-by-play needs no fallback: pbpstats reads cdn.nba.com's live feed for every game, since
+stats.nba.com's `playbyplayv2` answers `{}` (NEU-1857), so a stats.nba.com outage costs no
+stints.
 
 `parse_shot_charts` parses cached shot charts into `shot` files, one per shot chart, keyed as the
 shot chart is cached (`load.parquet`).
@@ -27,13 +35,14 @@ cdn.nba.com's, which `nightly` refreshes, or stats.nba.com's, which `fetch --sea
 """
 
 import json
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any
 
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.parse import pbp
-from closinglineup.parse.box import parse_box
+from closinglineup.parse.box import parse_box, parse_cdn_box
 from closinglineup.parse.matchups import parse_matchups
 from closinglineup.parse.roster import parse_players, parse_roster
 from closinglineup.parse.rows import (
@@ -73,12 +82,13 @@ class NotCachedError(LookupError):
 
 @dataclass(frozen=True, slots=True)
 class ParseReport:
-    """What `parse_date` did for one date: the games it parsed, the final games it had no box
-    score for, the games (or `REFERENCE`) a parser failed on, with why, and the rows written per
-    table."""
+    """What `parse_date` did for one date: the games it parsed, those of them parsed from
+    cdn.nba.com's live box, the final games it had no box score for, the games (or `REFERENCE`) a
+    parser failed on, with why, and the rows written per table."""
 
     game_date: date
     parsed: list[str] = field(default_factory=list[str])
+    fallback: list[str] = field(default_factory=list[str])
     missing: list[str] = field(default_factory=list[str])
     failed: dict[str, str] = field(default_factory=dict[str, str])
     rows: dict[str, int] = field(default_factory=dict[str, int])
@@ -109,6 +119,12 @@ def _schedule(cache: RawCache, season: str) -> list[GameRow]:
     return parse_schedule(payload)
 
 
+def games_on(cache: RawCache, day: date) -> list[GameRow]:
+    """The counted games of `day`, from its season's cached schedule; raises `NotCachedError` if
+    the schedule is not cached."""
+    return [game for game in _schedule(cache, season_label(day)) if game.game_date == day]
+
+
 def game_date_of(cache: RawCache, game_id: str) -> date:
     """The date of `game_id`, from its season's cached schedule."""
     for game in _schedule(cache, season_of_game_id(game_id)):
@@ -118,17 +134,23 @@ def game_date_of(cache: RawCache, game_id: str) -> date:
 
 
 def _game_rows(
-    cache: RawCache, game_id: str, traditional: Payload
+    cache: RawCache, game_id: str, traditional: Payload | None, live: Payload | None
 ) -> tuple[list[PlayerGameRow], list[MatchupRow]]:
+    """The game's box rows from its `traditional` box, else its `live` one, and its matchups."""
+
     def stats(endpoint: str) -> Payload | None:
         return _payload(cache, nba_stats.SOURCE, endpoint, game_id)
 
-    box = parse_box(
-        traditional,
-        stats(nba_stats.BOXSCORE_ADVANCED_V3),
-        stats(nba_stats.BOXSCORE_HUSTLE_V2),
-        stats(nba_stats.BOXSCORE_USAGE_V3),
-    )
+    if traditional is not None:
+        box = parse_box(
+            traditional,
+            stats(nba_stats.BOXSCORE_ADVANCED_V3),
+            stats(nba_stats.BOXSCORE_HUSTLE_V2),
+            stats(nba_stats.BOXSCORE_USAGE_V3),
+        )
+    else:
+        assert live is not None
+        box = parse_cdn_box(live)
     matchups_payload = stats(nba_stats.BOXSCORE_MATCHUPS_V3)
     matchups = parse_matchups(matchups_payload) if matchups_payload is not None else []
     if strays := {row.game_id for row in [*box, *matchups]} - {game_id}:
@@ -208,14 +230,21 @@ def _reference_rows(
     return players, memberships
 
 
-def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> ParseReport:
-    """Parse `day`'s games and its season's reference rows into the date's parquet files.
+def parse_date(
+    cache: RawCache,
+    store: ParquetStore,
+    day: date,
+    tz: tzinfo,
+    tables: Collection[str] | None = None,
+) -> ParseReport:
+    """Parse `day`'s games and its season's reference rows into the date's parquet files, or
+    only into those of `tables`.
 
     `tz` dates each roster's fetch. Raises `NotCachedError` if the season's schedule is not
     cached, since without it the date has no games.
     """
     season = season_label(day)
-    games = [game for game in _schedule(cache, season) if game.game_date == day]
+    games = games_on(cache, day)
     report = ParseReport(day)
     box_rows: list[PlayerGameRow] = []
     matchup_rows: list[MatchupRow] = []
@@ -226,18 +255,23 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         traditional = _payload(
             cache, nba_stats.SOURCE, nba_stats.BOXSCORE_TRADITIONAL_V3, game.game_id
         )
+        live: Payload | None = None
         if traditional is None:
-            if game.status == "final":
-                report.missing.append(game.game_id)
-            continue
+            live = _payload(cache, nba_cdn.SOURCE, nba_cdn.BOXSCORE, game.game_id)
+            if live is None:
+                if game.status == "final":
+                    report.missing.append(game.game_id)
+                continue
         try:
-            box, matchups = _game_rows(cache, game.game_id, traditional)
+            box, matchups = _game_rows(cache, game.game_id, traditional, live)
         except PAYLOAD_ERRORS as exc:
             report.failed[game.game_id] = f"{type(exc).__name__}: {exc}"
             continue
         box_rows.extend(box)
         matchup_rows.extend(matchups)
         report.parsed.append(game.game_id)
+        if live is not None:
+            report.fallback.append(game.game_id)
         try:
             pbp_rows = _pbp_rows(cache, game.game_id)
         # `PbpError`, a play-by-play that is not cached (`FileNotFoundError`), or whatever else
@@ -255,7 +289,7 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         players, memberships = _reference_rows(cache, season, tz)
     except PAYLOAD_ERRORS as exc:
         report.failed[REFERENCE] = f"{type(exc).__name__}: {exc}"
-    tables: dict[str, list[Row]] = {
+    rows_by_table: dict[str, list[Row]] = {
         "game": [*games],
         "player": [*players],
         "roster_membership": [*memberships],
@@ -265,9 +299,10 @@ def parse_date(cache: RawCache, store: ParquetStore, day: date, tz: tzinfo) -> P
         "possession": [*possession_rows],
         "possession_lineup": [*possession_lineup_rows],
     }
-    for table, rows in tables.items():
-        store.write_rows(table, day, rows)
-        report.rows[table] = len(rows)
+    for table, rows in rows_by_table.items():
+        if tables is None or table in tables:
+            store.write_rows(table, day, rows)
+            report.rows[table] = len(rows)
     return report
 
 
