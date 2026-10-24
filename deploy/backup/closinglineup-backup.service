@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up the closinglineup database to B2
+Wants=network-online.target
+After=network-online.target docker.service
+RequiresMountsFor=/mnt/music
+
+[Service]
+Type=oneshot
+User=tom
+ExecStart=/home/tom/closinglineup/deploy/backup/closinglineup-backup.sh
+Nice=10
+IOSchedulingClass=idle

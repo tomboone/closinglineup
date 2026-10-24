@@ -65,8 +65,8 @@ services:
       start_period: 60s
       start_interval: 2s
     ports:
-      # Loopback only: nothing on the LAN reaches it. The Tailscale sidecar (M7) will serve it on
-      # the personal tailnet.
+      # Loopback only: nothing on the LAN reaches it. `tailscale` below serves it on the personal
+      # tailnet; this port is for an SSH tunnel and checks on the host.
       - "127.0.0.1:${APP_PORT:-8010}:8000"
     depends_on:
       postgres:
@@ -80,6 +80,41 @@ services:
       # `job_run` rows into a schema that is not there yet.
       app:
         condition: service_healthy
+
+  # closinglineup's own Tailscale node on the personal tailnet (ADR-0001), serving `app` over HTTPS at
+  # https://closinglineup.<tailnet>.ts.net (tailscale/serve.json). The host itself is on no tailnet,
+  # and one tailscaled is on one tailnet at a time, so each stack on kumadrome brings its own sidecar.
+  tailscale:
+    image: tailscale/tailscale:stable
+    # Never the name of a service it proxies: Docker maps a container's own hostname to itself in
+    # /etc/hosts, so a proxy to that name would dial the sidecar (Navidrome's 502). The tailnet name
+    # is TS_HOSTNAME.
+    hostname: closinglineup-tailscale
+    environment:
+      TS_HOSTNAME: closinglineup
+      # One-time auth key from the personal tailnet. Needed only for the first start; blank it once the
+      # state directory holds the node key.
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      # Log in only when the state holds no node key. The default re-runs the login on every start,
+      # which fails once a one-time key has been used.
+      TS_AUTH_ONCE: "true"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      # Userspace networking: serve accepts the tailnet connections itself, so the sidecar needs no tun
+      # device and no NET_ADMIN.
+      TS_USERSPACE: "true"
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      # The directory, not the file: containerboot watches it, so a git pull that replaces serve.json
+      # still reaches the sidecar.
+      - ./tailscale:/config:ro
+      # Node key and identity, on the USB drive so a recreated container rejoins as the same node.
+      - type: bind
+        source: ${TS_STATE_HOST_DIR:?set TS_STATE_HOST_DIR in .env}
+        target: /var/lib/tailscale
+        bind:
+          create_host_path: false
+    restart: unless-stopped
 
   # Polls GHCR every 5 minutes and restarts only enabled containers in the `closinglineup` scope, so
   # it leaves the other stacks' containers (and their own Watchtowers) on the same host alone. The
