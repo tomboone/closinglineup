@@ -1,5 +1,7 @@
 import type { components } from "../api/types";
 import { money, percent, signed } from "./format";
+import PlayerLink from "./PlayerLink";
+import TeamLink from "./TeamLink";
 
 type Schemas = components["schemas"];
 type RaisedFlag = Schemas["RaisedFlag"];
@@ -65,6 +67,30 @@ function FlagList({ flags }: { flags: RaisedFlag[] }) {
       ))}
     </ul>
   );
+}
+
+/**
+ * A date's raised flags under a heading per flag, each with its player, team and what raised it;
+ * the API sends them by flag in spec §7.7's order, which the groups keep.
+ */
+export function FlagGroups({ flags }: { flags: RaisedFlag[] }) {
+  const groups = new Map<Schemas["Flag"], RaisedFlag[]>();
+  for (const raised of flags) groups.set(raised.flag, [...(groups.get(raised.flag) ?? []), raised]);
+  return [...groups].map(([flag, raised]) => (
+    <section key={flag} aria-label={FLAG_LABELS[flag]}>
+      <h3>
+        {FLAG_LABELS[flag]} ({raised.length})
+      </h3>
+      <ul className="flag-list">
+        {raised.map((one) => (
+          <li key={`${one.tricode}-${one.player.player_id}`}>
+            <PlayerLink player={one.player} /> <TeamLink tricode={one.tricode} />{" "}
+            <span className="note">{describe(flag, one.detail)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ));
 }
 
 export default FlagList;

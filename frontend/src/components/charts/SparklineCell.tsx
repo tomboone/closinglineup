@@ -6,13 +6,31 @@ import { AXIS_COLOUR, SERIES_COLOURS } from "./theme";
 
 type Point = components["schemas"]["Point"];
 
-/** An axis-less line for a table cell, a game date per point, with an optional dashed baseline. */
-function SparklineCell({ series, baseline }: { series: Point[]; baseline?: number }) {
-  const option = useMemo(() => sparklineOption(series, baseline), [series, baseline]);
+/** A y range several cells share, so their lines read against one another. */
+export type SparklineRange = { min: number; max: number };
+
+/**
+ * An axis-less line for a table cell, a game date per point, with an optional dashed baseline; its
+ * y range is its own unless `range` is given.
+ */
+function SparklineCell({
+  series,
+  baseline,
+  range,
+}: {
+  series: Point[];
+  baseline?: number;
+  range?: SparklineRange;
+}) {
+  const option = useMemo(() => sparklineOption(series, baseline, range), [series, baseline, range]);
   return <EChart option={option} className="chart-sparkline" />;
 }
 
-function sparklineOption(series: Point[], baseline: number | undefined): ChartOption {
+function sparklineOption(
+  series: Point[],
+  baseline: number | undefined,
+  range: SparklineRange | undefined,
+): ChartOption {
   return {
     animation: false,
     grid: { top: 2, right: 2, bottom: 2, left: 2 },
@@ -27,8 +45,14 @@ function sparklineOption(series: Point[], baseline: number | undefined): ChartOp
       type: "value",
       show: false,
       scale: true,
-      min: ({ min }: { min: number }) => (baseline === undefined ? min : Math.min(min, baseline)),
-      max: ({ max }: { max: number }) => (baseline === undefined ? max : Math.max(max, baseline)),
+      min: ({ min }: { min: number }) => {
+        const low = range?.min ?? min;
+        return baseline === undefined ? low : Math.min(low, baseline);
+      },
+      max: ({ max }: { max: number }) => {
+        const high = range?.max ?? max;
+        return baseline === undefined ? high : Math.max(high, baseline);
+      },
     },
     series: [
       {

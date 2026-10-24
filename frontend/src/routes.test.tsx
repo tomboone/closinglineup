@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { mockApi, PLAYER_PAGE, renderApp, TEAM_PAGE } from "./test/app";
+import { LEAGUE_PAGE, mockApi, PLAYER_PAGE, renderApp, TEAM_PAGE } from "./test/app";
 import { allOptions } from "./test/echarts";
 
 vi.mock("./components/charts/echarts", () => import("./test/echarts"));
@@ -10,7 +10,7 @@ const PAGES = [
     path: "/",
     api: "/api/league",
     heading: "League",
-    body: { date: "2026-03-20" },
+    body: LEAGUE_PAGE,
     content: "Morning feed for 2026-03-20.",
   },
   {

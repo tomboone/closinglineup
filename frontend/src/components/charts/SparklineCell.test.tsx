@@ -36,4 +36,15 @@ describe("SparklineCell", () => {
     expect(yAxis.min({ min: 0.12 })).toBe(0.12);
     expect(yAxis.max({ max: 0.15 })).toBe(0.2);
   });
+
+  it("takes a shared y range in place of its own", () => {
+    render(<SparklineCell series={SERIES} range={{ min: 0.05, max: 0.3 }} />);
+
+    const yAxis = lastOption().yAxis as {
+      min: (r: { min: number }) => number;
+      max: (r: { max: number }) => number;
+    };
+    expect(yAxis.min({ min: 0.12 })).toBe(0.05);
+    expect(yAxis.max({ max: 0.15 })).toBe(0.3);
+  });
 });
