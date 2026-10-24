@@ -13,7 +13,8 @@ RUN corepack enable
 WORKDIR /frontend
 
 # Dependencies first, so source edits don't invalidate this layer.
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+COPY frontend/tools/openapi-types/package.json ./tools/openapi-types/
 RUN --mount=type=cache,target=/pnpm-store \
     pnpm install --frozen-lockfile
 

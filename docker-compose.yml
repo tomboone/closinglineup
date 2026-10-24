@@ -58,6 +58,8 @@ services:
       npm_config_store_dir: /root/.cache/pnpm-store
     volumes:
       - ./frontend:/app
+      # The API's OpenAPI snapshot, where `pnpm gen:types` reads it (`../backend/...` from /app).
+      - ./backend/tests/fixtures/api:/backend/tests/fixtures/api:ro
       # Shadows any host `node_modules` with the container's Linux one.
       - frontend-node-modules:/app/node_modules
       # corepack's pnpm download and the pnpm store, kept across container recreation.
