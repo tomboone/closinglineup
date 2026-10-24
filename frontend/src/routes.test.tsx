@@ -1,6 +1,9 @@
 import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mockApi, renderApp } from "./test/app";
+import { allOptions } from "./test/echarts";
+
+vi.mock("./components/charts/echarts", () => import("./test/echarts"));
 
 const PAGES = [
   {
@@ -56,5 +59,20 @@ describe("routes", () => {
     renderApp(path);
 
     expect(await screen.findByText(content)).toBeInTheDocument();
+  });
+});
+
+describe("/dev/charts", () => {
+  it("renders every chart with sample data in dev, needing no API", async () => {
+    const fetchMock = mockApi();
+    renderApp("/dev/charts");
+
+    expect(await screen.findByRole("heading", { name: "Charts" })).toBeInTheDocument();
+    for (const chart of ["SparklineCell", "AnnotatedTimeSeries", "StintTimeline", "ShotProfile"]) {
+      expect(screen.getByRole("heading", { name: chart })).toBeInTheDocument();
+    }
+    // Three sparklines and one of each other chart.
+    expect(allOptions()).toHaveLength(6);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

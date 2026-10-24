@@ -42,3 +42,13 @@ body {
 .stale-banner p {
   margin: 4px 0;
 }
+
+.chart {
+  width: 100%;
+  height: 320px;
+}
+
+.chart-sparkline {
+  width: 120px;
+  height: 28px;
+}
