@@ -24,6 +24,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert str(settings.tz) == "America/New_York"
     assert settings.nba_rps == 1.0
     assert settings.nba_timeout_seconds == 30
+    assert settings.nightly_lookback_days == 3
     assert settings.healthchecks_url_nightly is None
     assert settings.healthchecks_url_daily is None
     assert settings.healthchecks_url_weekly is None

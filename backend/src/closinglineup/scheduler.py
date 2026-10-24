@@ -1,7 +1,8 @@
 """The worker's jobs, on APScheduler: each runs the functions the CLI does and records a `job_run`
 row as it starts and finishes (spec §3.3, §6.4).
 
-`nightly` refreshes the schedule, fetches, parses and loads, rebuilds the roster memberships from
+`nightly` refreshes the schedule, fetches (catching up the endpoints NBA.com published after an
+earlier run, `NIGHTLY_LOOKBACK_DAYS` back), parses and loads, rebuilds the roster memberships from
 rosters, transactions and games, then derives the date (`derive.run`): garbage time, windows,
 rotation state, events, flags, local BPM, and a sample of two teams' stints reconciled with
 NBA.com's. A game stats.nba.com fails for is marked `stats_failed` in `load_log` and parsed from
@@ -37,7 +38,13 @@ from closinglineup.clock import Clock
 from closinglineup.db.models import Game, JobRun, LoadLog, PlayerGame, RunStatus
 from closinglineup.derive.reconcile import sample_teams, season_type_of
 from closinglineup.derive.roster import rebuild_roster_membership
-from closinglineup.derive.run import RECONCILE, DeriveRules, derive, missing_dates
+from closinglineup.derive.run import (
+    RECONCILE,
+    DeriveRules,
+    derive,
+    missing_dates,
+    reconciled,
+)
 from closinglineup.derive.run import raise_for_failures as raise_for_derive_failures
 from closinglineup.heartbeat import Heartbeat, JobFamily
 from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures, write_load_log
@@ -154,6 +161,13 @@ def fully_cached(cache: RawCache, game_id: str) -> bool:
     return not stats_missing(cache, game_id) and all(
         cache.exists(nba_cdn.SOURCE, endpoint, game_id) for endpoint in CDN_GAME_ENDPOINTS
     )
+
+
+def any_cached(cache: RawCache, game_id: str) -> bool:
+    """Whether any per-game endpoint of `game_id` is in the cache: an earlier run has fetched it."""
+    return any(
+        cache.exists(nba_stats.SOURCE, endpoint, game_id) for endpoint in nba_stats.GAME_ENDPOINTS
+    ) or any(cache.exists(nba_cdn.SOURCE, endpoint, game_id) for endpoint in CDN_GAME_ENDPOINTS)
 
 
 # The `load_log` row of a date's stats.nba.com fetch: failed while any of its games is
@@ -313,6 +327,35 @@ def fetch_final_games(
     return results, unreachable
 
 
+type CaughtUp = list[tuple[date, str, list[EndpointResult]]]
+
+
+def catch_up(
+    session: NbaSession, cache: RawCache, games: list[tuple[date, str]]
+) -> tuple[CaughtUp, str | None]:
+    """`fetch_final_game` for each of `games`, as (game date, game ID), `NEVER_CACHED` skipped:
+    their results, as (game date, game ID, results), and why stats.nba.com stopped answering, if
+    it did. The game it stopped at is reported FAILED under `STATS_UNREACHABLE`, beside the
+    endpoints of it cached before then, and those after it are left for the next run."""
+    caught: CaughtUp = []
+    for day, game_id in games:
+        missing = stats_missing(cache, game_id)
+        try:
+            results = fetch_final_game(session, cache, game_id, skip=NEVER_CACHED)
+        except NbaUnreachableError as exc:
+            # `fetch_game` raises without its results, so the cache says what it got first.
+            results = [
+                EndpointResult(endpoint, game_id, FetchStatus.FETCHED, None)
+                for endpoint in missing
+                if cache.exists(nba_stats.SOURCE, endpoint, game_id)
+            ]
+            results.append(EndpointResult(STATS_UNREACHABLE, game_id, FetchStatus.FAILED, str(exc)))
+            caught.append((day, game_id, results))
+            return caught, str(exc)
+        caught.append((day, game_id, results))
+    return caught, None
+
+
 @dataclass
 class Jobs:
     """Every job, with what they share; the worker schedules them and the CLI runs them once.
@@ -337,9 +380,16 @@ class Jobs:
         """Refresh the schedule, fetch every per-game endpoint of each counted game final on `day`
         that is not yet fully cached, then parse, load and derive the date.
 
-        A game is final if the schedule says so or `poll_finals` saw it go final. An endpoint that
-        answers badly is listed in the run's detail and does not fail the job, since
-        `playbyplayv2` currently always does (see `nba_stats.fetch_playbyplay_v2`); nor does a
+        A game is final if the schedule says so or `poll_finals` saw it go final. Its endpoints are
+        fetched once nothing of it is cached (`fetched`); a game an earlier run left with endpoints
+        missing, of `day` or the `NIGHTLY_LOOKBACK_DAYS` before it, has just those fetched again,
+        `playbyplayv2` aside (`catch_up`), since NBA.com publishes some, the hustle box and
+        matchups among them, hours after the rest. Each game that got one is listed under
+        `caught_up`, with the endpoints it got, and each earlier date of them is parsed and loaded
+        again (`reloaded`), its `fetch_stats` row recorded afresh; not derived again, for the
+        reason `fetch_missing` gives. An endpoint that answers badly is listed in the run's detail
+        and does not fail the job, since `playbyplayv2` currently always does (see
+        `nba_stats.fetch_playbyplay_v2`); nor does a
         game a parser cannot read, which `parse_date` leaves out. Each earlier parsed date whose
         last load of a table failed or never ran is loaded again, and the roster memberships are
         rebuilt from the cached rosters, the transactions and every loaded game
@@ -350,7 +400,9 @@ class Jobs:
         has not all succeeded, oldest first; each step's `load_log` row says how it went, and a
         step that fails fails the job, its date derived again on the next run. The derive ends by
         reconciling two teams' stints, a different two each day (`reconcile.sample_teams`), with
-        NBA.com's lineups and on/off, re-fetched for the purpose. A row outside tolerance is
+        NBA.com's lineups and on/off, re-fetched for the purpose, unless the date has already been
+        reconciled (`derive.run.reconciled`), so a re-run with nothing left to fetch requests the
+        schedule alone. A row outside tolerance is
         logged as a warning and listed in the detail; it does not fail the job, nor does a
         response that failed to fetch, which skips the reconciliation.
 
@@ -386,7 +438,7 @@ class Jobs:
         return self._run(FETCH_MISSING, self._fetch_missing)
 
     def nightly_yesterday(self) -> Detail:
-        """`nightly` for yesterday in `TZ`, as the worker runs it at 03:30."""
+        """`nightly` for yesterday in `TZ`, as the worker runs it (`nightly_trigger`)."""
         today = self._local_now().date()
         return self.nightly(today - timedelta(days=1))
 
@@ -456,18 +508,32 @@ class Jobs:
                 schedule = json.loads(cached)
             noted = {g for g in self.finals.get(day, set()) if is_counted(_Game(g, ""))}
             games = sorted(final_games(schedule, day) | noted)
-            pending = [game_id for game_id in games if not fully_cached(self.cache, game_id)]
+            pending = [game_id for game_id in games if not any_cached(self.cache, game_id)]
+            # The games an earlier run left with endpoints missing, the date's and those of the
+            # lookback's days before it: NBA.com publishes some endpoints hours after the rest.
+            lookback = timedelta(days=self.settings.nightly_lookback_days)
+            rechecked = [
+                *final_games_between(schedule, day - lookback, day - timedelta(days=1)),
+                *((day, game_id) for game_id in games if game_id not in pending),
+            ]
+            behind = [(d, g) for d, g in rechecked if not fully_cached(self.cache, g)]
             results, unreachable = fetch_final_games(session, self.cache, pending)
+            caught: CaughtUp = []
+            if unreachable is None:
+                caught, unreachable = catch_up(session, self.cache, behind)
             # The season type of the date's games; None for a date with none counted in one.
             season_type = season_type_of(games[-1]) if games else None
             teams = sample_teams(day)
+            # A date already reconciled is not again: a re-run would refresh NBA.com's lineups
+            # for nothing, and its result would replace the first's.
+            reconciles = not reconciled(self.db, day)
             refresh: list[EndpointResult] = []
-            if season_type is not None and unreachable is not None:
+            if season_type is not None and reconciles and unreachable is not None:
                 # stats.nba.com has already used up its retries; asking again would only wait.
                 refresh = [
                     EndpointResult("reconcile", day.isoformat(), FetchStatus.FAILED, unreachable)
                 ]
-            elif season_type is not None:
+            elif season_type is not None and reconciles:
                 try:
                     refresh = fetch_reconciliation(
                         session, self.cache, season_label(day), season_type, teams, force=True
@@ -478,19 +544,34 @@ class Jobs:
                         EndpointResult("reconcile", day.isoformat(), FetchStatus.FAILED, str(exc))
                     ]
             results += refresh
+        caught_results = [r for _, _, found in caught for r in found]
         failed: list[Detail] = [
             {"endpoint": r.endpoint, "key": r.key, "error": r.error}
-            for r in results
+            for r in [*results, *caught_results]
             if r.status is FetchStatus.FAILED
         ]
         self.finals.pop(day, None)
-        drifted += [r for r in results if r.status is FetchStatus.DRIFT]
-        record_drift(self.db, day, drifted, started_at, self.clock.now())
-        for result in drifted:
-            log.warning("schema drift: %s", result.error, extra={"date": day.isoformat()})
+        caught_up: list[Detail] = [
+            {"date": d.isoformat(), "game_id": g, "endpoints": fetched}
+            for d, g, found in caught
+            if (fetched := [r.endpoint for r in found if r.status is FetchStatus.FETCHED])
+        ]
+        # The earlier dates with new raw data, parsed and loaded again below.
+        reloaded = sorted({date.fromisoformat(c["date"]) for c in caught_up} - {day})
+        drifted_on: dict[date, list[EndpointResult]] = {
+            day: [*drifted, *(r for r in results if r.status is FetchStatus.DRIFT)]
+        }
+        for d, _, found in caught:
+            drifted_on.setdefault(d, []).extend(r for r in found if r.status is FetchStatus.DRIFT)
+        for d, on_day in drifted_on.items():
+            record_drift(self.db, d, on_day, started_at, self.clock.now())
+            for result in on_day:
+                log.warning("schema drift: %s", result.error, extra={"date": d.isoformat()})
+        drifted = [r for on_day in drifted_on.values() for r in on_day]
         stats_failed = {g: missing for g in games if (missing := stats_missing(self.cache, g))}
         record_stats_fetch(self.db, day, stats_failed, started_at, self.clock.now())
         parsed = parse_date(self.cache, self.store, day, self.settings.tz)
+        reparsed = [parse_date(self.cache, self.store, d, self.settings.tz) for d in reloaded]
         warnings = [
             f"{game_id}: stats.nba.com failed for {', '.join(missing)}"
             + ("; box score from cdn.nba.com" if game_id in parsed.fallback else "")
@@ -499,11 +580,21 @@ class Jobs:
         for warning in warnings:
             log.warning("stats_failed: %s", warning, extra={"date": day.isoformat()})
         loaded = load_dates(self.db, self.store, self.clock, [day])
+        caught_loaded = load_dates(self.db, self.store, self.clock, reloaded)
         # Self-heals any earlier date a past run left without a successful load (spec §3.2).
-        earlier = [d for d in self.store.dates() if d != day]
+        earlier = [d for d in self.store.dates() if d != day and d not in reloaded]
         healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
         spans = rebuild_roster_membership(self.db, self.cache, self.settings.tz)
-        raise_for_failures([*loaded, *healed, spans])
+        raise_for_failures([*loaded, *caught_loaded, *healed, spans])
+        # As in `fetch_missing`, only once the rows are loaded do the games stop being
+        # `stats_failed`.
+        for d in reloaded:
+            missing_on = {
+                g: missing
+                for g in sorted(final_games(schedule, d))
+                if (missing := stats_missing(self.cache, g))
+            }
+            record_stats_fetch(self.db, d, missing_on, started_at, self.clock.now())
         # Any earlier date of the season a past run left underived goes first: a date's events
         # compare with the team's previous game date's rotation state.
         season_start, _ = season_bounds(season_label(day))
@@ -516,6 +607,7 @@ class Jobs:
             days,
             DeriveRules.from_settings(self.settings),
             season_type=season_type,
+            reconcile=reconciles,
             reconcile_skip=f"{stale.endpoint} {stale.key} failed to refresh" if stale else None,
         )
         raise_for_derive_failures(derived)
@@ -523,15 +615,21 @@ class Jobs:
             "date": day.isoformat(),
             "games": games,
             "fetched": pending,
+            "caught_up": caught_up,
             "failed": failed,
             "drift": [r.error for r in drifted],
             "stats_failed": sorted(stats_failed),
             "warnings": warnings,
             "parsed": parsed.parsed,
             "parse_fallback": parsed.fallback,
-            "parse_failed": parsed.failed,
+            "parse_failed": {
+                game_id: error
+                for report in [parsed, *reparsed]
+                for game_id, error in report.failed.items()
+            },
             "parse_missing": parsed.missing,
             "loaded": {result.table: result.rows for result in loaded},
+            "reloaded": [d.isoformat() for d in reloaded],
             "healed": [f"{result.table} {result.key}" for result in healed],
             "memberships": spans.rows,
             "derived": [d.isoformat() for d in days],
@@ -702,8 +800,16 @@ class Jobs:
             log.exception("could not record failed job run", extra={"job": job, "run_id": run_id})
 
 
-def nightly_trigger(tz: tzinfo) -> CronTrigger:
-    return CronTrigger(hour=3, minute=30, timezone=tz)
+def nightly_trigger(tz: tzinfo) -> OrTrigger:
+    """03:30, then hourly from 04:00 through 12:00, for now: the hourly runs measure when the
+    endpoints NBA.com publishes late land, until NEU-1918 settles the schedule
+    (`deploy/README.md`, "Nightly schedule")."""
+    return OrTrigger(
+        [
+            CronTrigger(hour=3, minute=30, timezone=tz),
+            CronTrigger(hour="4-12", minute=0, timezone=tz),
+        ]
+    )
 
 
 def weekly_trigger(tz: tzinfo) -> CronTrigger:
