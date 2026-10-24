@@ -237,7 +237,7 @@ Every table has `created_at` / `updated_at`. IDs are NBA's (`nba_player_id`, `nb
 
 ### 6.4 Derived
 
-- `player_window_stats` — **materialized view**, one row per `(player_id, team_id NULL for production windows, game_date, window ∈ {5, 10, 20, season, prior_season})` with every §7 metric plus `games_in_window` and `is_short`.
+- `player_window_stats` — **materialized view**, one row per `(player_id, team_id NULL for production windows, game_date, window ∈ {5, 10, 20, season, prior_season})` with every §7 metric plus `games_in_window` and `is_short`. Role rows (team set) are windows 5, 10, 20 and season over the player's spell with the team, his roster spans there run together; production rows (team NULL) add prior_season. Every window but prior_season stays within the date's season. Each windowed metric has `<metric>_delta_prior` and `<metric>_delta_season` columns; a production row's season window has the prior season as its prior, a role row's has none. §7.3's 2-man combos and garbage-time-included ratings are not in it yet. Defined in `db/views.sql`, refreshed by `derive.windows.refresh_windows` (NEU-1875).
 - `rotation_state(player_id, team_id, game_date, tier, minutes_share_10, starter_rate_5, played_rate_10, availability, badges text[], is_short, inputs jsonb)` PK `(player_id, team_id, game_date)`
 - `rotation_event(id, player_id, team_id, game_date, prev_game_date NULL, from_tier NULL, to_tier, signals jsonb)` — `from_tier NULL` means arrival on the team.
 - `player_flag(player_id, team_id, game_date, flag, detail jsonb)` PK `(player_id, team_id, game_date, flag)`

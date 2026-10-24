@@ -32,6 +32,7 @@ from closinglineup.derive.reconcile import (
     reconcile,
 )
 from closinglineup.derive.roster import rebuild_roster_membership
+from closinglineup.derive.windows import refresh_windows
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
 from closinglineup.load.parquet import ParquetStore
@@ -369,6 +370,9 @@ def derive(date: DateOption = None, start: FromOption = None, end: ToOption = No
                 f"derive {day}: garbage time: {flagged['games']} games, {flagged['stints']} "
                 f"stints, {flagged['flagged']} flagged, {flagged['changed']} changed"
             )
+        # The view is computed whole, so once for the range, from the flags just written.
+        windows = refresh_windows(db)
+        typer.echo(f"derive: windows: {windows['rows']} rows in {windows['seconds']} s")
     finally:
         engine.dispose()
 
