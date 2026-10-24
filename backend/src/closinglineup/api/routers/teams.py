@@ -158,7 +158,7 @@ def team_page(
     combos = top_groups(stints, 2, recent)
     contracts = _contracts(session, team_id, day, set(roster))
     availability = _availability(session, team_id, day, roster)
-    names = _names(
+    names = player_names(
         session,
         {
             *(row.player_id for row in board),
@@ -189,11 +189,11 @@ def team_page(
     )
 
 
-def _ref(player_id: int, names: dict[int, str]) -> PlayerRef:
+def player_ref(player_id: int, names: dict[int, str]) -> PlayerRef:
     return PlayerRef(player_id=player_id, name=names.get(player_id))
 
 
-def _names(session: Session, player_ids: set[int]) -> dict[int, str]:
+def player_names(session: Session, player_ids: set[int]) -> dict[int, str]:
     if not player_ids:
         return {}
     return dict(
@@ -267,7 +267,7 @@ class _BoardRow:
     def model(self, names: dict[int, str]) -> TierBoardRow:
         state = self.state
         return TierBoardRow(
-            player=_ref(self.player_id, names),
+            player=player_ref(self.player_id, names),
             tier=cast(Tier, state.tier),
             badges=[cast(Badge, badge) for badge in state.badges],
             availability=cast(Availability, state.availability),
@@ -359,7 +359,7 @@ class _Closing:
             game_date=self.game.game_date,
             opponent=by_nba_team_id(self.game.opponent_id).tricode,
             margin=cast(int, self.game.margin),
-            players=[_ref(player_id, names) for player_id in self.players],
+            players=[player_ref(player_id, names) for player_id in self.players],
         )
 
 
@@ -377,11 +377,13 @@ def _closing(session: Session, team_id: int, games: Sequence[_TeamGame]) -> list
             .order_by(Stint.game_id, Stint.period.desc(), Stint.end_sec.desc())
         ).all()
     )
-    found = [_Closing(game, _members(last[game.game_id])) for game in close if game.game_id in last]
+    found = [
+        _Closing(game, lineup_members(last[game.game_id])) for game in close if game.game_id in last
+    ]
     return found[:CLOSING_GAMES]
 
 
-def _members(lineup_key: str) -> tuple[int, ...]:
+def lineup_members(lineup_key: str) -> tuple[int, ...]:
     return tuple(int(member) for member in lineup_key.split("-"))
 
 
@@ -431,7 +433,7 @@ class Group:
 
     def model(self, names: dict[int, str]) -> LineupStats:
         return LineupStats(
-            players=[_ref(player_id, names) for player_id in self.players],
+            players=[player_ref(player_id, names) for player_id in self.players],
             possessions=self.season.possessions,
             opp_possessions=self.season.opp_possessions,
             net_rating=self.season.net_rating,
@@ -449,7 +451,7 @@ def top_groups(
     season: dict[tuple[int, ...], Totals] = defaultdict(Totals)
     latest: dict[tuple[int, ...], Totals] = defaultdict(Totals)
     for stint in stints:
-        for group in combinations(sorted(_members(stint.lineup_key)), size):
+        for group in combinations(sorted(lineup_members(stint.lineup_key)), size):
             season[group].add(stint)
             if stint.game_id in recent:
                 latest[group].add(stint)
@@ -500,7 +502,7 @@ class _Listed:
 
     def model(self, names: dict[int, str]) -> AvailabilityRow:
         return AvailabilityRow(
-            player=_ref(self.player_id, names),
+            player=player_ref(self.player_id, names),
             status=cast(InjuryStatusName | None, self.status),
             reason=self.reason,
             g_league=self.g_league,
@@ -579,7 +581,7 @@ class _Note:
     def model(self, names: dict[int, str]) -> ContractNote:
         contract = self.contract
         return ContractNote(
-            player=_ref(self.player_id, names),
+            player=player_ref(self.player_id, names),
             salary=contract.salary,
             minimum_salary=contract.minimum_salary,
             guaranteed=contract.guaranteed,

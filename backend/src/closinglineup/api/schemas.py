@@ -301,8 +301,17 @@ class PlayerHeader(BaseModel):
     badges: list[Badge]
 
 
+class ImpactSeries(BaseModel):
+    """One impact source's latest snapshot by each game date in the window."""
+
+    source: Literal["epm", "darko", "bpm_local"]
+    points: list[Point]
+
+
 class PlayerSeries(BaseModel):
-    """The window's value at each of the player's game dates this season."""
+    """A point per team game in the window: his minutes and share of his team's player-minutes, his
+    team's net rating with him on the floor and that less its net with him off, and his TS% and
+    USG%; and each impact source he has a snapshot from."""
 
     minutes: list[Point]
     minutes_share: list[Point]
@@ -310,8 +319,7 @@ class PlayerSeries(BaseModel):
     on_off_net: list[Point]
     ts_pct: list[Point]
     usg_pct: list[Point]
-    impact: list[Point]
-    impact_source: Literal["epm", "darko", "bpm_local"] | None
+    impact: list[ImpactSeries]
 
 
 class Annotation(BaseModel):
@@ -339,9 +347,10 @@ class Teammate(BaseModel):
     net_rating: float | None
 
 
-class MatchupSummary(BaseModel):
-    """His offense against defenders, summed over the window's games."""
+class MatchupRow(BaseModel):
+    """The offense of one side of a matchup against the other, summed over the window's games."""
 
+    player: PlayerRef
     partial_poss: float
     pts: int
     fgm: int
@@ -352,15 +361,24 @@ class MatchupSummary(BaseModel):
     ast: int
 
 
+class Matchups(BaseModel):
+    """The defenders who guarded him, with his offense against each, and the players he guarded,
+    with theirs against him; the most partial possessions first."""
+
+    defenders: list[MatchupRow]
+    guarded: list[MatchupRow]
+
+
 class PlayerPage(BaseModel):
     date: dt.date
     window: Window
+    garbage_time: GarbageTime
     header: PlayerHeader
     series: PlayerSeries
     annotations: list[Annotation]
     shot_profile: list[ShotZone]
     teammates: list[Teammate]
-    matchups: MatchupSummary
+    matchups: Matchups
     flags: list[RaisedFlag]
 
 

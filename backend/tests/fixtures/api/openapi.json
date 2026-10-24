@@ -407,6 +407,33 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "ImpactSeries": {
+        "description": "One impact source's latest snapshot by each game date in the window.",
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "epm",
+              "darko",
+              "bpm_local"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "points"
+        ],
+        "title": "ImpactSeries",
+        "type": "object"
+      },
       "InjuryChange": {
         "properties": {
           "from_status": {
@@ -681,8 +708,8 @@
         "title": "LineupStats",
         "type": "object"
       },
-      "MatchupSummary": {
-        "description": "His offense against defenders, summed over the window's games.",
+      "MatchupRow": {
+        "description": "The offense of one side of a matchup against the other, summed over the window's games.",
         "properties": {
           "ast": {
             "title": "Ast",
@@ -708,6 +735,9 @@
             "title": "Partial Poss",
             "type": "number"
           },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
           "pts": {
             "title": "Pts",
             "type": "integer"
@@ -718,6 +748,7 @@
           }
         },
         "required": [
+          "player",
           "partial_poss",
           "pts",
           "fgm",
@@ -727,7 +758,32 @@
           "tov",
           "ast"
         ],
-        "title": "MatchupSummary",
+        "title": "MatchupRow",
+        "type": "object"
+      },
+      "Matchups": {
+        "description": "The defenders who guarded him, with his offense against each, and the players he guarded,\nwith theirs against him; the most partial possessions first.",
+        "properties": {
+          "defenders": {
+            "items": {
+              "$ref": "#/components/schemas/MatchupRow"
+            },
+            "title": "Defenders",
+            "type": "array"
+          },
+          "guarded": {
+            "items": {
+              "$ref": "#/components/schemas/MatchupRow"
+            },
+            "title": "Guarded",
+            "type": "array"
+          }
+        },
+        "required": [
+          "defenders",
+          "guarded"
+        ],
+        "title": "Matchups",
         "type": "object"
       },
       "MetaResponse": {
@@ -893,11 +949,14 @@
             "title": "Flags",
             "type": "array"
           },
+          "garbage_time": {
+            "$ref": "#/components/schemas/GarbageTime"
+          },
           "header": {
             "$ref": "#/components/schemas/PlayerHeader"
           },
           "matchups": {
-            "$ref": "#/components/schemas/MatchupSummary"
+            "$ref": "#/components/schemas/Matchups"
           },
           "series": {
             "$ref": "#/components/schemas/PlayerSeries"
@@ -923,6 +982,7 @@
         "required": [
           "date",
           "window",
+          "garbage_time",
           "header",
           "series",
           "annotations",
@@ -961,30 +1021,14 @@
         "type": "object"
       },
       "PlayerSeries": {
-        "description": "The window's value at each of the player's game dates this season.",
+        "description": "A point per team game in the window: his minutes and share of his team's player-minutes, his\nteam's net rating with him on the floor and that less its net with him off, and his TS% and\nUSG%; and each impact source he has a snapshot from.",
         "properties": {
           "impact": {
             "items": {
-              "$ref": "#/components/schemas/Point"
+              "$ref": "#/components/schemas/ImpactSeries"
             },
             "title": "Impact",
             "type": "array"
-          },
-          "impact_source": {
-            "anyOf": [
-              {
-                "enum": [
-                  "epm",
-                  "darko",
-                  "bpm_local"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Impact Source"
           },
           "minutes": {
             "items": {
@@ -1036,8 +1080,7 @@
           "on_off_net",
           "ts_pct",
           "usg_pct",
-          "impact",
-          "impact_source"
+          "impact"
         ],
         "title": "PlayerSeries",
         "type": "object"
@@ -1995,6 +2038,20 @@
                 "season"
               ],
               "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "garbage_time",
+            "required": false,
+            "schema": {
+              "default": "exclude",
+              "enum": [
+                "include",
+                "exclude"
+              ],
+              "title": "Garbage Time",
               "type": "string"
             }
           },
