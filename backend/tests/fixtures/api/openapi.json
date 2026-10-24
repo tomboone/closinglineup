@@ -261,8 +261,57 @@
         ],
         "type": "string"
       },
+      "GameLineup": {
+        "description": "A five's results in the game: its offensive and defensive possessions, the points scored\nand allowed on them, and its net rating.",
+        "properties": {
+          "net_rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Rating"
+          },
+          "opp_possessions": {
+            "title": "Opp Possessions",
+            "type": "integer"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerRef"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "possessions": {
+            "title": "Possessions",
+            "type": "integer"
+          },
+          "pts_against": {
+            "title": "Pts Against",
+            "type": "integer"
+          },
+          "pts_for": {
+            "title": "Pts For",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "players",
+          "possessions",
+          "opp_possessions",
+          "pts_for",
+          "pts_against",
+          "net_rating"
+        ],
+        "title": "GameLineup",
+        "type": "object"
+      },
       "GamePage": {
-        "description": "`garbage_time_from` is the first garbage-time stint's (period, start_sec), null when the\ngame had none.",
+        "description": "`garbage_time_from` is null when the game had no garbage time.",
         "properties": {
           "away": {
             "$ref": "#/components/schemas/GameTeam"
@@ -276,42 +325,28 @@
             "title": "Game Id",
             "type": "string"
           },
+          "garbage_time": {
+            "$ref": "#/components/schemas/GarbageTime"
+          },
           "garbage_time_from": {
             "anyOf": [
               {
-                "maxItems": 2,
-                "minItems": 2,
-                "prefixItems": [
-                  {
-                    "type": "integer"
-                  },
-                  {
-                    "type": "number"
-                  }
-                ],
-                "type": "array"
+                "$ref": "#/components/schemas/GarbageTimeMarker"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Garbage Time From"
+            ]
           },
           "home": {
             "$ref": "#/components/schemas/GameTeam"
           },
           "status": {
-            "enum": [
-              "scheduled",
-              "final",
-              "postponed"
-            ],
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/GameStatus"
           },
           "stints": {
             "items": {
-              "$ref": "#/components/schemas/StintSummary"
+              "$ref": "#/components/schemas/PlayerStint"
             },
             "title": "Stints",
             "type": "array"
@@ -321,6 +356,7 @@
           "game_id",
           "game_date",
           "status",
+          "garbage_time",
           "home",
           "away",
           "stints",
@@ -329,20 +365,66 @@
         "title": "GamePage",
         "type": "object"
       },
+      "GamePlayer": {
+        "description": "A player who played in the game, from his box-score line, to label his timeline row.",
+        "properties": {
+          "is_starter": {
+            "title": "Is Starter",
+            "type": "boolean"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "seconds": {
+            "title": "Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player",
+          "is_starter",
+          "seconds"
+        ],
+        "title": "GamePlayer",
+        "type": "object"
+      },
+      "GameStatus": {
+        "enum": [
+          "scheduled",
+          "final",
+          "postponed"
+        ],
+        "type": "string"
+      },
       "GameTeam": {
+        "description": "`closing` is the five on the floor at the final buzzer, null unless the game was decided\nby 10 or fewer.",
         "properties": {
           "closing": {
-            "items": {
-              "$ref": "#/components/schemas/PlayerRef"
-            },
-            "title": "Closing",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PlayerRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing"
           },
           "lineups": {
             "items": {
-              "$ref": "#/components/schemas/LineupStats"
+              "$ref": "#/components/schemas/GameLineup"
             },
             "title": "Lineups",
+            "type": "array"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/GamePlayer"
+            },
+            "title": "Players",
             "type": "array"
           },
           "score": {
@@ -356,14 +438,20 @@
             ],
             "title": "Score"
           },
+          "team_id": {
+            "title": "Team Id",
+            "type": "integer"
+          },
           "tricode": {
             "title": "Tricode",
             "type": "string"
           }
         },
         "required": [
+          "team_id",
           "tricode",
           "score",
+          "players",
           "lineups",
           "closing"
         ],
@@ -376,6 +464,25 @@
           "exclude"
         ],
         "type": "string"
+      },
+      "GarbageTimeMarker": {
+        "description": "Where garbage time began: the first garbage-time stint's start.",
+        "properties": {
+          "period": {
+            "title": "Period",
+            "type": "integer"
+          },
+          "start_sec": {
+            "title": "Start Sec",
+            "type": "number"
+          }
+        },
+        "required": [
+          "period",
+          "start_sec"
+        ],
+        "title": "GarbageTimeMarker",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -391,7 +498,19 @@
         "type": "object"
       },
       "HealthResponse": {
+        "description": "`reason` says why the app is unavailable: the database not answering, or the latest\nderived date too far behind the latest final game.",
         "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
           "status": {
             "enum": [
               "ok",
@@ -1102,6 +1221,52 @@
         "title": "PlayerSeries",
         "type": "object"
       },
+      "PlayerStint": {
+        "description": "A player's part in one of his team's stints, so the timeline draws a row per player;\n`start_sec` and `end_sec` are seconds into the period.",
+        "properties": {
+          "end_sec": {
+            "title": "End Sec",
+            "type": "number"
+          },
+          "is_garbage_time": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Garbage Time"
+          },
+          "period": {
+            "title": "Period",
+            "type": "integer"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "start_sec": {
+            "title": "Start Sec",
+            "type": "number"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player_id",
+          "team_id",
+          "period",
+          "start_sec",
+          "end_sec",
+          "is_garbage_time"
+        ],
+        "title": "PlayerStint",
+        "type": "object"
+      },
       "Point": {
         "description": "One game date's value in a series.",
         "properties": {
@@ -1388,70 +1553,6 @@
           "latest"
         ],
         "title": "SourceFreshness",
-        "type": "object"
-      },
-      "StintSummary": {
-        "description": "One team's stint; `start_sec` and `end_sec` are seconds into the period.",
-        "properties": {
-          "end_sec": {
-            "title": "End Sec",
-            "type": "number"
-          },
-          "is_garbage_time": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Garbage Time"
-          },
-          "period": {
-            "title": "Period",
-            "type": "integer"
-          },
-          "players": {
-            "items": {
-              "$ref": "#/components/schemas/PlayerRef"
-            },
-            "title": "Players",
-            "type": "array"
-          },
-          "possessions": {
-            "title": "Possessions",
-            "type": "integer"
-          },
-          "pts_against": {
-            "title": "Pts Against",
-            "type": "integer"
-          },
-          "pts_for": {
-            "title": "Pts For",
-            "type": "integer"
-          },
-          "start_sec": {
-            "title": "Start Sec",
-            "type": "number"
-          },
-          "tricode": {
-            "title": "Tricode",
-            "type": "string"
-          }
-        },
-        "required": [
-          "tricode",
-          "period",
-          "start_sec",
-          "end_sec",
-          "players",
-          "possessions",
-          "pts_for",
-          "pts_against",
-          "is_garbage_time"
-        ],
-        "title": "StintSummary",
         "type": "object"
       },
       "TeamPage": {
@@ -1918,6 +2019,20 @@
             "required": true,
             "schema": {
               "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "garbage_time",
+            "required": false,
+            "schema": {
+              "default": "exclude",
+              "enum": [
+                "include",
+                "exclude"
+              ],
+              "title": "Garbage Time",
               "type": "string"
             }
           }

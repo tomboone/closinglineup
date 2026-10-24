@@ -97,7 +97,7 @@ docker compose ps
 ```
 
 `app` runs the database migrations (`alembic upgrade head`) before it starts serving, and its healthcheck
-requests the API, so it turns healthy only after they have run. `worker` waits for `app` to be healthy, so
+requests the API (`/api/meta`), so it turns healthy only after they have run. `worker` waits for `app` to be healthy, so
 it never writes to a schema that is not there yet. Within about a minute
 `docker compose ps` shows all four services `healthy`.
 
@@ -291,8 +291,11 @@ docker compose logs -f app           # migrations and API requests
 docker compose logs -f watchtower    # image updates
 ```
 
-**Health:** `docker compose exec app closinglineup health; echo $?` exits 0 when the database answers.
-It is also the image's `HEALTHCHECK`, for both `app` and `worker`.
+**Health:** `docker compose exec app closinglineup health; echo $?` exits 0 when the database answers
+and the latest derived date is within 36 h of the latest final game, and prints the reason otherwise;
+`/api/health` applies the same rule, answering 503 with the reason. It is the image's `HEALTHCHECK`,
+so `worker` turns unhealthy when derive falls behind. `app` overrides it with the readiness check
+above, since `worker` waits on `app` and would otherwise never start to catch up a stale database.
 
 **Database:** `docker compose exec postgres psql -U closinglineup`. `job_run` holds one row per job run,
 with its status and detail.

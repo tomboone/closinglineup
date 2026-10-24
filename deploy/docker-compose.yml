@@ -50,14 +50,16 @@ services:
     # Migrates before serving, so a Watchtower update that brings a migration applies it; only
     # `app` migrates, so two containers never race on the same upgrade.
     command: ["sh", "-c", "alembic upgrade head && exec closinglineup api"]
-    # The image's DB round-trip, plus a request to the API: it serves only once the migrations
-    # above have run, so healthy here means the schema is at head.
+    # Readiness, not the image's freshness rule: a request to the API, which serves only once the
+    # migrations above have run, so healthy here means the schema is at head. The worker waits on
+    # it, and the worker is what derives, so a check that failed on stale data would keep a stack
+    # brought up stale from ever catching up. The worker keeps the image's `closinglineup health`.
     healthcheck:
       test:
         - CMD-SHELL
         - >-
-          closinglineup health && python -c "import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/api/meta', timeout=5)"
       interval: 30s
       timeout: 10s
       start_period: 60s

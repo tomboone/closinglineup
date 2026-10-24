@@ -15,12 +15,11 @@ from typing import Annotated, Any
 import httpx
 import typer
 import uvicorn
-from sqlalchemy.exc import OperationalError
 
 from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
-from closinglineup.db.session import make_engine, make_session_factory, ping
+from closinglineup.db.session import make_engine, make_session_factory
 from closinglineup.derive.reconcile import (
     LINEUP_TOLERANCE_POSSESSIONS,
     MIN_POSSESSIONS,
@@ -33,6 +32,7 @@ from closinglineup.derive.reconcile import (
 from closinglineup.derive.roster import rebuild_roster_membership
 from closinglineup.derive.run import DeriveRules, missing_dates
 from closinglineup.derive.run import derive as run_derive
+from closinglineup.health import STALE_HOURS, unhealthy_reason
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
 from closinglineup.load.parquet import ParquetStore
@@ -79,7 +79,8 @@ COMMANDS = {
     "nightly": "Run the nightly job once: refresh the schedule, fetch, parse, load and derive a "
     "date.",
     "weekly": "Run the weekly job once: re-fetch, parse and load the season's shot charts.",
-    "health": "Check that the database answers.",
+    "health": "Check that the database answers and the latest derived date is within "
+    f"{STALE_HOURS} h of the latest final game.",
     "reparse": "Re-parse cached raw responses after a parser change.",
     "reconcile": "Compare lineup and on-court ratings from stints with NBA.com's.",
 }
@@ -89,12 +90,12 @@ COMMANDS = {
 def health() -> None:
     engine = make_engine(Settings())
     try:
-        ping(engine)
-    except OperationalError as exc:
-        typer.echo(f"health: database unreachable: {exc.orig}", err=True)
-        raise typer.Exit(1) from None
+        reason = unhealthy_reason(engine)
     finally:
         engine.dispose()
+    if reason is not None:
+        typer.echo(f"health: {reason}", err=True)
+        raise typer.Exit(1)
     typer.echo("health: ok")
 
 
