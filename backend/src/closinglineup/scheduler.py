@@ -1,10 +1,10 @@
 """The worker's jobs, on APScheduler: each runs the functions the CLI does and records a `job_run`
 row as it starts and finishes (spec §3.3, §6.4).
 
-So far `nightly` refreshes the schedule, fetches, parses and loads, rebuilds the roster
-memberships from rosters, transactions and games, writes the date's local BPM snapshot
-(`derive.bpm`), then reconciles a sample of two teams' stints with NBA.com's; the rest of derive
-joins it when it lands.
+`nightly` refreshes the schedule, fetches, parses and loads, rebuilds the roster memberships from
+rosters, transactions and games, then derives the date (`derive.run`): garbage time, windows,
+rotation state, events, flags, local BPM, and a sample of two teams' stints reconciled with
+NBA.com's.
 `weekly` re-fetches, parses and loads the season's shot charts, then runs the weekly overlays;
 `injuries` and `daily_overlays` run theirs (`closinglineup.overlays`).
 """
@@ -31,21 +31,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.clock import Clock
 from closinglineup.db.models import Game, JobRun, PlayerGame, RunStatus
-from closinglineup.derive.bpm import write_bpm
-from closinglineup.derive.reconcile import (
-    ReconcileError,
-    describe,
-    reconcile,
-    sample_teams,
-    season_type_of,
-)
+from closinglineup.derive.reconcile import sample_teams, season_type_of
 from closinglineup.derive.roster import rebuild_roster_membership
+from closinglineup.derive.run import RECONCILE, DeriveRules, derive, missing_dates
+from closinglineup.derive.run import raise_for_failures as raise_for_derive_failures
 from closinglineup.heartbeat import Heartbeat, JobFamily
 from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.overlays import OverlayFamily, by_name, overlays_in
 from closinglineup.pipeline import SHOT_TABLE, parse_date, parse_shot_charts
-from closinglineup.season import Phase, is_counted, season_label
+from closinglineup.season import Phase, is_counted, season_bounds, season_label
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
@@ -59,7 +54,6 @@ from closinglineup.sources.nba_stats import (
     fetch_player_shots,
     fetch_reconciliation,
 )
-from closinglineup.teams import by_nba_team_id
 
 NIGHTLY = "nightly"
 POLL_FINALS = "poll_finals"
@@ -217,7 +211,7 @@ class Jobs:
 
     def nightly(self, day: date) -> Detail:
         """Refresh the schedule, fetch every per-game endpoint of each counted game final on `day`
-        that is not yet fully cached, then parse and load the date.
+        that is not yet fully cached, then parse, load and derive the date.
 
         A game is final if the schedule says so or `poll_finals` saw it go final. An endpoint that
         answers badly is listed in the run's detail and does not fail the job, since
@@ -226,14 +220,15 @@ class Jobs:
         last load of a table failed or never ran is loaded again, and the roster memberships are
         rebuilt from the cached rosters, the transactions and every loaded game
         (`derive.roster`). A table that fails to load fails the job, and its failed `load_log` row
-        is there for the next run; so does a rebuild that fails. Then the date's `bpm_local`
-        snapshot is written: every player's BPM over the season's regular-season games final
-        through the date (`derive.bpm`), the same rows on a re-run.
+        is there for the next run; so does a rebuild that fails.
 
-        Last, two teams' stints, a different two each day (`reconcile.sample_teams`), are
-        reconciled with NBA.com's lineups and on/off, re-fetched for the purpose. A row outside
-        tolerance is logged as a warning and listed in the detail; it does not fail the job, nor
-        does a response that failed to fetch and is not cached.
+        Then the date is derived (`derive.run`), after any earlier date of its season whose derive
+        has not all succeeded, oldest first; each step's `load_log` row says how it went, and a
+        step that fails fails the job, its date derived again on the next run. The derive ends by
+        reconciling two teams' stints, a different two each day (`reconcile.sample_teams`), with
+        NBA.com's lineups and on/off, re-fetched for the purpose. A row outside tolerance is
+        logged as a warning and listed in the detail; it does not fail the job, nor does a
+        response that failed to fetch, which skips the reconciliation.
         """
         return self._run(NIGHTLY, lambda: self._nightly(day), family="nightly")
 
@@ -323,12 +318,21 @@ class Jobs:
         healed = load_dates(self.db, self.store, self.clock, earlier, missing=True)
         spans = rebuild_roster_membership(self.db, self.cache, self.settings.tz)
         raise_for_failures([*loaded, *healed, spans])
-        bpm = write_bpm(self.db, day)
-        reconciled = (
-            self._reconcile(season_label(day), season_type, teams, refresh)
-            if season_type is not None
-            else None
+        # Any earlier date of the season a past run left underived goes first: a date's events
+        # compare with the team's previous game date's rotation state.
+        season_start, _ = season_bounds(season_label(day))
+        days = [*missing_dates(self.db, season_start, day - timedelta(days=1)), day]
+        stale = next((r for r in refresh if r.status is FetchStatus.FAILED), None)
+        derived = derive(
+            self.db,
+            self.cache,
+            self.clock,
+            days,
+            DeriveRules.from_settings(self.settings),
+            season_type=season_type,
+            reconcile_skip=f"{stale.endpoint} {stale.key} failed to refresh" if stale else None,
         )
+        raise_for_derive_failures(derived)
         return {
             "date": day.isoformat(),
             "games": games,
@@ -340,38 +344,9 @@ class Jobs:
             "loaded": {result.table: result.rows for result in loaded},
             "healed": [f"{result.table} {result.key}" for result in healed],
             "memberships": spans.rows,
-            "bpm": bpm,
-            "reconcile": reconciled,
-        }
-
-    def _reconcile(
-        self,
-        season: str,
-        season_type: SeasonType,
-        teams: tuple[int, ...],
-        refresh: list[EndpointResult],
-    ) -> Detail:
-        """Reconcile `teams`, or skip it, with a warning, if `refresh` failed: a copy cached
-        earlier covers fewer games than the stints do, so every row would read as outside."""
-        detail: Detail = {
-            "season_type": season_type.slug,
-            "teams": [by_nba_team_id(team_id).tricode for team_id in teams],
-        }
-        try:
-            if failed := next((r for r in refresh if r.status is FetchStatus.FAILED), None):
-                raise ReconcileError(f"{failed.endpoint} {failed.key} failed to refresh")
-            report = reconcile(self.db, self.cache, season, season_type, teams)
-        except ReconcileError as exc:
-            log.warning("reconciliation skipped", extra={"reason": str(exc)})
-            return {**detail, "skipped": str(exc)}
-        outside = [describe(check) for check in report.outside]
-        for line in outside:
-            log.warning("reconciliation outside tolerance", extra={"check": line})
-        return {
-            **detail,
-            "lineups": len(report.lineups),
-            "on_court": len(report.on_court),
-            "outside": outside,
+            "derived": [d.isoformat() for d in days],
+            "derive": {r.step.name: r.detail for r in derived if r.day == day},
+            "reconcile": next((r.detail for r in derived if r.step == RECONCILE), None),
         }
 
     def _local_now(self) -> datetime:

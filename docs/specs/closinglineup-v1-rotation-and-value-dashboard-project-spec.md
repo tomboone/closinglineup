@@ -84,6 +84,7 @@ backend/
       flags.py             # §7.7
       bpm.py               # local BPM
       reconcile.py         # vs leaguedashlineups / leagueplayerondetails
+      run.py               # `derive`: every step over a run of dates, each in load_log
     db/
       models.py  session.py  views.sql
       alembic/             # migrations
@@ -121,7 +122,7 @@ derive : refresh views → rotation_state → rotation_event → flags → bpm �
 api    : FastAPI reads Postgres only
 ```
 
-A `load_log` row per (table, game_date, step) records what ran; `fetch --missing` and `load --missing` use it to self-heal skipped dates on the next run.
+A `load_log` row per (table, game_date, step) records what ran; `fetch --missing` and `load --missing` use it to self-heal skipped dates on the next run. `derive` (`derive/run.py`) records each of its steps there too, as (`stint`, `garbage_time`), (`player_window_stats`, `windows`), (`rotation_state`, `tiers`), (`rotation_event`, `events`), (`player_flag`, `flags`), (`impact_snapshot`, `bpm`) and (`stint`, `reconcile`); it refreshes the view once per run, after every date's garbage time, and reconciles once, for the run's last date. A failed step stops the run, since a date's events read the previous game date's rotation state; `derive --missing`, and `nightly` for its season's earlier dates, derive again, oldest first, every date whose loads all succeeded and whose writing steps have not (NEU-1879).
 
 ### 3.3 Nightly and periodic jobs (America/New_York)
 
@@ -331,7 +332,7 @@ Routes: `/` (league morning page), `/teams/:tricode`, `/players/:id`, `/games/:g
 
 - Every endpoint has a trimmed recorded fixture under `backend/tests/fixtures/<source>/<endpoint>/`, recorded by `scripts/record_fixtures.py` from kumadrome. Parsers are tested only from fixtures.
 - `parse/pbp.py` is tested on full fixture games (one with overtime, one with a known PBP ordering quirk, a 2026-27 feed, and a reconciliation game) against the stint and possession counts pbpstats emits.
-- Tier rules, events, flags and garbage time are tested on hand-labelled 2025-26 cases in `tests/derive/cases/*.yml` (player, team, date, expected tier, expected flags). At least 30 cases across all five tiers and every flag.
+- Tier rules, events, flags and garbage time are tested on hand-labelled 2025-26 cases in `tests/derive/cases/*.yml` (player, team, date, expected tier, expected flags, optional expected badges, and a note naming the evidence). At least 30 cases across all five tiers and every flag. `tests/test_derive_cases.py` loads `tests/fixtures/derive/`, five teams' real games through 2026-03-20 with their injury reports and player movement (its README says how it was built), into a database of its own and runs `derive` over it (NEU-1879).
 - Reconciliation: 5-man lineups with ≥ 100 possessions match `leaguedashlineups` net rating within 3 possessions' worth (3 × 110 / `POSS`; unfiltered); on-court ratings match `leagueplayerondetails` within ±0.5. Possessions are credited as NBA.com credits them, to every lineup and player on the court during each one, which a stint does not (NEU-1899); at a substitution logged at the instant a possession starts or ends, by the events there rather than the clock, and free-throw points at the foul (NEU-1900, `parse/pbp.py`). The rule matches every five's `POSS` in 24 of 32 games of NBA.com's per-game `leaguedashlineups`, the three fixture games among them, but not all, so lineups keep a tolerance of a few possessions rather than a flat ±0.1.
 - API routes have schema tests against a seeded test database. Frontend components have vitest render tests; pages have one smoke test each against mocked API responses.
 - CI gate: `uv run ruff check && ruff format --check && pyright && pytest` for `backend/`; `pnpm lint && pnpm tsc -b && pnpm test` for `frontend/`; both run locally before any push.
