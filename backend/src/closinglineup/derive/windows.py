@@ -14,7 +14,8 @@ them took longer than the rest of the query (7.8 s of 19 s below).
 Timing (NEU-1875), on synthetic seasons at full scale (1,230 games, 15 players a team, 40 stints
 and 85 shots a team-game, daily snapshots from all three impact sources) in a 2024 MacBook Pro's
 Docker Postgres 17: 10 s for one season, as a full 2025-26 backfill is, and 20 s for two; 28 s
-for two with JIT on. kumadrome's is to be measured on its first full backfill.
+for two with JIT on. On kumadrome, over the full 2025-26 backfill and 2026-27's first games
+(341,441 rows), 39.0 s on 2026-10-23, the refresh after `derive` first flagged garbage time.
 """
 
 from time import perf_counter
