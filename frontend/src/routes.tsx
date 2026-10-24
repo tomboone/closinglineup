@@ -16,4 +16,15 @@ export const routes: RouteObject[] = [
       { path: "/games/:gameId", element: <GamePage /> },
     ],
   },
+  // A page of every chart with sample data, outside the shell so it needs no API. `DEV` is false in
+  // a build, which drops this branch and with it the lazy import, so the bundle has no such route.
+  ...(import.meta.env.DEV
+    ? [
+        {
+          path: "/dev/charts",
+          lazy: async () => ({ Component: (await import("./dev/ChartsPage")).default }),
+          hydrateFallbackElement: <p role="status">Loading…</p>,
+        },
+      ]
+    : []),
 ];
