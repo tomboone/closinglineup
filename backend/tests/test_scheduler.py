@@ -15,8 +15,9 @@ from closinglineup import scheduler
 from closinglineup.clock import FakeClock
 from closinglineup.db.models import Game, JobRun, LoadLog, PlayerGame, RunStatus, Shot
 from closinglineup.derive.reconcile import sample_teams
+from closinglineup.derive.run import RECONCILE, WRITES
 from closinglineup.heartbeat import Heartbeat
-from closinglineup.load.loader import LoadError, LoadResult
+from closinglineup.load.loader import LOAD_STEP, LoadError, LoadResult
 from closinglineup.load.parquet import ROW_MODELS, ParquetStore
 from closinglineup.overlays import Overlay, UnknownOverlayError, register_overlay
 from closinglineup.scheduler import (
@@ -233,9 +234,17 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
         "possession": 0,
         "possession_lineup": 0,
     }
-    # The date's local BPM snapshot, over whatever regular-season games the season holds.
-    assert set(detail["bpm"]) == {"season", "games", "players", "changed", "removed"}
-    assert detail["bpm"]["season"] == "2026-27"
+    # The date is derived, last of any the season left underived, and every step of it succeeded.
+    assert detail["derived"][-1] == DAY.isoformat()
+    assert list(detail["derive"]) == [step.name for step in [*WRITES, RECONCILE]]
+    assert detail["derive"]["bpm"]["season"] == "2026-27"
+    with db() as session:
+        logged = session.execute(
+            select(LoadLog.step, LoadLog.status).where(
+                LoadLog.game_date == DAY, LoadLog.step != LOAD_STEP
+            )
+        ).all()
+    assert sorted(logged) == sorted((step.name, "succeeded") for step in [*WRITES, RECONCILE])
     assert ok.call_count == 1
 
 

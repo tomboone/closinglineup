@@ -1,0 +1,334 @@
+# Trades, two-way players in the rotation and one converted to an NBA contract, G League
+# assignments, injuries and returns from them.
+# Labelled by hand from NBA.com box scores and the official injury report; see
+# tests/test_derive_cases.py.
+- id: two-way-in-rotation-jenkins-det
+  player: Daniss Jenkins
+  player_id: 1642450
+  team: DET
+  game_date: 2026-01-05
+  expected_tier: core
+  expected_flags: [yo_yo]
+  expected_badges: [two_way]
+  note: >-
+    DET played 0022500502 on 2026-01-05. NBA.com box scores: started 0 of his last 5 games played
+    for DET (0022500430, 0022500445, 0022500460, 0022500494, 0022500502); minutes share 4.2% over
+    DET's last 10 games (0022500376 to 0022500502), in 8 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. NBA.com player movement: 2025-08-02 two_way_sign: Detroit
+    Pistons re-signed guard Daniss Jenkins to a Two-Way Contract. yo_yo: 3 tier changes in DET's
+    last 20 games: 2025-11-24 starter→core, 2025-12-28 core→fringe, 2026-01-05 fringe→core. On a
+    two-way contract (span from 2024-07-06), active in 36 games this season: under 45, so no
+    contract_pressure.
+
+- id: g-league-broome-phi
+  player: Johni Broome
+  player_id: 1641780
+  team: PHI
+  game_date: 2026-02-19
+  expected_tier: out
+  expected_flags: [earning_trust]
+  expected_badges: [g_league]
+  note: >-
+    PHI played 0022500794 on 2026-02-19. The official injury report
+    Injury-Report_2026-02-19_05_30PM.pdf lists him Out (G League - On Assignment). NBA.com box
+    scores: started 0 of his last 5 games played for PHI (0022500410, 0022500666, 0022500724,
+    0022500770, 0022500780); minutes share 0.6% over PHI's last 10 games (0022500666 to
+    0022500794), in 4 of which he played. A share under 3.6%, and he played in under half: Out. On
+    G League assignment: Injury-Report_2026-02-19_05_30PM.pdf, PHI's latest report by then, lists
+    him 'G League - On Assignment' (g_league badge). earning_trust: 5-game shares 10 and 5 team
+    games back and now 0.0% < 0.3% < 1.0%, 55 games into his spell.
+
+- id: g-league-klintman-det
+  player: Bobi Klintman
+  player_id: 1641752
+  team: DET
+  game_date: 2026-02-25
+  expected_tier: out
+  expected_flags: [yo_yo]
+  expected_badges: [g_league]
+  note: >-
+    DET played 0022500842 on 2026-02-25. The official injury report
+    Injury-Report_2026-02-25_05_30PM.pdf lists him Out (G League - On Assignment). NBA.com box
+    scores: started 0 of his last 5 games played for DET (0022500214, 0022500041, 0022500650,
+    0022500685, 0022500781); minutes share 0.2% over DET's last 10 games (0022500704 to
+    0022500842), in 1 of which he played. A share under 3.6%, and he played in under half: Out. On
+    G League assignment: Injury-Report_2026-02-25_05_30PM.pdf, DET's latest report by then, lists
+    him 'G League - On Assignment' (g_league badge). yo_yo: 4 tier changes in DET's last 20 games:
+    2026-02-06 out→injured, 2026-02-09 injured→out, 2026-02-23 out→injured, 2026-02-25 injured→out.
+
+- id: g-league-topic-okc-fringe
+  player: Nikola Topić
+  player_id: 1642260
+  team: OKC
+  game_date: 2026-03-04
+  expected_tier: fringe
+  expected_flags: []
+  expected_badges: [g_league]
+  note: >-
+    OKC played 0022500893 on 2026-03-04. The official injury report
+    Injury-Report_2026-03-04_05_30PM.pdf lists him Out (G League - On Assignment). NBA.com box
+    scores: started 0 of his last 5 games played for OKC (0022500789, 0022500808, 0022500817,
+    0022500834, 0022500842); minutes share 2.2% over OKC's last 10 games (0022500785 to
+    0022500893), in 5 of which he played. A share under 3.6%, but he played in at least half:
+    Fringe. On G League assignment: Injury-Report_2026-03-04_05_30PM.pdf, OKC's latest report by
+    then, lists him 'G League - On Assignment' (g_league badge).
+
+- id: g-league-newell-atl
+  player: Asa Newell
+  player_id: 1642854
+  team: ATL
+  game_date: 2026-03-20
+  expected_tier: out
+  expected_flags: [minutes_cliff, usage_up_efficiency_down, yo_yo]
+  expected_badges: [g_league]
+  note: >-
+    ATL played 0022501018 on 2026-03-20. The official injury report
+    Injury-Report_2026-03-20_05_30PM.pdf lists him Out (G League - On Assignment). NBA.com box
+    scores: started 1 of his last 5 games played for ATL (0022500735, 0022500751, 0022500765,
+    0022500775, 0022500850); minutes share 0.1% over ATL's last 10 games (0022500850 to
+    0022501018), in 1 of which he played. A share under 3.6%, and he played in under half: Out. On
+    G League assignment: Injury-Report_2026-03-20_05_30PM.pdf, ATL's latest report by then, lists
+    him 'G League - On Assignment' (g_league badge). minutes_cliff: 5-game share 0.0% is under 60%
+    of the 20-game 1.5%. yo_yo: 5 tier changes in ATL's last 20 games: 2026-01-31 fringe→out,
+    2026-02-05 out→fringe, 2026-02-09 fringe→core, 2026-02-24 core→fringe, 2026-03-04 fringe→out.
+    usage_up_efficiency_down: usage 0.269 over his last 10 team games vs 0.171 for the season
+    (+0.098), TS% 0.500 vs 0.628 (-0.128).
+
+- id: injured-lebron-lal
+  player: LeBron James
+  player_id: 2544
+  team: LAL
+  game_date: 2025-12-05
+  expected_tier: injured
+  expected_flags: [earning_trust, yo_yo]
+  expected_badges: []
+  note: >-
+    LAL played 0022500338 on 2025-12-05. The official injury report
+    Injury-Report_2025-12-05_05_30PM.pdf lists him Out (Injury/Illness - Right Sciatica; & Left
+    Foot Joint Arthritis) for it: Injured. earning_trust: 5-game shares 10 and 5 team games back
+    and now 0.0% < 8.0% < 8.4%, 22 games into his spell. yo_yo: 4 tier changes in LAL's last 20
+    games: 2025-11-18 injured→starter, 2025-11-30 starter→injured, 2025-12-01 injured→starter,
+    2025-12-05 starter→injured.
+
+- id: return-lebron-lal
+  player: LeBron James
+  player_id: 2544
+  team: LAL
+  game_date: 2025-12-07
+  expected_tier: starter
+  expected_flags: [yo_yo]
+  expected_badges: []
+  note: >-
+    LAL played 0022500362 on 2025-12-07. The official injury report
+    Injury-Report_2025-12-07_05_30PM.pdf lists him Probable (Injury/Illness - Right Sciatica; &
+    Left Foot Joint Arthritis). NBA.com box scores: started 5 of his last 5 games played for LAL
+    (0022500059, 0022500078, 0022500317, 0022500336, 0022500362); minutes share 9.7% over LAL's
+    last 10 games (0022500231 to 0022500362), in 7 of which he played. At least 4 starts in his
+    last 5 games played: Starter. Return from injury: for LAL's previous game, 2025-12-05, the
+    report Injury-Report_2025-12-05_05_30PM.pdf listed him Out (Injury/Illness - Right Sciatica; &
+    Left Foot Joint Arthritis). yo_yo: 5 tier changes in LAL's last 20 games: 2025-11-18
+    injured→starter, 2025-11-30 starter→injured, 2025-12-01 injured→starter, 2025-12-05
+    starter→injured, 2025-12-07 injured→starter.
+
+- id: return-maxey-phi
+  player: Tyrese Maxey
+  player_id: 1630178
+  team: PHI
+  game_date: 2025-12-19
+  expected_tier: starter
+  expected_flags: []
+  expected_badges: []
+  note: >-
+    PHI played 0022500382 on 2025-12-19. NBA.com box scores: started 5 of his last 5 games played
+    for PHI (0022500318, 0022500333, 0022500348, 0022500362, 0022500382); minutes share 12.6% over
+    PHI's last 10 games (0022500058 to 0022500382), in 8 of which he played. At least 4 starts in
+    his last 5 games played: Starter. Return from injury: for PHI's previous game, 2025-12-14, the
+    report Injury-Report_2025-12-14_05_30PM.pdf listed him Out (Injury/Illness - N/a; Illness).
+
+- id: return-dort-okc
+  player: Luguentz Dort
+  player_id: 1629652
+  team: OKC
+  game_date: 2026-01-15
+  expected_tier: starter
+  expected_flags: [yo_yo]
+  expected_badges: []
+  note: >-
+    OKC played 0022500581 on 2026-01-15. The official injury report
+    Injury-Report_2026-01-15_05_30PM.pdf lists him Questionable (Injury/Illness - Left Foot;
+    Soreness). NBA.com box scores: started 5 of his last 5 games played for OKC (0022500506,
+    0022500525, 0022500536, 0022500553, 0022500581); minutes share 9.0% over OKC's last 10 games
+    (0022500455 to 0022500581), in 9 of which he played. At least 4 starts in his last 5 games
+    played: Starter. Return from injury: for OKC's previous game, 2026-01-13, the report
+    Injury-Report_2026-01-13_05_30PM.pdf listed him Out (Injury/Illness - Left Foot; Soreness).
+    yo_yo: 3 tier changes in OKC's last 20 games: 2025-12-10 injured→starter, 2026-01-13
+    starter→injured, 2026-01-15 injured→starter.
+
+- id: return-hartenstein-okc
+  player: Isaiah Hartenstein
+  player_id: 1628392
+  team: OKC
+  game_date: 2025-12-19
+  expected_tier: starter
+  expected_flags: [minutes_cliff, yo_yo]
+  expected_badges: []
+  note: >-
+    OKC played 0022500385 on 2025-12-19. NBA.com box scores: started 5 of his last 5 games played
+    for OKC (0022500055, 0022500280, 0022500064, 0022501230, 0022500385); minutes share 3.2% over
+    OKC's last 10 games (0022500064 to 0022500385), in 3 of which he played. At least 4 starts in
+    his last 5 games played: Starter. Return from injury: for OKC's previous game, 2025-12-18, the
+    report Injury-Report_2025-12-18_05_30PM.pdf listed him Out (Injury/Illness - Right Soleus;
+    Injury Management). minutes_cliff: 5-game share 4.0% is under 60% of the 20-game 7.0%. yo_yo: 4
+    tier changes in OKC's last 20 games: 2025-11-28 starter→injured, 2025-12-13 injured→starter,
+    2025-12-18 starter→injured, 2025-12-19 injured→starter.
+
+- id: return-doncic-lal
+  player: Luka Dončić
+  player_id: 1629029
+  team: LAL
+  game_date: 2026-02-20
+  expected_tier: starter
+  expected_flags: [minutes_cliff, yo_yo]
+  expected_badges: []
+  note: >-
+    LAL played 0022500809 on 2026-02-20. NBA.com box scores: started 5 of his last 5 games played
+    for LAL (0022500688, 0022500708, 0022500719, 0022500740, 0022500809); minutes share 7.5% over
+    LAL's last 10 games (0022500671 to 0022500809), in 6 of which he played. At least 4 starts in
+    his last 5 games played: Starter. Return from injury: for LAL's previous game, 2026-02-12, the
+    report Injury-Report_2026-02-12_05_30PM.pdf listed him Out (Injury/Illness - Left Hamstring;
+    Strain). minutes_cliff: 5-game share 3.2% is under 60% of the 20-game 10.6%. yo_yo: 4 tier
+    changes in LAL's last 20 games: 2026-01-17 starter→injured, 2026-01-18 injured→starter,
+    2026-02-07 starter→injured, 2026-02-20 injured→starter.
+
+- id: trade-mccain-phi-before
+  player: Jared McCain
+  player_id: 1642272
+  team: PHI
+  game_date: 2026-01-31
+  expected_tier: core
+  expected_flags: []
+  expected_badges: []
+  note: >-
+    PHI played 0022500699 on 2026-01-31. NBA.com box scores: started 0 of his last 5 games played
+    for PHI (0022500609, 0022500657, 0022500666, 0022500680, 0022500699); minutes share 3.7% over
+    PHI's last 10 games (0022500572 to 0022500699), in 6 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core.
+
+- id: trade-mccain-okc-arrival
+  player: Jared McCain
+  player_id: 1642272
+  team: OKC
+  game_date: 2026-02-04
+  expected_tier: out
+  expected_flags: []
+  expected_badges: []
+  note: >-
+    OKC played 0022500730 on 2026-02-04. NBA.com box scores: started 0 of his last 0 games played
+    for OKC; minutes share 0.0% over OKC's last 1 games (0022500730 to 0022500730), in 0 of which
+    he played. A share under 3.6%, and he played in under half: Out. NBA.com player movement:
+    2026-02-04 trade: Oklahoma City Thunder received guard Jared McCain from Philadelphia 76ers.
+
+- id: trade-mccain-okc-core
+  player: Jared McCain
+  player_id: 1642272
+  team: OKC
+  game_date: 2026-02-09
+  expected_tier: core
+  expected_flags: [yo_yo]
+  expected_badges: []
+  note: >-
+    OKC played 0022500769 on 2026-02-09. NBA.com box scores: started 0 of his last 2 games played
+    for OKC (0022500748, 0022500769); minutes share 3.8% over OKC's last 3 games (0022500730 to
+    0022500769), in 2 of which he played. Fewer than 4 starts and a share of at least 3.6%: Core.
+    NBA.com player movement: 2026-02-04 trade: Oklahoma City Thunder received guard Jared McCain
+    from Philadelphia 76ers. yo_yo: 3 tier changes in OKC's last 20 games: 2026-02-04 arrival→out,
+    2026-02-07 out→fringe, 2026-02-09 fringe→core.
+
+- id: trade-kennard-lal
+  player: Luke Kennard
+  player_id: 1628379
+  team: LAL
+  game_date: 2026-02-07
+  expected_tier: core
+  expected_flags: []
+  expected_badges: []
+  note: >-
+    LAL played 0022500753 on 2026-02-07. The official injury report
+    Injury-Report_2026-02-07_05_30PM.pdf lists him Available (Trade Pending). NBA.com box scores:
+    started 0 of his last 1 games played for LAL (0022500753); minutes share 5.4% over LAL's last 2
+    games (0022500740 to 0022500753), in 1 of which he played. Fewer than 4 starts and a share of
+    at least 3.6%: Core. NBA.com player movement: 2025-07-08 sign: Atlanta Hawks signed guard Luke
+    Kennard to a Contract; 2026-02-05 trade: Los Angeles Lakers received guard Luke Kennard from
+    Atlanta Hawks.
+
+- id: trade-vincent-atl
+  player: Gabe Vincent
+  player_id: 1629216
+  team: ATL
+  game_date: 2026-02-09
+  expected_tier: out
+  expected_flags: []
+  expected_badges: []
+  note: >-
+    ATL played 0022500765 on 2026-02-09. NBA.com box scores: started 0 of his last 1 games played
+    for ATL (0022500765); minutes share 2.7% over ATL's last 3 games (0022500735 to 0022500765), in
+    1 of which he played. A share under 3.6%, and he played in under half: Out. NBA.com player
+    movement: 2026-02-05 trade: Atlanta Hawks received guard Gabe Vincent from Los Angeles Lakers.
+
+- id: two-way-in-rotation-martin-phi
+  player: Tyrese Martin
+  player_id: 1631213
+  team: PHI
+  game_date: 2026-03-15
+  expected_tier: fringe
+  expected_flags: [yo_yo]
+  expected_badges: [two_way]
+  note: >-
+    PHI played 0022500980 on 2026-03-15. NBA.com box scores: started 0 of his last 5 games played
+    for PHI (0022500888, 0022500895, 0022500931, 0022500953, 0022500980); minutes share 2.9% over
+    PHI's last 10 games (0022500849 to 0022500980), in 5 of which he played. A share under 3.6%,
+    but he played in at least half: Fringe. NBA.com player movement: 2026-02-05 waive: Brooklyn
+    Nets waived forward Tyrese Martin; 2026-02-19 two_way_sign: Philadelphia 76ers signed forward
+    Tyrese Martin to a Two-Way Contract. yo_yo: 8 tier changes in PHI's last 20 games: 2026-02-19
+    arrival→out, 2026-02-21 out→fringe, 2026-02-26 fringe→out, 2026-03-04 out→fringe, 2026-03-07
+    fringe→out, 2026-03-09 out→fringe, 2026-03-14 fringe→out, 2026-03-15 out→fringe. On a two-way
+    contract (span from 2026-02-19), active in 11 games this season: under 45, so no
+    contract_pressure.
+
+- id: two-way-in-rotation-smith-lal
+  player: Nick Smith Jr.
+  player_id: 1641733
+  team: LAL
+  game_date: 2025-12-23
+  expected_tier: core
+  expected_flags: [earning_trust, yo_yo]
+  expected_badges: [two_way]
+  note: >-
+    LAL played 0022500418 on 2025-12-23. NBA.com box scores: started 1 of his last 5 games played
+    for LAL (0022500336, 0022500338, 0022500379, 0022500395, 0022500418); minutes share 4.1% over
+    LAL's last 10 games (0022500308 to 0022500418), in 6 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. NBA.com player movement: 2025-09-25 waive: Charlotte
+    Hornets waived guard Nick Smith Jr; 2025-09-29 two_way_sign: Los Angeles Lakers signed guard
+    Nick Smith Jr. to a Two-Way Contract. earning_trust: 5-game shares 10 and 5 team games back and
+    now 0.2% < 3.6% < 4.6%, 28 games into his spell. yo_yo: 5 tier changes in LAL's last 20 games:
+    2025-11-08 out→core, 2025-11-15 core→fringe, 2025-11-18 fringe→out, 2025-12-20 out→fringe,
+    2025-12-23 fringe→core. On a two-way contract (span from 2025-09-29), active in 16 games this
+    season: under 45, so no contract_pressure.
+
+- id: two-way-converted-jenkins-det
+  player: Daniss Jenkins
+  player_id: 1642450
+  team: DET
+  game_date: 2026-02-09
+  expected_tier: core
+  expected_flags: []
+  expected_badges: []
+  note: >-
+    DET played 0022500761 on 2026-02-09. NBA.com box scores: started 0 of his last 5 games played
+    for DET (0022500696, 0022500704, 0022500716, 0022500742, 0022500761); minutes share 7.2% over
+    DET's last 10 games (0022500635 to 0022500761), in 9 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. NBA.com player movement: 2025-08-02 two_way_sign: Detroit
+    Pistons re-signed guard Daniss Jenkins to a Two-Way Contract; 2026-02-09 sign: Detroit Pistons
+    re-signed guard Daniss Jenkins to a Rest-of-Season Contract. Converted from his two-way
+    contract that day, so no two_way badge and no contract_pressure, which he had raised through
+    2026-02-06 (two-way-in-rotation-jenkins-det, contract-pressure-jenkins-det).

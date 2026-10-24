@@ -10,7 +10,7 @@ from datetime import date as Date
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import FrameType
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 import typer
@@ -21,9 +21,6 @@ from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
-from closinglineup.derive.events import SignalRule, compute_events
-from closinglineup.derive.flags import FlagRule, compute_flags
-from closinglineup.derive.garbage_time import GarbageTimeRule, write_garbage_time
 from closinglineup.derive.reconcile import (
     LINEUP_TOLERANCE_POSSESSIONS,
     MIN_POSSESSIONS,
@@ -34,8 +31,8 @@ from closinglineup.derive.reconcile import (
     reconcile,
 )
 from closinglineup.derive.roster import rebuild_roster_membership
-from closinglineup.derive.rotation import TierRule, compute_rotation_state
-from closinglineup.derive.windows import refresh_windows
+from closinglineup.derive.run import DeriveRules, missing_dates
+from closinglineup.derive.run import derive as run_derive
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
 from closinglineup.load.parquet import ParquetStore
@@ -74,11 +71,13 @@ COMMANDS = {
     "fetch": "Fetch raw responses from NBA.com into the raw cache.",
     "parse": "Parse cached raw responses into parquet rows.",
     "load": "Load parquet rows into Postgres.",
-    "derive": "Refresh windows and write rotation state, events and flags.",
+    "derive": "Flag garbage time, refresh windows, write rotation state, events, flags and BPM, "
+    "and reconcile a sample.",
     "overlays": "Run one overlay by name: injuries, transactions, impact metrics or contracts.",
     "api": "Serve the API and the built frontend.",
     "worker": "Run the job scheduler.",
-    "nightly": "Run the nightly job once: refresh the schedule, fetch, parse and load a date.",
+    "nightly": "Run the nightly job once: refresh the schedule, fetch, parse, load and derive a "
+    "date.",
     "weekly": "Run the weekly job once: re-fetch, parse and load the season's shot charts.",
     "health": "Check that the database answers.",
     "reparse": "Re-parse cached raw responses after a parser change.",
@@ -357,45 +356,62 @@ def load(
         raise typer.Exit(1)
 
 
+def _summary(detail: dict[str, Any]) -> str:
+    """A step's scalar results as `name value` pairs, e.g. `players 412, changed 3`."""
+    return ", ".join(
+        f"{name} {value}"
+        for name, value in detail.items()
+        if isinstance(value, int | float | str) and name not in {"error", "skipped"}
+    )
+
+
 @app.command("derive", help=COMMANDS["derive"])
-def derive(date: DateOption = None, start: FromOption = None, end: ToOption = None) -> None:
+def derive(
+    date: DateOption = None,
+    start: FromOption = None,
+    end: ToOption = None,
+    missing: Annotated[
+        bool,
+        typer.Option(
+            "--missing",
+            help="Only the loaded dates whose derive has not all succeeded; with no dates, of "
+            "every loaded date.",
+        ),
+    ] = False,
+) -> None:
     days = _days(date, start, end)
-    if days is None:
-        raise typer.BadParameter("pass --date or --from/--to")
+    if days is None and not missing:
+        raise typer.BadParameter("pass --date, --from/--to or --missing")
     settings = Settings()
-    rule = GarbageTimeRule.from_settings(settings)
-    tiers = TierRule.from_settings(settings)
     engine = make_engine(settings)
     try:
         db = make_session_factory(engine)
-        for day in days:
-            flagged = write_garbage_time(db, day, rule)
-            typer.echo(
-                f"derive {day}: garbage time: {flagged['games']} games, {flagged['stints']} "
-                f"stints, {flagged['flagged']} flagged, {flagged['changed']} changed"
-            )
-        # The view is computed whole, so once for the range, from the flags just written.
-        windows = refresh_windows(db)
-        typer.echo(f"derive: windows: {windows['rows']} rows in {windows['seconds']} s")
-        for day in days:
-            state = compute_rotation_state(db, day, tiers)
-            typer.echo(
-                f"derive {day}: rotation state: {state['players']} players, "
-                f"{state['changed']} changed, {state['removed']} removed"
-            )
-            # Events compare the date's rotation state with the team's previous game date's.
-            events = compute_events(db, day, SignalRule())
-            typer.echo(
-                f"derive {day}: rotation events: {events['events']} written, "
-                f"{events['removed']} replaced"
-            )
-            # Flags read the date's events among their inputs.
-            raised = compute_flags(db, day, FlagRule())
-            typer.echo(
-                f"derive {day}: flags: {raised['flags']} raised, {raised['removed']} replaced"
-            )
+        if missing:
+            days = missing_dates(db, days[0], days[-1]) if days else missing_dates(db)
+        results = run_derive(
+            db,
+            RawCache(settings.data_dir),
+            SystemClock(),
+            days or [],
+            DeriveRules.from_settings(settings),
+        )
     finally:
         engine.dispose()
+    for result in results:
+        label = f"derive {result.day} {result.step.name}"
+        if result.status is RunStatus.FAILED:
+            typer.echo(f"{label}: failed: {result.detail['error']}")
+            continue
+        if "skipped" in result.detail:
+            typer.echo(f"{label}: skipped: {result.detail['skipped']}")
+            continue
+        typer.echo(f"{label}: {result.status}, {_summary(result.detail)}")
+        for line in result.detail.get("outside", []):
+            typer.echo(f"{label}: outside tolerance: {line}")
+    if not results:
+        typer.echo("derive: nothing to derive")
+    if any(result.status is RunStatus.FAILED for result in results):
+        raise typer.Exit(1)
 
 
 def _team_ids(teams: str | None) -> list[int]:

@@ -137,7 +137,7 @@ def _upsert(
     return data.num_rows, changed, removed
 
 
-def _log(
+def write_load_log(
     session: Session,
     table_name: str,
     game_date: date,
@@ -145,16 +145,18 @@ def _log(
     started_at: datetime,
     finished_at: datetime,
     detail: dict[str, Any],
+    *,
+    step: str = LOAD_STEP,
 ) -> None:
+    """Upsert the (table, game date, step) row of `load_log`; `derive.run` records its steps here
+    too."""
     values = {
         "status": status,
         "started_at": started_at,
         "finished_at": finished_at,
         "detail": detail,
     }
-    stmt = insert(LoadLog).values(
-        table_name=table_name, game_date=game_date, step=LOAD_STEP, **values
-    )
+    stmt = insert(LoadLog).values(table_name=table_name, game_date=game_date, step=step, **values)
     session.execute(
         stmt.on_conflict_do_update(
             index_elements=["table_name", "game_date", "step"],
@@ -177,12 +179,14 @@ def load_table(
             rows, changed, removed = _upsert(session, store, table_name, key)
             detail = {"rows": rows, "changed": changed, "removed": removed}
             if isinstance(key, date):
-                _log(session, table_name, key, RunStatus.SUCCEEDED, started_at, clock.now(), detail)
+                write_load_log(
+                    session, table_name, key, RunStatus.SUCCEEDED, started_at, clock.now(), detail
+                )
     except (OSError, ValueError, SQLAlchemyError, psycopg.Error) as exc:
         reason = f"{type(exc).__name__}: {exc}"
         if isinstance(key, date):
             with db.begin() as session:
-                _log(
+                write_load_log(
                     session,
                     table_name,
                     key,

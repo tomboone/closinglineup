@@ -1,0 +1,159 @@
+# One case per tier, plain and on the edges (a Questionable starter, a deep-bench Out).
+# Labelled by hand from NBA.com box scores and the official injury report; see
+# tests/test_derive_cases.py.
+- id: starter-sga-okc
+  player: Shai Gilgeous-Alexander
+  player_id: 1628983
+  team: OKC
+  game_date: 2026-01-23
+  expected_tier: starter
+  expected_flags: []
+  note: >-
+    OKC played 0022500641 on 2026-01-23. NBA.com box scores: started 5 of his last 5 games played
+    for OKC (0022500581, 0022500597, 0022500015, 0022500625, 0022500641); minutes share 12.7% over
+    OKC's last 10 games (0022500506 to 0022500641), in 9 of which he played. At least 4 starts in
+    his last 5 games played: Starter.
+
+- id: starter-cunningham-det
+  player: Cade Cunningham
+  player_id: 1630595
+  team: DET
+  game_date: 2026-02-09
+  expected_tier: starter
+  expected_flags: []
+  note: >-
+    DET played 0022500761 on 2026-02-09. NBA.com box scores: started 5 of his last 5 games played
+    for DET (0022500704, 0022500716, 0022500733, 0022500742, 0022500761); minutes share 13.9% over
+    DET's last 10 games (0022500635 to 0022500761), in 10 of which he played. At least 4 starts in
+    his last 5 games played: Starter.
+
+- id: starter-duren-det-questionable
+  player: Jalen Duren
+  player_id: 1631105
+  team: DET
+  game_date: 2026-03-20
+  expected_tier: starter
+  expected_flags: []
+  note: >-
+    DET played 0022501017 on 2026-03-20. The official injury report
+    Injury-Report_2026-03-20_05_30PM.pdf lists him Questionable (Injury/Illness - Right Ankle;
+    Soreness). NBA.com box scores: started 5 of his last 5 games played for DET (0022500961,
+    0022500978, 0022500993, 0022501009, 0022501017); minutes share 10.4% over DET's last 10 games
+    (0022500904 to 0022501017), in 10 of which he played. At least 4 starts in his last 5 games
+    played: Starter.
+
+- id: core-cason-wallace-okc
+  player: Cason Wallace
+  player_id: 1641717
+  team: OKC
+  game_date: 2026-03-18
+  expected_tier: core
+  expected_flags: []
+  note: >-
+    OKC played 0022501000 on 2026-03-18. NBA.com box scores: started 3 of his last 5 games played
+    for OKC (0022500933, 0022500959, 0022500976, 0022500992, 0022501000); minutes share 11.5% over
+    OKC's last 10 games (0022500862 to 0022501000), in 10 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core.
+
+- id: core-javonte-green-det
+  player: Javonte Green
+  player_id: 1629750
+  team: DET
+  game_date: 2026-03-07
+  expected_tier: core
+  expected_flags: []
+  note: >-
+    DET played 0022500916 on 2026-03-07. NBA.com box scores: started 0 of his last 5 games played
+    for DET (0022500858, 0022500875, 0022500884, 0022500904, 0022500916); minutes share 6.5% over
+    DET's last 10 games (0022500781 to 0022500916), in 10 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core.
+
+- id: fringe-keaton-wallace-atl
+  player: Keaton Wallace
+  player_id: 1630811
+  team: ATL
+  game_date: 2026-01-15
+  expected_tier: fringe
+  expected_flags: []
+  note: >-
+    ATL played 0022500585 on 2026-01-15. NBA.com box scores: started 0 of his last 5 games played
+    for ATL (0022500488, 0022500519, 0022500537, 0022500556, 0022500569); minutes share 2.4% over
+    ATL's last 10 games (0022500455 to 0022500585), in 7 of which he played. A share under 3.6%,
+    but he played in at least half: Fringe.
+
+- id: fringe-lanier-det
+  player: Chaz Lanier
+  player_id: 1642404
+  team: DET
+  game_date: 2026-03-20
+  expected_tier: fringe
+  expected_flags: []
+  note: >-
+    DET played 0022501017 on 2026-03-20. NBA.com box scores: started 0 of his last 5 games played
+    for DET (0022500923, 0022500937, 0022500953, 0022501009, 0022501017); minutes share 1.4% over
+    DET's last 10 games (0022500904 to 0022501017), in 6 of which he played. A share under 3.6%,
+    but he played in at least half: Fringe.
+
+- id: out-houstan-atl
+  player: Caleb Houstan
+  player_id: 1631216
+  team: ATL
+  game_date: 2026-03-12
+  expected_tier: out
+  expected_flags: []
+  note: >-
+    ATL played 0022500956 on 2026-03-12. NBA.com box scores: started 0 of his last 5 games played
+    for ATL (0022500327, 0022500488, 0022500594, 0022500873, 0022500897); minutes share 0.2% over
+    ATL's last 10 games (0022500794 to 0022500956), in 2 of which he played. A share under 3.6%,
+    and he played in under half: Out.
+
+- id: out-jaylin-williams-okc
+  player: Jaylin Williams
+  player_id: 1631119
+  team: OKC
+  game_date: 2026-01-15
+  expected_tier: out
+  expected_flags: []
+  note: >-
+    OKC played 0022500581 on 2026-01-15. NBA.com box scores: started 0 of his last 5 games played
+    for OKC (0022501203, 0022501230, 0022500553, 0022500568, 0022500581); minutes share 2.2% over
+    OKC's last 10 games (0022500455 to 0022500581), in 3 of which he played. A share under 3.6%,
+    and he played in under half: Out.
+
+- id: injured-maxey-phi
+  player: Tyrese Maxey
+  player_id: 1630178
+  team: PHI
+  game_date: 2026-03-12
+  expected_tier: injured
+  expected_flags: [usage_up_efficiency_down]
+  note: >-
+    PHI played 0022500953 on 2026-03-12. The official injury report
+    Injury-Report_2026-03-12_05_30PM.pdf lists him Out (Injury/Illness - Right Finger; Tendon
+    Strain) for it: Injured. usage_up_efficiency_down: usage 0.350 over his last 10 team games vs
+    0.301 for the season (+0.049), TS% 0.547 vs 0.589 (-0.042).
+
+- id: injured-jalen-williams-okc
+  player: Jalen Williams
+  player_id: 1631114
+  team: OKC
+  game_date: 2026-02-27
+  expected_tier: injured
+  expected_flags: [yo_yo]
+  note: >-
+    OKC played 0022500862 on 2026-02-27. The official injury report
+    Injury-Report_2026-02-27_05_30PM.pdf lists him Out (Injury/Illness - Right Hamstring; Strain)
+    for it: Injured. yo_yo: 3 tier changes in OKC's last 20 games: 2026-01-19 starter→injured,
+    2026-02-09 injured→starter, 2026-02-12 starter→injured.
+
+- id: injured-cunningham-det
+  player: Cade Cunningham
+  player_id: 1630595
+  team: DET
+  game_date: 2026-03-07
+  expected_tier: injured
+  expected_flags: []
+  note: >-
+    DET played 0022500916 on 2026-03-07. The official injury report
+    Injury-Report_2026-03-07_05_30PM.pdf lists him Out (Injury/Illness - Left Quadriceps;
+    Contusion) for it: Injured.

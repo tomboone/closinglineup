@@ -484,9 +484,10 @@ def test_parse_exits_1_when_the_schedule_is_not_cached(data_env: Path) -> None:
         ("load", ["--shots", "--date", "2025-10-23"], "take no dates and no --missing"),
         ("load", ["--memberships", "--missing"], "take no dates and no --missing"),
         ("load", ["--shots", "--memberships"], "pass --shots or --memberships, not both"),
+        ("derive", ["--from", "2025-10-22", "--missing"], "--from and --to go together"),
     ],
 )
-def test_parse_and_load_without_dates_are_usage_errors(
+def test_parse_load_and_derive_without_dates_are_usage_errors(
     data_env: Path, command: str, args: list[str], message: str
 ) -> None:
     result = runner.invoke(app, [command, *args])
