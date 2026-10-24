@@ -1,0 +1,5 @@
+# `tools/openapi-types` holds openapi-typescript, which drives TypeScript's JS compiler API. The
+# app's TypeScript 7 no longer ships that API, and pnpm resolves a peer from the app's own
+# dependencies, so the generator gets a package of its own with a TypeScript 5 beside it.
+packages:
+  - tools/*

@@ -1,0 +1,44 @@
+/* Desktop-first: laid out for 1280 px, nothing below 1024 px is tested (spec §9). */
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+
+body {
+  margin: 0;
+  min-width: 1024px;
+}
+
+.shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.shell-header .brand {
+  margin-right: auto;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+}
+
+.stale-banner {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid #e0b252;
+  border-radius: 4px;
+  background: #fff6e0;
+}
+
+.stale-banner p {
+  margin: 4px 0;
+}

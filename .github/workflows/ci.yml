@@ -33,6 +33,7 @@ jobs:
               - ".github/workflows/ci.yml"
             frontend:
               - "frontend/**"
+              - "backend/tests/fixtures/api/openapi.json"
               - ".github/workflows/ci.yml"
 
   backend:
@@ -112,6 +113,14 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # `types.ts` is generated from the backend's OpenAPI snapshot, which the backend's tests hold
+      # equal to the schema `/api/openapi.json` serves; a stale committed copy fails here.
+      - name: Generated API types are current
+        run: |
+          pnpm gen:types
+          git diff --exit-code -- src/api/types.ts
+          test -z "$(git status --porcelain -- src/api/types.ts)"
 
       - name: Oxlint
         run: pnpm lint
