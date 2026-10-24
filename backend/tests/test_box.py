@@ -6,10 +6,12 @@ from typing import Any
 
 import pytest
 
-from closinglineup.parse.box import classify_dnp, parse_box, parse_seconds
+from closinglineup.parse.box import classify_dnp, parse_box, parse_cdn_box, parse_seconds
 from closinglineup.parse.rows import ParseError, PlayerGameRow
 
 FIXTURES = Path(__file__).parent / "fixtures" / "nba_stats"
+# cdn.nba.com's live box scores, of the same game among others.
+CDN_FIXTURES = Path(__file__).parent / "fixtures" / "pbp" / "boxscore"
 # DEN at GSW, 137-131 after one overtime.
 GAME = "0022500006"
 GSW, DEN = 1610612744, 1610612743
@@ -31,6 +33,10 @@ type Payload = dict[str, Any]
 
 def _fixture(endpoint: str) -> Payload:
     return json.loads((FIXTURES / endpoint / f"{GAME}.json").read_text())
+
+
+def _cdn_fixture(game_id: str = GAME) -> Payload:
+    return json.loads((CDN_FIXTURES / f"{game_id}.json").read_text())
 
 
 def _game() -> list[PlayerGameRow]:
@@ -182,9 +188,85 @@ def test_unreadable_minutes_are_an_error() -> None:
         ("NWT - Suspended", "suspension"),
         ("DNP - G League - On Assignment", "g_league"),
         ("NWT - G League - Two-Way", "g_league"),
+        ("DND_INJURY", "injury"),
+        ("INACTIVE_GLEAGUE_ON_ASSIGNMENT", "g_league"),
+        ("INACTIVE_PERSONAL", "inactive"),
         ("", "other"),
         ("DNP - Rest", "other"),
     ],
 )
 def test_dnp_comments_classify(comment: str, reason: str) -> None:
     assert classify_dnp(comment) == reason
+
+
+def test_the_cdn_box_has_the_same_players_minutes_and_starters_as_the_stats_box() -> None:
+    def by_player(rows: list[PlayerGameRow]) -> dict[int, tuple[int, int, bool]]:
+        return {row.player_id: (row.team_id, row.seconds, row.is_starter) for row in rows}
+
+    assert by_player(parse_cdn_box(_cdn_fixture())) == by_player(_game())
+
+
+def test_the_cdn_box_has_counting_stats_and_no_advanced_or_hustle_numbers() -> None:
+    butler = next(row for row in parse_cdn_box(_cdn_fixture()) if row.player_id == JIMMY_BUTLER)
+    # The stats.nba.com box has him at 16 field goal attempts; the live box at 15.
+    assert butler == PlayerGameRow(
+        game_id=GAME,
+        player_id=JIMMY_BUTLER,
+        team_id=GSW,
+        is_starter=True,
+        seconds=38 * 60 + 34,
+        pts=21,
+        fgm=6,
+        fga=15,
+        fg3m=2,
+        fg3a=4,
+        ftm=7,
+        fta=8,
+        oreb=3,
+        dreb=2,
+        ast=6,
+        stl=3,
+        blk=0,
+        tov=0,
+        pf=1,
+        plus_minus=8,
+        source="cdn",
+    )
+
+
+def test_the_cdn_box_leaves_out_inactive_players_as_the_stats_box_does() -> None:
+    live = _cdn_fixture()["game"]
+    inactive = {
+        int(player["personId"])
+        for side in ("homeTeam", "awayTeam")
+        for player in live[side]["players"]
+        if player["status"] == "INACTIVE"
+    }
+    rows = parse_cdn_box(_cdn_fixture())
+    assert inactive
+    assert not inactive & {row.player_id for row in rows}
+    assert Counter(row.team_id for row in rows) == ROSTER_SIZES
+
+
+# 0022500270 has two active players who did not dress, each `DND_INJURY`, and one who sat with
+# no reason given.
+CD_0022500270 = 1
+
+
+def test_a_cdn_dnp_is_a_coachs_decision_unless_the_box_gives_a_reason() -> None:
+    rows = parse_cdn_box(_cdn_fixture("0022500270"))
+    reasons = Counter(row.dnp_reason for row in rows if row.seconds == 0)
+    assert reasons == {"cd": CD_0022500270, "injury": 2}
+    assert all(row.dnp_reason is None for row in rows if row.seconds > 0)
+
+
+def test_a_cdn_box_missing_a_count_is_an_error_not_a_zero() -> None:
+    live = _cdn_fixture()
+    del live["game"]["homeTeam"]["players"][0]["statistics"]["points"]
+    with pytest.raises(ValueError, match="pts"):
+        parse_cdn_box(live)
+
+
+def test_a_payload_that_is_not_a_live_box_is_refused() -> None:
+    with pytest.raises(ParseError, match="game"):
+        parse_cdn_box(_fixture("boxscoretraditionalv3"))

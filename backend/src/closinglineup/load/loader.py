@@ -7,9 +7,11 @@ values changed, so reloading an unchanged file writes nothing, `updated_at` incl
 
 A load deletes only from the tables in `REPLACE_SCOPES`, whose natural keys a re-parse can move:
 a stint's start or a possession's number shifts when an override changes how pbpstats reads a
-game, and a shot can be credited to another player. Their files replace what was loaded before,
-within the scope of the rows they hold: every game a stint, possession or possession lineup file
-covers, and every player and season type a shot file covers. A row in that scope the file no
+game, a shot can be credited to another player, and a game's box score re-parsed from
+stats.nba.com in place of cdn.nba.com's live one (`pipeline`) need not list the same players.
+Their files replace what was loaded before, within the scope of the rows they hold: every game a
+box score, stint, possession or possession lineup file covers, and every player and season type a
+shot file covers. A row in that scope the file no
 longer holds is deleted. Every other table keeps a row its file no longer holds.
 
 A date's load that fails rolls back whole and records its `load_log` row as failed, which
@@ -58,6 +60,7 @@ type Columns = Callable[[str], ColumnElement[Any]]
 # The tables a load replaces within a scope, by the expressions that scope it: a target row
 # whose scope matches a staged row's and whose natural key no staged row has is deleted.
 REPLACE_SCOPES: dict[str, Callable[[Columns], tuple[ColumnElement[Any], ...]]] = {
+    "player_game": lambda c: (c("game_id"),),
     "stint": lambda c: (c("game_id"),),
     "possession": lambda c: (c("game_id"),),
     "possession_lineup": lambda c: (c("game_id"),),
