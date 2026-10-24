@@ -223,10 +223,11 @@ class TeamPage(BaseModel):
 
 
 class Signal(BaseModel):
-    """One of a rotation event's contributing signals (spec §7.6)."""
+    """One of a rotation event's contributing signals (spec §7.6): a numeric one's change, or the
+    injury signal's `before → after` statuses or the transaction signal's type."""
 
     name: str
-    value: float | None
+    value: float | str | None
     label: str
 
 
@@ -244,12 +245,14 @@ class TeamRotationEvents(BaseModel):
 
 
 class Mover(BaseModel):
-    """A player's 10-game value and its change over the prior 10 games."""
+    """A player's 10-game value and its change over the prior 10 games; an impact mover's
+    `source` names the metric, a minutes mover's is null."""
 
     player: PlayerRef
     tricode: str | None
     value: float | None
     delta: float
+    source: Literal["epm", "darko", "bpm_local"] | None
 
 
 class RaisedFlag(BaseModel):

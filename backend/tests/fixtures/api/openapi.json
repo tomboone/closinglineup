@@ -832,7 +832,7 @@
         "type": "object"
       },
       "Mover": {
-        "description": "A player's 10-game value and its change over the prior 10 games.",
+        "description": "A player's 10-game value and its change over the prior 10 games; an impact mover's\n`source` names the metric, a minutes mover's is null.",
         "properties": {
           "delta": {
             "title": "Delta",
@@ -840,6 +840,22 @@
           },
           "player": {
             "$ref": "#/components/schemas/PlayerRef"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "epm",
+                  "darko",
+                  "bpm_local"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           },
           "tricode": {
             "anyOf": [
@@ -868,7 +884,8 @@
           "player",
           "tricode",
           "value",
-          "delta"
+          "delta",
+          "source"
         ],
         "title": "Mover",
         "type": "object"
@@ -1309,7 +1326,7 @@
         "type": "object"
       },
       "Signal": {
-        "description": "One of a rotation event's contributing signals (spec \u00a77.6).",
+        "description": "One of a rotation event's contributing signals (spec \u00a77.6): a numeric one's change, or the\ninjury signal's `before \u2192 after` statuses or the transaction signal's type.",
         "properties": {
           "label": {
             "title": "Label",
@@ -1323,6 +1340,9 @@
             "anyOf": [
               {
                 "type": "number"
+              },
+              {
+                "type": "string"
               },
               {
                 "type": "null"
