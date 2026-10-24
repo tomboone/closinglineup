@@ -51,9 +51,11 @@ _ISO = re.compile(r"^PT(\d+)M(\d+(?:\.\d+)?)S$")
 # A DNP comment's reason, by the first marker it contains (compared lower-cased). Order matters:
 # "NWT - G League - Two-Way" is a G League DNP, not a not-with-team one. The fixture game has
 # only "DNP - Coach's Decision"; the others follow NBA.com's DNP/DND/NWT comment forms, such as
-# "DND - Injury/Illness", "NWT - Personal Reasons" and "DNP - G League - On Assignment".
+# "DND - Injury/Illness", "NWT - Personal Reasons" and "DNP - G League - On Assignment", and the
+# live box's reason codes, such as `DND_INJURY` and `INACTIVE_GLEAGUE_ON_ASSIGNMENT`.
 _DNP_MARKERS: tuple[tuple[str, DnpReason], ...] = (
     ("g league", "g_league"),
+    ("gleague", "g_league"),
     ("suspen", "suspension"),
     ("injury", "injury"),
     ("illness", "injury"),

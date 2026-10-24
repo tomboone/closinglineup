@@ -188,6 +188,9 @@ def test_unreadable_minutes_are_an_error() -> None:
         ("NWT - Suspended", "suspension"),
         ("DNP - G League - On Assignment", "g_league"),
         ("NWT - G League - Two-Way", "g_league"),
+        ("DND_INJURY", "injury"),
+        ("INACTIVE_GLEAGUE_ON_ASSIGNMENT", "g_league"),
+        ("INACTIVE_PERSONAL", "inactive"),
         ("", "other"),
         ("DNP - Rest", "other"),
     ],
@@ -245,12 +248,15 @@ def test_the_cdn_box_leaves_out_inactive_players_as_the_stats_box_does() -> None
     assert Counter(row.team_id for row in rows) == ROSTER_SIZES
 
 
+# 0022500270 has two active players who did not dress, each `DND_INJURY`, and one who sat with
+# no reason given.
+CD_0022500270 = 1
+
+
 def test_a_cdn_dnp_is_a_coachs_decision_unless_the_box_gives_a_reason() -> None:
-    # 0022500270 has two active players who did not dress, each `DND_INJURY`.
     rows = parse_cdn_box(_cdn_fixture("0022500270"))
     reasons = Counter(row.dnp_reason for row in rows if row.seconds == 0)
-    assert reasons == {"cd": reasons["cd"], "injury": 2}
-    assert reasons["cd"] > 0
+    assert reasons == {"cd": CD_0022500270, "injury": 2}
     assert all(row.dnp_reason is None for row in rows if row.seconds > 0)
 
 

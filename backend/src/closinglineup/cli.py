@@ -214,6 +214,8 @@ def _fetch_missing(settings: Settings, clock: Clock) -> None:
         typer.echo(f"{day} {game_id}: stats.nba.com failed again for {', '.join(endpoints)}")
     for failed_game, error in detail["parse_failed"].items():
         typer.echo(f"parse {failed_game}: failed: {error}")
+    if detail["unreachable"] is not None:
+        typer.echo(f"fetch --missing: stopped: {detail['unreachable']}")
     typer.echo(
         f"fetch --missing: {len(detail['games'])} stats_failed games, "
         f"{len(detail['games']) - len(still)} fetched, {len(still)} still failing"

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import respx
+from curl_cffi import requests as curl_requests
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -33,7 +34,7 @@ from closinglineup.scheduler import (
     shot_chart_players,
 )
 from closinglineup.settings import Settings
-from closinglineup.sources import nba_cdn, nba_stats
+from closinglineup.sources import nba_cdn, nba_http, nba_stats
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.nba_http import (
     NbaHttpError,
@@ -474,6 +475,55 @@ def test_a_game_stats_nba_com_fails_for_loads_from_cdn_until_fetch_missing_repla
         (NIGHTLY, "succeeded"),
         (scheduler.FETCH_MISSING, "succeeded"),
     ]
+
+
+class StatsDownGet(RoutedGet):
+    """`RoutedGet` with stats.nba.com never answering: every request to it times out."""
+
+    def __call__(self, url: str, params: dict[str, str] | None = None) -> Any:
+        if url.startswith(nba_stats.STATS_BASE):
+            self.calls.append((url, params))
+            raise curl_requests.exceptions.Timeout("Operation timed out")
+        return super().__call__(url, params)
+
+
+def test_nightly_with_stats_nba_com_not_answering_loads_every_game_from_cdn(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    clear_fixture_game(db)
+    schedule = copy.deepcopy(FIXTURE_SCHEDULE)
+    [game_date] = schedule["leagueSchedule"]["gameDates"]
+    game_date["games"] = [g for g in game_date["games"] if g["gameId"] == FIXTURE_GAME]
+    get = StatsDownGet(
+        {
+            nba_cdn.SCHEDULE_URL: json.dumps(schedule).encode(),
+            **{
+                cdn_game_url(endpoint, FIXTURE_GAME): (
+                    PBP_FIXTURES / endpoint / f"{FIXTURE_GAME}.json"
+                ).read_bytes()
+                for endpoint in (nba_cdn.BOXSCORE, nba_cdn.PLAYBYPLAY)
+            },
+        }
+    )
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    detail = jobs.nightly(FIXTURE_DAY)
+
+    [run] = runs(db)
+    assert (run.job, run.status) == (NIGHTLY, "succeeded")
+    assert detail["stats_failed"] == detail["parse_fallback"] == [FIXTURE_GAME]
+    assert [(f["endpoint"], f["key"]) for f in detail["failed"]] == [
+        (scheduler.STATS_UNREACHABLE, FIXTURE_GAME),
+        ("reconcile", FIXTURE_DAY.isoformat()),
+    ]
+    # The first endpoint's tries, and none after: reconciliation is not refreshed either.
+    stats_calls = [url for url, _ in get.calls if url.startswith(nba_stats.STATS_BASE)]
+    assert len(stats_calls) == 1 + nba_http.RETRIES
+    assert _sources(db, FIXTURE_GAME) == ["cdn"] * PLAYER_GAMES
 
 
 def test_nightly_skips_a_game_already_fully_cached(
