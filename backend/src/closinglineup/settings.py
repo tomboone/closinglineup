@@ -9,8 +9,12 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
-# (|margin| ≥ M, ≤ T seconds left in the fourth quarter) pairs (spec §7.4).
-type GarbageTimeRule = tuple[tuple[int, int], ...]
+# (|margin| ≥ M, ≤ T seconds left in the fourth quarter) pairs (spec §7.4); `derive.garbage_time`
+# applies them.
+type GarbageTimeThresholds = tuple[tuple[int, int], ...]
+
+# A fourth quarter's length, the most seconds a garbage-time threshold can leave.
+QUARTER_SECONDS = 720
 
 
 def _split_pairs(value: object) -> object:
@@ -38,14 +42,15 @@ class Settings(BaseSettings):
     # Off until each source's terms of use are checked (spec §2).
     epm_enabled: bool = False
     darko_enabled: bool = False
-    spotrac_enabled: bool = False
+    hoopsrumors_enabled: bool = False
 
-    garbage_time_rule: Annotated[GarbageTimeRule, NoDecode] = Field(
+    garbage_time_rule: Annotated[GarbageTimeThresholds, NoDecode] = Field(
         default=((25, 540), (20, 360), (15, 180), (10, 60)), min_length=1
     )
     # Started at least N of the last K games played, from `"N/K"` (spec §7.5).
     tier_starter_min: Annotated[tuple[int, int], NoDecode] = (4, 5)
-    tier_core_share: float = Field(default=0.18, gt=0, le=1)
+    # A share of the team's player-minutes (§7.1): 0.036 is 18% of one player's 48, 8.6 a game.
+    tier_core_share: float = Field(default=0.036, gt=0, le=1)
     tier_fringe_played_rate: float = Field(default=0.5, ge=0, le=1)
 
     log_level: LogLevel = "INFO"
@@ -56,6 +61,17 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_garbage_time_rule(cls, value: object) -> object:
         return _split_pairs(value)
+
+    @field_validator("garbage_time_rule")
+    @classmethod
+    def _check_garbage_time_rule(cls, value: GarbageTimeThresholds) -> GarbageTimeThresholds:
+        for margin, seconds in value:
+            if margin < 1 or not 0 < seconds <= QUARTER_SECONDS:
+                raise ValueError(
+                    f"each pair must be M:T with M ≥ 1 points and 0 < T ≤ {QUARTER_SECONDS} "
+                    f"seconds left, not {margin}:{seconds}"
+                )
+        return value
 
     @field_validator("tier_starter_min", mode="before")
     @classmethod

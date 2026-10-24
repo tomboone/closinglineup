@@ -18,7 +18,7 @@ _Avoid_: role, depth-chart position, two-way (a badge, not a tier)
 A contract or assignment fact shown beside a tier: two-way, 10-day, Exhibit 10, G League assignment. Badges explain a tier; they never replace one.
 
 **Rotation event**:
-A change of rotation tier between two consecutive team game dates, with the before and after tiers and the top contributing signals.
+A change of rotation tier between two consecutive team game dates, or a player's arrival on a team (no tier on its previous game date, so no before tier), with the before and after tiers and the top contributing signals.
 _Avoid_: transition (fine in prose, but the entity is an event)
 
 **Closer**:
@@ -58,7 +58,7 @@ A continuous span within one period during which the same ten players were on th
 _Avoid_: lineup segment, shift
 
 **Lineup**:
-A set of five teammates on the floor together, identified by their sorted player IDs. Lineup results are sums over stints.
+A set of five teammates on the floor together, identified by their sorted player IDs. Lineup results are sums over stints. Reconciliation alone credits possessions as NBA.com does: each one to every lineup on the floor for any of it, so one a substitution splits counts for both (NEU-1899), and at a substitution logged at the instant one starts or ends, to the lineups on the floor for the events there (NEU-1900). These are its **possession lineups**.
 
 **Possession**:
 One team's offensive possession as pbpstats emits it, with how it started, how it ended and the score margin.
@@ -69,15 +69,19 @@ Play after the game is decided by a fixed margin-and-clock rule; excluded from o
 ### Overlays
 
 **Availability**:
-Whether a player can play on a date: active, injury status (Out / Doubtful / Questionable / Probable / Available), inactive, suspended, or assigned to the G League.
+Whether a player can play on a date: active, injury status (Out / Doubtful / Questionable / Probable / Available), inactive, suspended, or assigned to the G League. An assignment is read from the official injury report's `G League - On Assignment` lines, whatever their status; a recall is absence from a newer report covering the team (NEU-1905).
 _Avoid_: health, injury (an injury is the reason, availability is the state)
 
 **Transaction**:
-A roster move on a date: sign, waive, trade, two-way conversion, G League assign or recall, option decision.
+A roster move on a date: sign, waive, trade, two-way conversion, G League assign or recall, option decision. NBA.com's player-movement feed carries only the first four.
 
 **Impact snapshot**:
 One public (EPM, DARKO) or locally computed (BPM) impact metric value for a player on a date, with its offensive and defensive split and its minutes basis.
 _Avoid_: rating (reserved for on-court ORtg/DRtg/NetRtg)
+
+**Non-guaranteed contract**:
+A player's contract for a season whose salary is not yet fully guaranteed: non-guaranteed, partially guaranteed, Exhibit 9 or Exhibit 10. It carries the guaranteed amount now, the date the guarantee next rises (January 7 by default) and the amount it rises to. A player with no non-guaranteed contract in the week's snapshot is taken as fully guaranteed; two-way status is a badge from roster membership, not a contract fact (ADR-0004).
+_Avoid_: cap hit, contract status (a contract type is a badge)
 
 **Flag**:
 A named boolean condition on a player-team-date derived from windows and overlays (for example minutes cliff, earning trust, yo-yo), raised so the morning page can surface it.

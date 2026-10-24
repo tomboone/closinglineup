@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "lint": "oxlint --max-warnings 0",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "gen:types": "pnpm --dir tools/openapi-types exec openapi-typescript ../../../backend/tests/fixtures/api/openapi.json --output ../../src/api/types.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.5",

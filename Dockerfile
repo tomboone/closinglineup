@@ -13,7 +13,8 @@ RUN corepack enable
 WORKDIR /frontend
 
 # Dependencies first, so source edits don't invalidate this layer.
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+COPY frontend/tools/openapi-types/package.json ./tools/openapi-types/
 RUN --mount=type=cache,target=/pnpm-store \
     pnpm install --frozen-lockfile
 
@@ -39,6 +40,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/src ./src
+COPY backend/pbpstats_overrides ./pbpstats_overrides
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -55,6 +57,8 @@ WORKDIR /app
 
 COPY --from=backend /app/.venv ./.venv
 COPY --from=backend /app/src ./src
+# `parse.pbp.OVERRIDES_SOURCE`, copied into DATA_DIR/pbpstats/overrides/ before pbpstats runs.
+COPY --from=backend /app/pbpstats_overrides ./pbpstats_overrides
 # Alembic reads its config from `[tool.alembic]`, so migrations run from /app.
 COPY --from=backend /app/pyproject.toml ./
 # `api.app.STATIC_DIR`; the project is installed editable, so this is where the package looks.
@@ -66,6 +70,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Fails the build, rather than serving `/api` alone, if the package stops resolving to /app/src.
 RUN python -c "from closinglineup.api.app import STATIC_DIR; assert (STATIC_DIR / 'index.html').is_file(), STATIC_DIR"
+# Likewise for the pbpstats overrides, which resolve relative to the package.
+RUN python -c "from closinglineup.parse.pbp import ACTION_OVERRIDES, OVERRIDE_FILES, OVERRIDES_SOURCE as d; assert all((d / f).is_file() for f in (*OVERRIDE_FILES, ACTION_OVERRIDES)), d"
 
 USER 999:999
 

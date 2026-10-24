@@ -10,7 +10,7 @@ are type-2 games that only the `in-season-knockout` subtype tells apart; Cup gro
 regular season.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from enum import StrEnum
 from typing import Protocol
 
@@ -50,9 +50,28 @@ def season_start_year(d: date) -> int:
     return d.year if d.month >= ROLLOVER_MONTH else d.year - 1
 
 
-def season_label(d: date) -> str:
-    start = season_start_year(d)
+def _label(start: int) -> str:
     return f"{start}-{(start + 1) % 100:02d}"
+
+
+def espn_season(d: date) -> int:
+    """ESPN names a season by the year it ends: 2027 for 2026-27."""
+    return season_start_year(d) + 1
+
+
+def season_label(d: date) -> str:
+    return _label(season_start_year(d))
+
+
+def season_bounds(season: str) -> tuple[date, date]:
+    """The first and last calendar dates of a season label: `2025-26` → 2025-08-01, 2026-07-31."""
+    start = int(season[:4])
+    return date(start, ROLLOVER_MONTH, 1), date(start + 1, ROLLOVER_MONTH, 1) - timedelta(days=1)
+
+
+def season_of_game_id(game_id: str) -> str:
+    """The season a game ID belongs to, from its two-digit season year: `0022500001` → 2025-26."""
+    return _label(2000 + int(game_id[3:5]))
 
 
 def phase(game: ScheduleGame) -> Phase | None:

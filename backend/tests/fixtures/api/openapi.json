@@ -1,0 +1,2330 @@
+{
+  "components": {
+    "schemas": {
+      "Annotation": {
+        "properties": {
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "injury",
+              "transaction",
+              "starter",
+              "closer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "game_date",
+          "kind",
+          "label"
+        ],
+        "title": "Annotation",
+        "type": "object"
+      },
+      "Availability": {
+        "enum": [
+          "active",
+          "out",
+          "doubtful",
+          "questionable",
+          "probable",
+          "available",
+          "inactive",
+          "suspended",
+          "g_league"
+        ],
+        "type": "string"
+      },
+      "AvailabilityBoard": {
+        "description": "The team's newest injury report by the end of the date (null fields when it has none), and\n`stale` when that report is ESPN's fallback.",
+        "properties": {
+          "game_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Game Date"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/AvailabilityRow"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "report_datetime": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Datetime"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjurySource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "report_datetime",
+          "game_date",
+          "source",
+          "stale",
+          "players"
+        ],
+        "title": "AvailabilityBoard",
+        "type": "object"
+      },
+      "AvailabilityRow": {
+        "description": "A player on the team's latest injury report, or on G League assignment.",
+        "properties": {
+          "g_league": {
+            "title": "G League",
+            "type": "boolean"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjuryStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "player",
+          "status",
+          "reason",
+          "g_league"
+        ],
+        "title": "AvailabilityRow",
+        "type": "object"
+      },
+      "Badge": {
+        "enum": [
+          "two_way",
+          "ten_day",
+          "exhibit_10",
+          "g_league"
+        ],
+        "type": "string"
+      },
+      "ClosingLineup": {
+        "description": "The five on the floor at the final buzzer of a game decided by 10 or fewer; `margin` is the\nteam's final margin.",
+        "properties": {
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "game_id": {
+            "title": "Game Id",
+            "type": "string"
+          },
+          "margin": {
+            "title": "Margin",
+            "type": "integer"
+          },
+          "opponent": {
+            "title": "Opponent",
+            "type": "string"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerRef"
+            },
+            "title": "Players",
+            "type": "array"
+          }
+        },
+        "required": [
+          "game_id",
+          "game_date",
+          "opponent",
+          "margin",
+          "players"
+        ],
+        "title": "ClosingLineup",
+        "type": "object"
+      },
+      "ContractNote": {
+        "description": "A rostered player's non-guaranteed contract in the latest weekly snapshot on or before the\ndate (spec \u00a74.6). No source carries options or trade-eligible dates (NEU-1873).",
+        "properties": {
+          "days_until_guarantee": {
+            "title": "Days Until Guarantee",
+            "type": "integer"
+          },
+          "guarantee_date": {
+            "format": "date",
+            "title": "Guarantee Date",
+            "type": "string"
+          },
+          "guaranteed": {
+            "title": "Guaranteed",
+            "type": "integer"
+          },
+          "guaranteed_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guaranteed After"
+          },
+          "minimum_salary": {
+            "title": "Minimum Salary",
+            "type": "boolean"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "salary": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary"
+          }
+        },
+        "required": [
+          "player",
+          "salary",
+          "minimum_salary",
+          "guaranteed",
+          "guarantee_date",
+          "guaranteed_after",
+          "days_until_guarantee"
+        ],
+        "title": "ContractNote",
+        "type": "object"
+      },
+      "Flag": {
+        "enum": [
+          "minutes_cliff",
+          "usage_up_efficiency_down",
+          "bleeding",
+          "earning_trust",
+          "yo_yo",
+          "contract_pressure"
+        ],
+        "type": "string"
+      },
+      "GameLineup": {
+        "description": "A five's results in the game: its offensive and defensive possessions, the points scored\nand allowed on them, and its net rating.",
+        "properties": {
+          "net_rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Rating"
+          },
+          "opp_possessions": {
+            "title": "Opp Possessions",
+            "type": "integer"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerRef"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "possessions": {
+            "title": "Possessions",
+            "type": "integer"
+          },
+          "pts_against": {
+            "title": "Pts Against",
+            "type": "integer"
+          },
+          "pts_for": {
+            "title": "Pts For",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "players",
+          "possessions",
+          "opp_possessions",
+          "pts_for",
+          "pts_against",
+          "net_rating"
+        ],
+        "title": "GameLineup",
+        "type": "object"
+      },
+      "GamePage": {
+        "description": "`garbage_time_from` is null when the game had no garbage time.",
+        "properties": {
+          "away": {
+            "$ref": "#/components/schemas/GameTeam"
+          },
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "game_id": {
+            "title": "Game Id",
+            "type": "string"
+          },
+          "garbage_time": {
+            "$ref": "#/components/schemas/GarbageTime"
+          },
+          "garbage_time_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GarbageTimeMarker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "home": {
+            "$ref": "#/components/schemas/GameTeam"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameStatus"
+          },
+          "stints": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerStint"
+            },
+            "title": "Stints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "game_id",
+          "game_date",
+          "status",
+          "garbage_time",
+          "home",
+          "away",
+          "stints",
+          "garbage_time_from"
+        ],
+        "title": "GamePage",
+        "type": "object"
+      },
+      "GamePlayer": {
+        "description": "A player who played in the game, from his box-score line, to label his timeline row.",
+        "properties": {
+          "is_starter": {
+            "title": "Is Starter",
+            "type": "boolean"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "seconds": {
+            "title": "Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player",
+          "is_starter",
+          "seconds"
+        ],
+        "title": "GamePlayer",
+        "type": "object"
+      },
+      "GameStatus": {
+        "enum": [
+          "scheduled",
+          "final",
+          "postponed"
+        ],
+        "type": "string"
+      },
+      "GameTeam": {
+        "description": "`closing` is the five on the floor at the final buzzer, null unless the game was decided\nby 10 or fewer.",
+        "properties": {
+          "closing": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PlayerRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing"
+          },
+          "lineups": {
+            "items": {
+              "$ref": "#/components/schemas/GameLineup"
+            },
+            "title": "Lineups",
+            "type": "array"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/GamePlayer"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "integer"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "tricode",
+          "score",
+          "players",
+          "lineups",
+          "closing"
+        ],
+        "title": "GameTeam",
+        "type": "object"
+      },
+      "GarbageTime": {
+        "enum": [
+          "include",
+          "exclude"
+        ],
+        "type": "string"
+      },
+      "GarbageTimeMarker": {
+        "description": "Where garbage time began: the first garbage-time stint's start.",
+        "properties": {
+          "period": {
+            "title": "Period",
+            "type": "integer"
+          },
+          "start_sec": {
+            "title": "Start Sec",
+            "type": "number"
+          }
+        },
+        "required": [
+          "period",
+          "start_sec"
+        ],
+        "title": "GarbageTimeMarker",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "`reason` says why the app is unavailable: the database not answering, or the latest\nderived date too far behind the latest final game.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "ImpactSeries": {
+        "description": "One impact source's latest snapshot by each game date in the window.",
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "epm",
+              "darko",
+              "bpm_local"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "points"
+        ],
+        "title": "ImpactSeries",
+        "type": "object"
+      },
+      "InjuryChange": {
+        "properties": {
+          "from_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjuryStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "report_datetime": {
+            "format": "date-time",
+            "title": "Report Datetime",
+            "type": "string"
+          },
+          "to_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjuryStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player",
+          "tricode",
+          "from_status",
+          "to_status",
+          "reason",
+          "report_datetime"
+        ],
+        "title": "InjuryChange",
+        "type": "object"
+      },
+      "InjurySource": {
+        "enum": [
+          "pdf",
+          "espn"
+        ],
+        "type": "string"
+      },
+      "InjurySourceMarker": {
+        "description": "The source of a team's newest injury row; `stale` when it is ESPN's fallback (spec \u00a74.3).",
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/InjurySource"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tricode",
+          "source",
+          "stale"
+        ],
+        "title": "InjurySourceMarker",
+        "type": "object"
+      },
+      "InjuryStatus": {
+        "enum": [
+          "Out",
+          "Doubtful",
+          "Questionable",
+          "Probable",
+          "Available"
+        ],
+        "type": "string"
+      },
+      "JobRunSummary": {
+        "description": "A job's latest `job_run`.",
+        "properties": {
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "job": {
+            "title": "Job",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job",
+          "started_at",
+          "finished_at",
+          "status"
+        ],
+        "title": "JobRunSummary",
+        "type": "object"
+      },
+      "LeaguePage": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/RaisedFlag"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "impact_fallers": {
+            "items": {
+              "$ref": "#/components/schemas/Mover"
+            },
+            "title": "Impact Fallers",
+            "type": "array"
+          },
+          "impact_risers": {
+            "items": {
+              "$ref": "#/components/schemas/Mover"
+            },
+            "title": "Impact Risers",
+            "type": "array"
+          },
+          "injury_changes": {
+            "items": {
+              "$ref": "#/components/schemas/InjuryChange"
+            },
+            "title": "Injury Changes",
+            "type": "array"
+          },
+          "minutes_fallers": {
+            "items": {
+              "$ref": "#/components/schemas/Mover"
+            },
+            "title": "Minutes Fallers",
+            "type": "array"
+          },
+          "minutes_risers": {
+            "items": {
+              "$ref": "#/components/schemas/Mover"
+            },
+            "title": "Minutes Risers",
+            "type": "array"
+          },
+          "rotation_events": {
+            "items": {
+              "$ref": "#/components/schemas/TeamRotationEvents"
+            },
+            "title": "Rotation Events",
+            "type": "array"
+          },
+          "transactions": {
+            "items": {
+              "$ref": "#/components/schemas/TransactionSummary"
+            },
+            "title": "Transactions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "date",
+          "rotation_events",
+          "minutes_risers",
+          "minutes_fallers",
+          "flags",
+          "injury_changes",
+          "transactions",
+          "impact_risers",
+          "impact_fallers"
+        ],
+        "title": "LeaguePage",
+        "type": "object"
+      },
+      "LineupStats": {
+        "description": "A five or a pair over the season through the date, and over the team's last 10 games:\nits offensive and defensive possessions and its net rating.",
+        "properties": {
+          "net_rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Rating"
+          },
+          "net_rating_10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Rating 10"
+          },
+          "opp_possessions": {
+            "title": "Opp Possessions",
+            "type": "integer"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerRef"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "possessions": {
+            "title": "Possessions",
+            "type": "integer"
+          },
+          "possessions_10": {
+            "title": "Possessions 10",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "players",
+          "possessions",
+          "opp_possessions",
+          "net_rating",
+          "possessions_10",
+          "net_rating_10"
+        ],
+        "title": "LineupStats",
+        "type": "object"
+      },
+      "MatchupRow": {
+        "description": "The offense of one side of a matchup against the other, summed over the window's games.",
+        "properties": {
+          "ast": {
+            "title": "Ast",
+            "type": "integer"
+          },
+          "fg3a": {
+            "title": "Fg3A",
+            "type": "integer"
+          },
+          "fg3m": {
+            "title": "Fg3M",
+            "type": "integer"
+          },
+          "fga": {
+            "title": "Fga",
+            "type": "integer"
+          },
+          "fgm": {
+            "title": "Fgm",
+            "type": "integer"
+          },
+          "partial_poss": {
+            "title": "Partial Poss",
+            "type": "number"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "pts": {
+            "title": "Pts",
+            "type": "integer"
+          },
+          "tov": {
+            "title": "Tov",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player",
+          "partial_poss",
+          "pts",
+          "fgm",
+          "fga",
+          "fg3m",
+          "fg3a",
+          "tov",
+          "ast"
+        ],
+        "title": "MatchupRow",
+        "type": "object"
+      },
+      "Matchups": {
+        "description": "The defenders who guarded him, with his offense against each, and the players he guarded,\nwith theirs against him; the most partial possessions first.",
+        "properties": {
+          "defenders": {
+            "items": {
+              "$ref": "#/components/schemas/MatchupRow"
+            },
+            "title": "Defenders",
+            "type": "array"
+          },
+          "guarded": {
+            "items": {
+              "$ref": "#/components/schemas/MatchupRow"
+            },
+            "title": "Guarded",
+            "type": "array"
+          }
+        },
+        "required": [
+          "defenders",
+          "guarded"
+        ],
+        "title": "Matchups",
+        "type": "object"
+      },
+      "MetaResponse": {
+        "properties": {
+          "freshness": {
+            "items": {
+              "$ref": "#/components/schemas/SourceFreshness"
+            },
+            "title": "Freshness",
+            "type": "array"
+          },
+          "injury_sources": {
+            "items": {
+              "$ref": "#/components/schemas/InjurySourceMarker"
+            },
+            "title": "Injury Sources",
+            "type": "array"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobRunSummary"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "latest_derived_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Derived Date"
+          }
+        },
+        "required": [
+          "latest_derived_date",
+          "jobs",
+          "freshness",
+          "injury_sources"
+        ],
+        "title": "MetaResponse",
+        "type": "object"
+      },
+      "Mover": {
+        "description": "A player's 10-game value and its change over the prior 10 games; an impact mover's\n`source` names the metric, a minutes mover's is null.",
+        "properties": {
+          "delta": {
+            "title": "Delta",
+            "type": "number"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "epm",
+                  "darko",
+                  "bpm_local"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "tricode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tricode"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "player",
+          "tricode",
+          "value",
+          "delta",
+          "source"
+        ],
+        "title": "Mover",
+        "type": "object"
+      },
+      "PlayerHeader": {
+        "properties": {
+          "badges": {
+            "items": {
+              "$ref": "#/components/schemas/Badge"
+            },
+            "title": "Badges",
+            "type": "array"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tricode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tricode"
+          }
+        },
+        "required": [
+          "player",
+          "position",
+          "tricode",
+          "tier",
+          "badges"
+        ],
+        "title": "PlayerHeader",
+        "type": "object"
+      },
+      "PlayerPage": {
+        "properties": {
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/Annotation"
+            },
+            "title": "Annotations",
+            "type": "array"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/RaisedFlag"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "garbage_time": {
+            "$ref": "#/components/schemas/GarbageTime"
+          },
+          "header": {
+            "$ref": "#/components/schemas/PlayerHeader"
+          },
+          "matchups": {
+            "$ref": "#/components/schemas/Matchups"
+          },
+          "series": {
+            "$ref": "#/components/schemas/PlayerSeries"
+          },
+          "shot_profile": {
+            "items": {
+              "$ref": "#/components/schemas/ShotZone"
+            },
+            "title": "Shot Profile",
+            "type": "array"
+          },
+          "teammates": {
+            "items": {
+              "$ref": "#/components/schemas/Teammate"
+            },
+            "title": "Teammates",
+            "type": "array"
+          },
+          "window": {
+            "$ref": "#/components/schemas/Window"
+          }
+        },
+        "required": [
+          "date",
+          "window",
+          "garbage_time",
+          "header",
+          "series",
+          "annotations",
+          "shot_profile",
+          "teammates",
+          "matchups",
+          "flags"
+        ],
+        "title": "PlayerPage",
+        "type": "object"
+      },
+      "PlayerRef": {
+        "description": "A player by NBA.com ID; `name` is null until the daily roster pull has his `player` row.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player_id",
+          "name"
+        ],
+        "title": "PlayerRef",
+        "type": "object"
+      },
+      "PlayerSeries": {
+        "description": "A point per team game in the window: his minutes and share of his team's player-minutes, his\nteam's net rating with him on the floor and that less its net with him off, and his TS% and\nUSG%; and each impact source he has a snapshot from.",
+        "properties": {
+          "impact": {
+            "items": {
+              "$ref": "#/components/schemas/ImpactSeries"
+            },
+            "title": "Impact",
+            "type": "array"
+          },
+          "minutes": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Minutes",
+            "type": "array"
+          },
+          "minutes_share": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Minutes Share",
+            "type": "array"
+          },
+          "on_court_net": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "On Court Net",
+            "type": "array"
+          },
+          "on_off_net": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "On Off Net",
+            "type": "array"
+          },
+          "ts_pct": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Ts Pct",
+            "type": "array"
+          },
+          "usg_pct": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Usg Pct",
+            "type": "array"
+          }
+        },
+        "required": [
+          "minutes",
+          "minutes_share",
+          "on_court_net",
+          "on_off_net",
+          "ts_pct",
+          "usg_pct",
+          "impact"
+        ],
+        "title": "PlayerSeries",
+        "type": "object"
+      },
+      "PlayerStint": {
+        "description": "A player's part in one of his team's stints, so the timeline draws a row per player;\n`start_sec` and `end_sec` are seconds into the period.",
+        "properties": {
+          "end_sec": {
+            "title": "End Sec",
+            "type": "number"
+          },
+          "is_garbage_time": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Garbage Time"
+          },
+          "period": {
+            "title": "Period",
+            "type": "integer"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "start_sec": {
+            "title": "Start Sec",
+            "type": "number"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player_id",
+          "team_id",
+          "period",
+          "start_sec",
+          "end_sec",
+          "is_garbage_time"
+        ],
+        "title": "PlayerStint",
+        "type": "object"
+      },
+      "Point": {
+        "description": "One game date's value in a series.",
+        "properties": {
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "game_date",
+          "value"
+        ],
+        "title": "Point",
+        "type": "object"
+      },
+      "RaisedFlag": {
+        "properties": {
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "flag": {
+            "$ref": "#/components/schemas/Flag"
+          },
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player",
+          "tricode",
+          "game_date",
+          "flag",
+          "detail"
+        ],
+        "title": "RaisedFlag",
+        "type": "object"
+      },
+      "RosterCounts": {
+        "description": "Players on the roster on the date against the CBA's limits; 10-day and Exhibit 10\ncontracts are standard contracts.",
+        "properties": {
+          "standard": {
+            "title": "Standard",
+            "type": "integer"
+          },
+          "standard_limit": {
+            "title": "Standard Limit",
+            "type": "integer"
+          },
+          "two_way": {
+            "title": "Two Way",
+            "type": "integer"
+          },
+          "two_way_limit": {
+            "title": "Two Way Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "standard",
+          "standard_limit",
+          "two_way",
+          "two_way_limit"
+        ],
+        "title": "RosterCounts",
+        "type": "object"
+      },
+      "RotationEventSummary": {
+        "properties": {
+          "from_tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/Signal"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "to_tier": {
+            "$ref": "#/components/schemas/Tier"
+          }
+        },
+        "required": [
+          "player",
+          "game_date",
+          "from_tier",
+          "to_tier",
+          "signals"
+        ],
+        "title": "RotationEventSummary",
+        "type": "object"
+      },
+      "ShotZone": {
+        "description": "A zone's share of his attempts and his FG% there, over the window, the season and the prior\nseason.",
+        "properties": {
+          "fg_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fg Pct"
+          },
+          "freq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freq"
+          },
+          "prior_fg_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior Fg Pct"
+          },
+          "prior_freq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior Freq"
+          },
+          "season_fg_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season Fg Pct"
+          },
+          "season_freq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season Freq"
+          },
+          "zone": {
+            "enum": [
+              "rim",
+              "short_mid",
+              "long_mid",
+              "corner_3",
+              "above_break_3"
+            ],
+            "title": "Zone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "zone",
+          "freq",
+          "fg_pct",
+          "season_freq",
+          "season_fg_pct",
+          "prior_freq",
+          "prior_fg_pct"
+        ],
+        "title": "ShotZone",
+        "type": "object"
+      },
+      "Signal": {
+        "description": "One of a rotation event's contributing signals (spec \u00a77.6): a numeric one's change, or the\ninjury signal's `before \u2192 after` statuses or the transaction signal's type.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "label"
+        ],
+        "title": "Signal",
+        "type": "object"
+      },
+      "SourceFreshness": {
+        "description": "The newest row a source has given: a report's time for the injury sources, a date for the\nrest; null when it has given none.",
+        "properties": {
+          "latest": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "latest"
+        ],
+        "title": "SourceFreshness",
+        "type": "object"
+      },
+      "TeamPage": {
+        "description": "`tier_date` is the team's latest game date on or before `date`, which the tier board and its\nsparklines are as of; null before its first.",
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/AvailabilityBoard"
+          },
+          "closing_lineups": {
+            "items": {
+              "$ref": "#/components/schemas/ClosingLineup"
+            },
+            "title": "Closing Lineups",
+            "type": "array"
+          },
+          "combos": {
+            "items": {
+              "$ref": "#/components/schemas/LineupStats"
+            },
+            "title": "Combos",
+            "type": "array"
+          },
+          "contracts": {
+            "items": {
+              "$ref": "#/components/schemas/ContractNote"
+            },
+            "title": "Contracts",
+            "type": "array"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "garbage_time": {
+            "$ref": "#/components/schemas/GarbageTime"
+          },
+          "lineups": {
+            "items": {
+              "$ref": "#/components/schemas/LineupStats"
+            },
+            "title": "Lineups",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "roster": {
+            "$ref": "#/components/schemas/RosterCounts"
+          },
+          "tier_board": {
+            "items": {
+              "$ref": "#/components/schemas/TierBoardRow"
+            },
+            "title": "Tier Board",
+            "type": "array"
+          },
+          "tier_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier Date"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tricode",
+          "name",
+          "date",
+          "tier_date",
+          "garbage_time",
+          "tier_board",
+          "closing_lineups",
+          "lineups",
+          "combos",
+          "availability",
+          "roster",
+          "contracts"
+        ],
+        "title": "TeamPage",
+        "type": "object"
+      },
+      "TeamRotationEvents": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RotationEventSummary"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tricode",
+          "events"
+        ],
+        "title": "TeamRotationEvents",
+        "type": "object"
+      },
+      "TeamSummary": {
+        "description": "A team with its regular-season record in the season of the latest derived date, and the\nlatest date it has rotation state for.",
+        "properties": {
+          "conference": {
+            "enum": [
+              "East",
+              "West"
+            ],
+            "title": "Conference",
+            "type": "string"
+          },
+          "division": {
+            "title": "Division",
+            "type": "string"
+          },
+          "latest_derived_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Derived Date"
+          },
+          "losses": {
+            "title": "Losses",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          },
+          "wins": {
+            "title": "Wins",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tricode",
+          "name",
+          "conference",
+          "division",
+          "wins",
+          "losses",
+          "latest_derived_date"
+        ],
+        "title": "TeamSummary",
+        "type": "object"
+      },
+      "Teammate": {
+        "properties": {
+          "net_rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Rating"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "possessions": {
+            "title": "Possessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player",
+          "possessions",
+          "net_rating"
+        ],
+        "title": "Teammate",
+        "type": "object"
+      },
+      "TeamsResponse": {
+        "properties": {
+          "season": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/TeamSummary"
+            },
+            "title": "Teams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "season",
+          "teams"
+        ],
+        "title": "TeamsResponse",
+        "type": "object"
+      },
+      "Tier": {
+        "enum": [
+          "injured",
+          "starter",
+          "core",
+          "fringe",
+          "out"
+        ],
+        "type": "string"
+      },
+      "TierBoardRow": {
+        "description": "A player's rotation state on the tier board's date, and three sparklines over the team's\nlast 20 game dates through it: his 10-game role window's minutes share and on/off net, and his\nimpact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for).",
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "badges": {
+            "items": {
+              "$ref": "#/components/schemas/Badge"
+            },
+            "title": "Badges",
+            "type": "array"
+          },
+          "impact": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Impact",
+            "type": "array"
+          },
+          "impact_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "epm",
+                  "darko",
+                  "bpm_local"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Source"
+          },
+          "is_short": {
+            "title": "Is Short",
+            "type": "boolean"
+          },
+          "minutes_share": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Minutes Share",
+            "type": "array"
+          },
+          "minutes_share_10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes Share 10"
+          },
+          "on_off_net": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "On Off Net",
+            "type": "array"
+          },
+          "played_rate_10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Played Rate 10"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "starter_rate_5": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starter Rate 5"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/Tier"
+          }
+        },
+        "required": [
+          "player",
+          "tier",
+          "badges",
+          "availability",
+          "is_short",
+          "minutes_share_10",
+          "starter_rate_5",
+          "played_rate_10",
+          "minutes_share",
+          "on_off_net",
+          "impact",
+          "impact_source"
+        ],
+        "title": "TierBoardRow",
+        "type": "object"
+      },
+      "TransactionSummary": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "from_tricode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Tricode"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "to_tricode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Tricode"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player",
+          "date",
+          "type",
+          "from_tricode",
+          "to_tricode",
+          "detail"
+        ],
+        "title": "TransactionSummary",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Window": {
+        "enum": [
+          "5",
+          "10",
+          "20",
+          "season"
+        ],
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "title": "closinglineup",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/games/{game_id}": {
+      "get": {
+        "operationId": "game_page_api_games__game_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "garbage_time",
+            "required": false,
+            "schema": {
+              "default": "exclude",
+              "enum": [
+                "include",
+                "exclude"
+              ],
+              "title": "Garbage Time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Game Page"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/league": {
+      "get": {
+        "operationId": "league_api_league_get",
+        "parameters": [
+          {
+            "description": "A game date; the latest derived one if omitted.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A game date; the latest derived one if omitted.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaguePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "League"
+      }
+    },
+    "/api/meta": {
+      "get": {
+        "operationId": "meta_api_meta_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Meta"
+      }
+    },
+    "/api/players/{player_id}": {
+      "get": {
+        "operationId": "player_page_api_players__player_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "10",
+              "enum": [
+                "5",
+                "10",
+                "20",
+                "season"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "garbage_time",
+            "required": false,
+            "schema": {
+              "default": "exclude",
+              "enum": [
+                "include",
+                "exclude"
+              ],
+              "title": "Garbage Time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A game date; the latest derived one if omitted.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A game date; the latest derived one if omitted.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Player Page"
+      }
+    },
+    "/api/teams": {
+      "get": {
+        "description": "The 30 teams, by tricode, with their regular-season record in the season of the latest\nderived date (0-0 before any) and the latest date each has rotation state for.",
+        "operationId": "teams_api_teams_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Teams"
+      }
+    },
+    "/api/teams/{tricode}": {
+      "get": {
+        "operationId": "team_page_api_teams__tricode__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tricode",
+            "required": true,
+            "schema": {
+              "title": "Tricode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "garbage_time",
+            "required": false,
+            "schema": {
+              "default": "exclude",
+              "enum": [
+                "include",
+                "exclude"
+              ],
+              "title": "Garbage Time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A game date; the latest derived one if omitted.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A game date; the latest derived one if omitted.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Team Page"
+      }
+    }
+  }
+}

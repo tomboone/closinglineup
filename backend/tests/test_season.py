@@ -6,7 +6,14 @@ from typing import Any
 
 import pytest
 
-from closinglineup.season import Phase, is_counted, phase, season_label, season_start_year
+from closinglineup.season import (
+    Phase,
+    is_counted,
+    phase,
+    season_bounds,
+    season_label,
+    season_start_year,
+)
 
 SCHEDULE_2025_26 = (
     Path(__file__).parent / "fixtures" / "nba_stats" / "scheduleleaguev2" / "2025-26.json"
@@ -82,3 +89,17 @@ def test_other_leagues_never_count() -> None:
 
 def test_knockout_subtype_only_upgrades_a_regular_season_game() -> None:
     assert phase(Game("0012500001", "in-season-knockout")) is None
+
+
+@pytest.mark.parametrize(
+    ("season", "bounds"),
+    [
+        ("2025-26", (date(2025, 8, 1), date(2026, 7, 31))),
+        ("1999-00", (date(1999, 8, 1), date(2000, 7, 31))),
+    ],
+)
+def test_season_bounds_run_from_rollover_to_the_day_before_the_next(
+    season: str, bounds: tuple[date, date]
+) -> None:
+    assert season_bounds(season) == bounds
+    assert {season_label(day) for day in bounds} == {season}

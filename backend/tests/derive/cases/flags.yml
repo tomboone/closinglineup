@@ -1,0 +1,140 @@
+# Each §7.7 flag raised on a real date, with the numbers that raise it.
+# Labelled by hand from NBA.com box scores and the official injury report; see
+# tests/test_derive_cases.py.
+- id: bleeding-risacher-atl
+  player: Zaccharie Risacher
+  player_id: 1642258
+  team: ATL
+  game_date: 2026-01-07
+  expected_tier: starter
+  expected_flags: [bleeding]
+  note: >-
+    ATL played 0022500519 on 2026-01-07. NBA.com box scores: started 5 of his last 5 games played
+    for ATL (0022500463, 0022500479, 0022500488, 0022500504, 0022500519); minutes share 10.2% over
+    ATL's last 10 games (0022500396 to 0022500519), in 10 of which he played. At least 4 starts in
+    his last 5 games played: Starter. bleeding: on-court net -7.2 on 531 possessions over the 10
+    games, ATL 4.7 with him off (stints from NBA.com play-by-play, garbage time out).
+
+- id: bleeding-laravia-lal
+  player: Jake LaRavia
+  player_id: 1631222
+  team: LAL
+  game_date: 2025-12-14
+  expected_tier: core
+  expected_flags: [bleeding]
+  note: >-
+    LAL played 0022501228 on 2025-12-14. NBA.com box scores: started 1 of his last 5 games played
+    for LAL (0022500336, 0022500338, 0022500362, 0022501204, 0022501228); minutes share 7.5% over
+    LAL's last 10 games (0022500282 to 0022501228), in 10 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. bleeding: on-court net -5.6 on 367 possessions over the 10
+    games, LAL 2.4 with him off (stints from NBA.com play-by-play, garbage time out).
+
+- id: earning-trust-newell-atl
+  player: Asa Newell
+  player_id: 1642854
+  team: ATL
+  game_date: 2026-01-02
+  expected_tier: core
+  expected_flags: [earning_trust]
+  note: >-
+    ATL played 0022500479 on 2026-01-02. NBA.com box scores: started 0 of his last 5 games played
+    for ATL (0022500423, 0022500435, 0022500455, 0022500463, 0022500479); minutes share 6.1% over
+    ATL's last 10 games (0022501217 to 0022500479), in 10 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. earning_trust: 5-game shares 10 and 5 team games back and
+    now 4.0% < 5.9% < 6.3%, 36 games into his spell.
+
+- id: contract-pressure-jenkins-det
+  player: Daniss Jenkins
+  player_id: 1642450
+  team: DET
+  game_date: 2026-01-27
+  expected_tier: core
+  expected_flags: [contract_pressure]
+  expected_badges: [two_way]
+  note: >-
+    DET played 0022500668 on 2026-01-27. NBA.com box scores: started 1 of his last 5 games played
+    for DET (0022500595, 0022500624, 0022500635, 0022500650, 0022500668); minutes share 7.4% over
+    DET's last 10 games (0022500502 to 0022500668), in 9 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. NBA.com player movement: 2025-08-02 two_way_sign: Detroit
+    Pistons re-signed guard Daniss Jenkins to a Two-Way Contract. contract_pressure: on a two-way
+    contract (span from 2024-07-06), active (played, or a coach's decision) in 45 regular-season
+    games, of the 50 the CBA allows.
+
+- id: minutes-cliff-reed-det
+  player: Paul Reed
+  player_id: 1630194
+  team: DET
+  game_date: 2025-12-28
+  expected_tier: fringe
+  expected_flags: [minutes_cliff]
+  note: >-
+    DET played 0022500445 on 2025-12-28. NBA.com box scores: started 0 of his last 5 games played
+    for DET (0022500376, 0022500390, 0022500408, 0022500430, 0022500445); minutes share 1.8% over
+    DET's last 10 games (0022500342 to 0022500445), in 7 of which he played. A share under 3.6%,
+    but he played in at least half: Fringe. minutes_cliff: 5-game share 1.4% is under 60% of the
+    20-game 2.6%.
+
+- id: usage-down-lowry-phi
+  player: Kyle Lowry
+  player_id: 200768
+  team: PHI
+  game_date: 2026-01-20
+  expected_tier: out
+  expected_flags: [minutes_cliff, usage_up_efficiency_down]
+  note: >-
+    PHI played 0022500613 on 2026-01-20. NBA.com box scores: started 0 of his last 5 games played
+    for PHI (0022500070, 0022500348, 0022501217, 0022500410, 0022500560); minutes share 0.1% over
+    PHI's last 10 games (0022500487 to 0022500613), in 1 of which he played. A share under 3.6%,
+    and he played in under half: Out. minutes_cliff: 5-game share 0.2% is under 60% of the 20-game
+    0.4%. usage_up_efficiency_down: usage 0.738 over his last 10 team games vs 0.096 for the season
+    (+0.642), TS% 0.000 vs 0.375 (-0.375).
+
+- id: yo-yo-bronny-lal
+  player: Bronny James
+  player_id: 1642355
+  team: LAL
+  game_date: 2026-03-03
+  expected_tier: out
+  expected_flags: [minutes_cliff, yo_yo]
+  note: >-
+    LAL played 0022500891 on 2026-03-03. NBA.com box scores: started 0 of his last 5 games played
+    for LAL (0022500688, 0022500719, 0022500774, 0022500791, 0022500878); minutes share 1.4% over
+    LAL's last 10 games (0022500769 to 0022500891), in 3 of which he played. A share under 3.6%,
+    and he played in under half: Out. minutes_cliff: 5-game share 0.5% is under 60% of the 20-game
+    1.1%. yo_yo: 5 tier changes in LAL's last 20 games: 2026-02-01 fringe→injured, 2026-02-03
+    injured→fringe, 2026-02-05 fringe→out, 2026-02-12 out→fringe, 2026-02-22 fringe→out.
+
+- id: contract-pressure-youngblood-okc
+  player: Chris Youngblood
+  player_id: 1642959
+  team: OKC
+  game_date: 2026-01-23
+  expected_tier: out
+  expected_flags: [contract_pressure, yo_yo]
+  expected_badges: [two_way]
+  note: >-
+    OKC played 0022500641 on 2026-01-23. NBA.com box scores: started 0 of his last 5 games played
+    for OKC (0022500484, 0022500506, 0022500581, 0022500015, 0022500625); minutes share 0.5% over
+    OKC's last 10 games (0022500506 to 0022500641), in 4 of which he played. A share under 3.6%,
+    and he played in under half: Out. NBA.com player movement: 2025-10-18 two_way_convert: Oklahoma
+    City Thunder converted the contract of guard Chris Youngblood to a Two-Way Contract. yo_yo: 3
+    tier changes in OKC's last 20 games: 2025-12-18 fringe→out, 2025-12-23 out→fringe, 2026-01-13
+    fringe→out. contract_pressure: on a two-way contract (span from 2025-10-18), active (played, or
+    a coach's decision) in 45 regular-season games, of the 50 the CBA allows.
+
+- id: contract-pressure-walker-phi
+  player: Jabari Walker
+  player_id: 1631133
+  team: PHI
+  game_date: 2026-01-27
+  expected_tier: core
+  expected_flags: [contract_pressure]
+  expected_badges: [two_way]
+  note: >-
+    PHI played 0022500666 on 2026-01-27. NBA.com box scores: started 0 of his last 5 games played
+    for PHI (0022500589, 0022500609, 0022500613, 0022500657, 0022500666); minutes share 4.1% over
+    PHI's last 10 games (0022500550 to 0022500666), in 8 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. NBA.com player movement: 2025-07-05 two_way_sign:
+    Philadelphia 76ers signed forward Jabari Walker to a Two-Way Contract. contract_pressure: on a
+    two-way contract (span from 2025-07-05), active (played, or a coach's decision) in 46
+    regular-season games, of the 50 the CBA allows.

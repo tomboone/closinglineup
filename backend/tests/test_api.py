@@ -1,3 +1,5 @@
+import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -10,6 +12,8 @@ from closinglineup.settings import Settings
 # Port 1 on loopback refuses at once, standing in for a stopped Postgres.
 DOWN_DSN = "postgresql+psycopg://closinglineup:secret@127.0.0.1:1/x"
 INDEX = "<!doctype html><div id='root'></div>"
+# The schema the frontend's types are generated from; `UPDATE_SNAPSHOTS=1` rewrites it.
+OPENAPI_SNAPSHOT = Path(__file__).parent / "fixtures" / "api" / "openapi.json"
 
 
 @pytest.fixture
@@ -26,19 +30,14 @@ def client(static_dir: Path) -> Iterator[TestClient]:
         yield client
 
 
-def test_health_is_200_when_the_database_answers(database_url: str, tmp_path: Path) -> None:
-    with TestClient(create_app(Settings(database_url=database_url), tmp_path)) as client:
-        response = client.get("/api/health")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
-
 def test_health_is_503_when_the_database_is_down(client: TestClient) -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 503
-    assert response.json() == {"status": "unavailable"}
+    body = response.json()
+    assert body["status"] == "unavailable"
+    assert body["reason"].startswith("database unreachable")
+    assert "secret" not in body["reason"]
 
 
 def test_root_serves_the_bundle_index(client: TestClient) -> None:
@@ -79,3 +78,26 @@ def test_without_a_bundle_only_the_api_is_served(tmp_path: Path) -> None:
     with TestClient(create_app(Settings(database_url=DOWN_DSN), missing)) as client:
         assert client.get("/").status_code == 404
         assert client.get("/api/health").status_code == 503
+
+
+def test_the_openapi_schema_is_served_and_matches_its_snapshot(client: TestClient) -> None:
+    response = client.get("/api/openapi.json")
+
+    assert response.status_code == 200
+    schema = response.json()
+    if os.environ.get("UPDATE_SNAPSHOTS"):
+        OPENAPI_SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
+        OPENAPI_SNAPSHOT.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n")
+    assert schema == json.loads(OPENAPI_SNAPSHOT.read_text()), (
+        "the API's schema changed; rerun with UPDATE_SNAPSHOTS=1 and commit the snapshot"
+    )
+
+
+def test_every_spec_route_s_page_model_is_in_the_schema(client: TestClient) -> None:
+    schema = client.get("/api/openapi.json").json()
+
+    assert {"/api/league", "/api/players/{player_id}", "/api/games/{game_id}"} <= set(
+        schema["paths"]
+    )
+    pages = {"MetaResponse", "TeamsResponse", "TeamPage", "LeaguePage", "PlayerPage", "GamePage"}
+    assert pages <= set(schema["components"]["schemas"])

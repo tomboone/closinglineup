@@ -6,14 +6,15 @@ from pathlib import Path, PurePosixPath
 from typing import override
 
 from fastapi import FastAPI, Response, status
-from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException
 from starlette.responses import Response as StarletteResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
+from closinglineup.api.routers import games, league, meta, players, teams
 from closinglineup.api.schemas import HealthResponse
-from closinglineup.db.session import make_engine, ping
+from closinglineup.db.session import make_engine, make_session_factory
+from closinglineup.health import unhealthy_reason
 from closinglineup.logging import configure_logging
 from closinglineup.settings import Settings
 
@@ -46,16 +47,24 @@ def create_app(settings: Settings, static_dir: Path = STATIC_DIR) -> FastAPI:
         yield
         engine.dispose()
 
-    app = FastAPI(title="closinglineup", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(
+        title="closinglineup",
+        lifespan=lifespan,
+        openapi_url="/api/openapi.json",
+        docs_url=None,
+        redoc_url=None,
+    )
+    # What `api.deps.get_session` opens each request's session from.
+    app.state.sessions = make_session_factory(engine)
+    for routes in (meta, teams, league, players, games):
+        app.include_router(routes.router)
 
-    # DB check only; the freshness rule against the last final game lands with the derive layer.
     @app.get("/api/health")
     def health(response: Response) -> HealthResponse:
-        try:
-            ping(engine)
-        except OperationalError:
+        reason = unhealthy_reason(engine)
+        if reason is not None:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-            return HealthResponse(status="unavailable")
+            return HealthResponse(status="unavailable", reason=reason)
         return HealthResponse(status="ok")
 
     # Mounted last so every `/api` route matches before the catch-all.

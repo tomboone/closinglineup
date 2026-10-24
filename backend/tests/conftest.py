@@ -1,6 +1,14 @@
 import os
+from collections.abc import Iterator
 
 import pytest
+from sqlalchemy import Engine, create_engine, delete
+from sqlalchemy.orm import Session, sessionmaker
+
+from closinglineup import overlays
+from closinglineup.db.models import JobRun
+from closinglineup.overlays import Overlay
+from tests.test_migrations import alembic
 
 
 @pytest.fixture
@@ -14,3 +22,26 @@ def database_url() -> str:
     if not url:
         pytest.skip("DATABASE_URL is not set; run inside `docker compose exec app`")
     return url
+
+
+@pytest.fixture
+def db(database_url: str) -> Iterator[sessionmaker[Session]]:
+    """Sessions on the migrated database, with `job_run` emptied first."""
+    upgrade = alembic("upgrade", "head", database_url=database_url)
+    assert upgrade.returncode == 0, upgrade.stderr
+    engine: Engine = create_engine(database_url)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.execute(delete(JobRun))
+    try:
+        yield sessions
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def registry(monkeypatch: pytest.MonkeyPatch) -> dict[str, Overlay]:
+    """An empty overlay registry in place of the real one, for the test to register fakes in."""
+    fresh: dict[str, Overlay] = {}
+    monkeypatch.setattr(overlays, "REGISTRY", fresh)
+    return fresh

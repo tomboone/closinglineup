@@ -29,10 +29,10 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.healthchecks_url_weekly is None
     assert settings.epm_enabled is False
     assert settings.darko_enabled is False
-    assert settings.spotrac_enabled is False
+    assert settings.hoopsrumors_enabled is False
     assert settings.garbage_time_rule == ((25, 540), (20, 360), (15, 180), (10, 60))
     assert settings.tier_starter_min == (4, 5)
-    assert settings.tier_core_share == 0.18
+    assert settings.tier_core_share == 0.036
     assert settings.tier_fringe_played_rate == 0.5
     assert settings.log_level == "INFO"
     assert settings.season is None
@@ -90,6 +90,10 @@ def test_log_level_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
         ("GARBAGE_TIME_RULE", "25-540"),
         ("GARBAGE_TIME_RULE", "25:abc"),
         ("GARBAGE_TIME_RULE", " , "),
+        ("GARBAGE_TIME_RULE", "25:540:1"),
+        ("GARBAGE_TIME_RULE", "0:540"),
+        ("GARBAGE_TIME_RULE", "25:0"),
+        ("GARBAGE_TIME_RULE", "25:900"),
         ("TIER_STARTER_MIN", "4"),
         ("TIER_STARTER_MIN", "6/5"),
         ("TIER_STARTER_MIN", "0/5"),

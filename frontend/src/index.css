@@ -1,0 +1,344 @@
+/* Desktop-first: laid out for 1280 px, nothing below 1024 px is tested (spec §9). */
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+
+body {
+  margin: 0;
+  min-width: 1024px;
+}
+
+.shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.shell-header .brand {
+  margin-right: auto;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+}
+
+.stale-banner {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid #e0b252;
+  border-radius: 4px;
+  background: #fff6e0;
+}
+
+.stale-banner p {
+  margin: 4px 0;
+}
+
+.chart {
+  width: 100%;
+  height: 320px;
+}
+
+.chart-sparkline {
+  width: 120px;
+  height: 28px;
+}
+
+.note {
+  color: #57606a;
+  font-size: 0.85em;
+}
+
+.team-page {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.team-page .team-tiers {
+  grid-row: span 2;
+}
+
+.team-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.team-page th,
+.team-page td {
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #eee;
+}
+
+.team-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.team-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tier-heading th {
+  padding-top: 12px;
+  border-left: 4px solid;
+  font-weight: 600;
+  background: #f0f0f0;
+}
+
+.badge,
+.marker {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 0.75em;
+  white-space: nowrap;
+}
+
+.badge {
+  border: 1px solid #8c959f;
+  color: #57606a;
+}
+
+.marker {
+  font-style: italic;
+  color: #8c959f;
+}
+
+.marker-stale {
+  border: 1px solid #e0b252;
+  background: #fff6e0;
+  color: #7d4e00;
+  font-style: normal;
+}
+
+.impact-source {
+  margin-left: 4px;
+  font-size: 0.75em;
+  color: #8c959f;
+}
+
+.trend-up {
+  color: #2da44e;
+}
+
+.trend-down {
+  color: #cf222e;
+}
+
+.closing-lineups {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.closing-lineups li {
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.result-win {
+  color: #2da44e;
+}
+
+.result-loss {
+  color: #cf222e;
+}
+
+.team-page .chart-sparkline {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.player-header .tier {
+  margin-left: 8px;
+  padding-left: 6px;
+  border-left: 4px solid;
+  font-weight: 600;
+}
+
+.window-toggle {
+  display: flex;
+  gap: 12px;
+  margin: 12px 0;
+  border: none;
+  padding: 0;
+}
+
+.window-toggle legend {
+  float: left;
+  margin-right: 8px;
+  font-weight: 600;
+}
+
+.player-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.player-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.player-page th,
+.player-page td {
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.player-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.player-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.flag-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flag-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.flag-date {
+  font-variant-numeric: tabular-nums;
+  color: #57606a;
+}
+
+.league-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.league-page .league-events {
+  grid-row: span 2;
+}
+
+.league-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.league-page th,
+.league-page td {
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #eee;
+}
+
+.league-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.league-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.league-page .chart-sparkline {
+  display: inline-block;
+  vertical-align: middle;
+  width: 60px;
+}
+
+.league-page .tier {
+  padding-left: 6px;
+  border-left: 4px solid;
+  font-weight: 600;
+}
+
+.rotation-events,
+.league-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rotation-events > li,
+.league-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.signals {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: #57606a;
+  font-size: 0.85em;
+}
+
+.game-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.game-page .game-timeline {
+  grid-column: 1 / -1;
+}
+
+.game-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+.game-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.game-page th,
+.game-page td {
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #eee;
+}
+
+.game-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.game-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
