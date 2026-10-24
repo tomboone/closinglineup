@@ -308,6 +308,8 @@ JSON only; response models in `api/schemas.py`; the frontend's `src/api/types.ts
 | `GET /api/games/{game_id}` | both teams' stints as a timeline, lineup results, closing lineup, garbage-time marker |
 | `GET /api/health` | 200 when the DB answers and the latest derived date is within 36 h of the last final game |
 
+The OpenAPI schema is served at `/api/openapi.json` and snapshot-tested (`tests/fixtures/api/openapi.json`, rewritten by `UPDATE_SNAPSHOTS=1`). Every route above is registered with its response model, so the schema carries them all; one whose handler a later ticket fills answers 501 until then. The latest derived date is the latest game date every writing `derive` step has succeeded for in `load_log`, as `derive.run` counts one derived (§3.2); `?date=` with none derived yet is a 404. The team page's sparklines read `player_window_stats`' 10-game windows over the team's last 20 game dates, so their ratings are garbage-time filtered whatever `?garbage_time=` says; its lineups and 2-man combos are summed from stints, and follow it. Its contract notes are the non-guaranteed rows only, since no source carries options or trade-eligible dates (§4.6) (NEU-1880).
+
 ## 9. Frontend
 
 Routes: `/` (league morning page), `/teams/:tricode`, `/players/:id`, `/games/:gameId`. A date picker in the header sets `?date=` globally. Components: `TierBoard`, `SparklineCell`, `AnnotatedTimeSeries` (multi-series with event markers), `LineupTable`, `AvailabilityBoard`, `StintTimeline` (horizontal gantt per player, both teams), `FlagList`, `ShotProfile`. ECharts is the only charting library; charts fetch nothing themselves, pages do via TanStack Query. Desktop-first; nothing below 1024 px is tested. No auth.

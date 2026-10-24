@@ -12,8 +12,9 @@ from starlette.responses import Response as StarletteResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
+from closinglineup.api.routers import games, league, meta, players, teams
 from closinglineup.api.schemas import HealthResponse
-from closinglineup.db.session import make_engine, ping
+from closinglineup.db.session import make_engine, make_session_factory, ping
 from closinglineup.logging import configure_logging
 from closinglineup.settings import Settings
 
@@ -46,7 +47,17 @@ def create_app(settings: Settings, static_dir: Path = STATIC_DIR) -> FastAPI:
         yield
         engine.dispose()
 
-    app = FastAPI(title="closinglineup", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(
+        title="closinglineup",
+        lifespan=lifespan,
+        openapi_url="/api/openapi.json",
+        docs_url=None,
+        redoc_url=None,
+    )
+    # What `api.deps.get_session` opens each request's session from.
+    app.state.sessions = make_session_factory(engine)
+    for routes in (meta, teams, league, players, games):
+        app.include_router(routes.router)
 
     # DB check only; the freshness rule against the last final game lands with the derive layer.
     @app.get("/api/health")
