@@ -164,3 +164,71 @@ body {
   display: inline-block;
   vertical-align: middle;
 }
+
+.player-header .tier {
+  margin-left: 8px;
+  padding-left: 6px;
+  border-left: 4px solid;
+  font-weight: 600;
+}
+
+.window-toggle {
+  display: flex;
+  gap: 12px;
+  margin: 12px 0;
+  border: none;
+  padding: 0;
+}
+
+.window-toggle legend {
+  float: left;
+  margin-right: 8px;
+  font-weight: 600;
+}
+
+.player-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.player-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.player-page th,
+.player-page td {
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.player-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.player-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.flag-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flag-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.flag-date {
+  font-variant-numeric: tabular-nums;
+  color: #57606a;
+}
