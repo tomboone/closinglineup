@@ -21,6 +21,7 @@ from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
+from closinglineup.derive.events import SignalRule, compute_events
 from closinglineup.derive.garbage_time import GarbageTimeRule, write_garbage_time
 from closinglineup.derive.reconcile import (
     LINEUP_TOLERANCE_POSSESSIONS,
@@ -380,6 +381,12 @@ def derive(date: DateOption = None, start: FromOption = None, end: ToOption = No
             typer.echo(
                 f"derive {day}: rotation state: {state['players']} players, "
                 f"{state['changed']} changed, {state['removed']} removed"
+            )
+            # Events compare the date's rotation state with the team's previous game date's.
+            events = compute_events(db, day, SignalRule())
+            typer.echo(
+                f"derive {day}: rotation events: {events['events']} written, "
+                f"{events['removed']} replaced"
             )
     finally:
         engine.dispose()
