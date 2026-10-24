@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GAME_PAGE, LEAGUE_PAGE, mockApi, PLAYER_PAGE, renderApp, TEAM_PAGE } from "./test/app";
 import { allOptions } from "./test/echarts";
@@ -71,8 +71,9 @@ describe("/dev/charts", () => {
     for (const chart of ["SparklineCell", "AnnotatedTimeSeries", "StintTimeline", "ShotProfile"]) {
       expect(screen.getByRole("heading", { name: chart })).toBeInTheDocument();
     }
-    // Three sparklines and one of each other chart.
-    expect(allOptions()).toHaveLength(6);
+    // Three sparklines and one of each other chart. The charts set their options in an effect, which
+    // can land after the lazily loaded page's headings do.
+    await waitFor(() => expect(allOptions()).toHaveLength(6));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
