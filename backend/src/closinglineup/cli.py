@@ -32,6 +32,7 @@ from closinglineup.derive.reconcile import (
     reconcile,
 )
 from closinglineup.derive.roster import rebuild_roster_membership
+from closinglineup.derive.rotation import TierRule, compute_rotation_state
 from closinglineup.derive.windows import refresh_windows
 from closinglineup.heartbeat import Heartbeat
 from closinglineup.load.loader import LoadResult, load_dates, load_keyed
@@ -361,6 +362,7 @@ def derive(date: DateOption = None, start: FromOption = None, end: ToOption = No
         raise typer.BadParameter("pass --date or --from/--to")
     settings = Settings()
     rule = GarbageTimeRule.from_settings(settings)
+    tiers = TierRule.from_settings(settings)
     engine = make_engine(settings)
     try:
         db = make_session_factory(engine)
@@ -373,6 +375,12 @@ def derive(date: DateOption = None, start: FromOption = None, end: ToOption = No
         # The view is computed whole, so once for the range, from the flags just written.
         windows = refresh_windows(db)
         typer.echo(f"derive: windows: {windows['rows']} rows in {windows['seconds']} s")
+        for day in days:
+            state = compute_rotation_state(db, day, tiers)
+            typer.echo(
+                f"derive {day}: rotation state: {state['players']} players, "
+                f"{state['changed']} changed, {state['removed']} removed"
+            )
     finally:
         engine.dispose()
 

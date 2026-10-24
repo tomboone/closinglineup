@@ -11,7 +11,7 @@ BACKEND = Path(__file__).parents[1]
 
 BASELINE = "62f166b83d8c"
 BASELINE_TABLES = {"load_log", "job_run"}
-# Spec §6.1, §6.2 and §6.3.
+# Spec §6.1, §6.2, §6.3 and §6.4's tables.
 DATA_TABLES = {
     "team",
     "player",
@@ -27,6 +27,7 @@ DATA_TABLES = {
     "transaction",
     "impact_snapshot",
     "contract",
+    "rotation_state",
 }
 
 

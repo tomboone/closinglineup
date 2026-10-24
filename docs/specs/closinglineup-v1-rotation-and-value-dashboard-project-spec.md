@@ -270,9 +270,9 @@ A stint is garbage time when, at its start, `|margin| ≥ M` with `≤ T` second
 ### 7.5 Rotation tiers (per player-team-game-date, role window)
 
 Evaluated in order; the first match wins:
-1. **Injured** — the most recent injury report at or before the date lists the player Out or Doubtful for that team's game on that date.
+1. **Injured** — the most recent injury report at or before the date lists the player Out or Doubtful for that team's game on that date, for a reason other than a G League one (`G League - On Assignment`, `G League - Two-Way`), which is an assignment, not an injury (`derive/availability.py`, NEU-1876).
 2. **Starter** — started ≥ 4 of the last 5 games he played for the team.
-3. **Core** — minutes share ≥ 18% over the last 10 team games.
+3. **Core** — minutes share ≥ 3.6% over the last 10 team games: 18% of a game's 48 minutes, about 8.6 a game, since §7.1's share is of the team's 240 player-minutes a regulation game, of which a whole game is 20% (NEU-1876).
 4. **Fringe** — played in ≥ 50% of the last 10 team games.
 5. **Out** — everything else, including a current G League assignment.
 
@@ -321,7 +321,7 @@ Routes: `/` (league morning page), `/teams/:tricode`, `/players/:id`, `/games/:g
 | `HEALTHCHECKS_URL_NIGHTLY` / `_DAILY` / `_WEEKLY` | unset → no-op | |
 | `EPM_ENABLED`, `DARKO_ENABLED`, `HOOPSRUMORS_ENABLED` | `false` until terms are checked | Hoops Rumors replaces `SPOTRAC_ENABLED` (ADR-0004) |
 | `GARBAGE_TIME_RULE` | `25:540,20:360,15:180,10:60` | |
-| `TIER_STARTER_MIN`, `TIER_CORE_SHARE`, `TIER_FRINGE_PLAYED_RATE` | `4/5`, `0.18`, `0.5` | |
+| `TIER_STARTER_MIN`, `TIER_CORE_SHARE`, `TIER_FRINGE_PLAYED_RATE` | `4/5`, `0.036`, `0.5` | |
 | `LOG_LEVEL` | `INFO` | |
 | `SEASON` | derived from today | override for backfill |
 
