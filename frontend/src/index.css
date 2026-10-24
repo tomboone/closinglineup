@@ -52,3 +52,115 @@ body {
   width: 120px;
   height: 28px;
 }
+
+.note {
+  color: #57606a;
+  font-size: 0.85em;
+}
+
+.team-page {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.team-page .team-tiers {
+  grid-row: span 2;
+}
+
+.team-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.team-page th,
+.team-page td {
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #eee;
+}
+
+.team-page caption {
+  margin: 12px 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.team-page .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tier-heading th {
+  padding-top: 12px;
+  border-left: 4px solid;
+  font-weight: 600;
+  background: #f0f0f0;
+}
+
+.badge,
+.marker {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 0.75em;
+  white-space: nowrap;
+}
+
+.badge {
+  border: 1px solid #8c959f;
+  color: #57606a;
+}
+
+.marker {
+  font-style: italic;
+  color: #8c959f;
+}
+
+.marker-stale {
+  border: 1px solid #e0b252;
+  background: #fff6e0;
+  color: #7d4e00;
+  font-style: normal;
+}
+
+.impact-source {
+  margin-left: 4px;
+  font-size: 0.75em;
+  color: #8c959f;
+}
+
+.trend-up {
+  color: #2da44e;
+}
+
+.trend-down {
+  color: #cf222e;
+}
+
+.closing-lineups {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.closing-lineups li {
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.result-win {
+  color: #2da44e;
+}
+
+.result-loss {
+  color: #cf222e;
+}
+
+.team-page .chart-sparkline {
+  display: inline-block;
+  vertical-align: middle;
+}
