@@ -28,6 +28,7 @@ type Availability = Literal[
 type InjuryStatus = Literal["Out", "Doubtful", "Questionable", "Probable", "Available"]
 type InjurySource = Literal["pdf", "espn"]
 type GarbageTime = Literal["include", "exclude"]
+type GameStatus = Literal["scheduled", "final", "postponed"]
 type Window = Literal["5", "10", "20", "season"]
 type Flag = Literal[
     "minutes_cliff",
@@ -40,7 +41,11 @@ type Flag = Literal[
 
 
 class HealthResponse(BaseModel):
+    """`reason` says why the app is unavailable: the database not answering, or the latest
+    derived date too far behind the latest final game."""
+
     status: Literal["ok", "unavailable"]
+    reason: str | None = None
 
 
 class PlayerRef(BaseModel):
@@ -388,35 +393,65 @@ class PlayerPage(BaseModel):
 # `/api/games/{game_id}`
 
 
-class StintSummary(BaseModel):
-    """One team's stint; `start_sec` and `end_sec` are seconds into the period."""
+class PlayerStint(BaseModel):
+    """A player's part in one of his team's stints, so the timeline draws a row per player;
+    `start_sec` and `end_sec` are seconds into the period."""
 
-    tricode: str
+    player_id: int
+    team_id: int
     period: int
     start_sec: float
     end_sec: float
-    players: list[PlayerRef]
-    possessions: int
-    pts_for: int
-    pts_against: int
     is_garbage_time: bool | None
 
 
+class GamePlayer(BaseModel):
+    """A player who played in the game, from his box-score line, to label his timeline row."""
+
+    player: PlayerRef
+    is_starter: bool
+    seconds: int
+
+
+class GameLineup(BaseModel):
+    """A five's results in the game: its offensive and defensive possessions, the points scored
+    and allowed on them, and its net rating."""
+
+    players: list[PlayerRef]
+    possessions: int
+    opp_possessions: int
+    pts_for: int
+    pts_against: int
+    net_rating: float | None
+
+
 class GameTeam(BaseModel):
+    """`closing` is the five on the floor at the final buzzer, null unless the game was decided
+    by 10 or fewer."""
+
+    team_id: int
     tricode: str
     score: int | None
-    lineups: list[LineupStats]
-    closing: list[PlayerRef]
+    players: list[GamePlayer]
+    lineups: list[GameLineup]
+    closing: list[PlayerRef] | None
+
+
+class GarbageTimeMarker(BaseModel):
+    """Where garbage time began: the first garbage-time stint's start."""
+
+    period: int
+    start_sec: float
 
 
 class GamePage(BaseModel):
-    """`garbage_time_from` is the first garbage-time stint's (period, start_sec), null when the
-    game had none."""
+    """`garbage_time_from` is null when the game had no garbage time."""
 
     game_id: str
     game_date: dt.date
-    status: Literal["scheduled", "final", "postponed"]
+    status: GameStatus
+    garbage_time: GarbageTime
     home: GameTeam
     away: GameTeam
-    stints: list[StintSummary]
-    garbage_time_from: tuple[int, float] | None
+    stints: list[PlayerStint]
+    garbage_time_from: GarbageTimeMarker | None

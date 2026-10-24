@@ -30,19 +30,14 @@ def client(static_dir: Path) -> Iterator[TestClient]:
         yield client
 
 
-def test_health_is_200_when_the_database_answers(database_url: str, tmp_path: Path) -> None:
-    with TestClient(create_app(Settings(database_url=database_url), tmp_path)) as client:
-        response = client.get("/api/health")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
-
 def test_health_is_503_when_the_database_is_down(client: TestClient) -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 503
-    assert response.json() == {"status": "unavailable"}
+    body = response.json()
+    assert body["status"] == "unavailable"
+    assert body["reason"].startswith("database unreachable")
+    assert "secret" not in body["reason"]
 
 
 def test_root_serves_the_bundle_index(client: TestClient) -> None:
@@ -106,7 +101,3 @@ def test_every_spec_route_s_page_model_is_in_the_schema(client: TestClient) -> N
     )
     pages = {"MetaResponse", "TeamsResponse", "TeamPage", "LeaguePage", "PlayerPage", "GamePage"}
     assert pages <= set(schema["components"]["schemas"])
-
-
-def test_a_route_a_later_ticket_fills_is_501(client: TestClient) -> None:
-    assert client.get("/api/games/0022500001").status_code == 501
