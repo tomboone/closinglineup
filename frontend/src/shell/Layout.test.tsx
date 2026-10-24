@@ -76,16 +76,28 @@ describe("Layout", () => {
     );
   });
 
-  it("shows the stale banner when a source has given nothing", async () => {
+  it("shows the stale banner when a required source has given nothing", async () => {
     const meta = {
       ...FRESH_META,
-      freshness: [...FRESH_META.freshness, { source: "darko", latest: null }],
+      freshness: [...FRESH_META.freshness, { source: "bpm_local", latest: null }],
     };
     mockApi({ "/api/meta": { body: meta }, "/api/league": "pending" });
     renderApp("/");
 
     expect(await screen.findByRole("complementary", { name: "Stale data" })).toHaveTextContent(
-      "No data yet from: DARKO.",
+      "No data yet from: local BPM.",
     );
+  });
+
+  it("shows no stale banner for a source that may be switched off", async () => {
+    const meta = {
+      ...FRESH_META,
+      freshness: [...FRESH_META.freshness, { source: "darko", latest: null }],
+    };
+    mockApi({ "/api/meta": { body: meta }, "/api/league": { body: { date: "2026-03-20" } } });
+    renderApp("/");
+    await screen.findByText("Morning feed for 2026-03-20.");
+
+    expect(screen.queryByRole("complementary", { name: "Stale data" })).not.toBeInTheDocument();
   });
 });
