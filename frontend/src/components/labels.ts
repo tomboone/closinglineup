@@ -39,3 +39,9 @@ export const IMPACT_LABELS: Record<Schemas["ImpactSeries"]["source"], string> = 
   darko: "DARKO",
   bpm_local: "BPM",
 };
+
+export const GAME_STATUS_LABELS: Record<Schemas["GameStatus"], string> = {
+  scheduled: "Scheduled",
+  final: "Final",
+  postponed: "Postponed",
+};

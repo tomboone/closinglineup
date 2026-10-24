@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { LEAGUE_PAGE, mockApi, PLAYER_PAGE, renderApp, TEAM_PAGE } from "./test/app";
+import { GAME_PAGE, LEAGUE_PAGE, mockApi, PLAYER_PAGE, renderApp, TEAM_PAGE } from "./test/app";
 import { allOptions } from "./test/echarts";
 
 vi.mock("./components/charts/echarts", () => import("./test/echarts"));
@@ -28,11 +28,11 @@ const PAGES = [
     content: "as of 2026-03-20",
   },
   {
-    path: "/games/0022500001",
-    api: "/api/games/0022500001",
-    heading: "Game 0022500001",
-    body: { game_date: "2025-10-21", away: { tricode: "NYK" }, home: { tricode: "BOS" } },
-    content: "NYK at BOS, 2025-10-21.",
+    path: "/games/0022500990",
+    api: "/api/games/0022500990",
+    heading: "Game",
+    body: GAME_PAGE,
+    content: "Not a close game.",
   },
 ];
 

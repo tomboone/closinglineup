@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { vi } from "vitest";
 import type {
+  GamePage,
   LeaguePage,
   MetaResponse,
   PlayerPage,
@@ -334,6 +335,124 @@ export const EMPTY_LEAGUE_PAGE: LeaguePage = {
   transactions: [],
   impact_risers: [],
   impact_fallers: [],
+};
+
+const KNICKS = {
+  BRUNSON: player(1628973, "Jalen Brunson"),
+  HART: player(1628404, "Josh Hart"),
+  ANUNOBY: player(1628384, "OG Anunoby"),
+  BRIDGES: player(1628969, "Mikal Bridges"),
+  TOWNS: player(1626157, "Karl-Anthony Towns"),
+  MCBRIDE: player(1630540, "Miles McBride"),
+};
+
+const gamePlayer = (
+  ref: { player_id: number; name: string },
+  is_starter: boolean,
+  seconds: number,
+) => ({ player: ref, is_starter, seconds });
+
+const stint = (
+  player_id: number,
+  team_id: number,
+  period: number,
+  start_sec: number,
+  end_sec: number,
+  is_garbage_time = false,
+): GamePage["stints"][number] => ({
+  player_id,
+  team_id,
+  period,
+  start_sec,
+  end_sec,
+  is_garbage_time,
+});
+
+const BOS_ID = 1610612738;
+const NYK_ID = 1610612752;
+
+/**
+ * A Celtics blowout of the Knicks, so no closing lineup, with garbage time from 5:00 left in the
+ * fourth: six players a side, box-score order, and a stint or two each.
+ */
+export const GAME_PAGE: GamePage = {
+  game_id: "0022500990",
+  game_date: "2026-03-19",
+  status: "final",
+  garbage_time: "exclude",
+  away: {
+    team_id: NYK_ID,
+    tricode: "NYK",
+    score: 101,
+    players: [
+      gamePlayer(KNICKS.BRUNSON, true, 2052),
+      gamePlayer(KNICKS.HART, true, 1980),
+      gamePlayer(KNICKS.ANUNOBY, true, 1905),
+      gamePlayer(KNICKS.BRIDGES, true, 1860),
+      gamePlayer(KNICKS.TOWNS, true, 1800),
+      gamePlayer(KNICKS.MCBRIDE, false, 905),
+    ],
+    lineups: [
+      {
+        players: [KNICKS.BRUNSON, KNICKS.HART, KNICKS.ANUNOBY, KNICKS.BRIDGES, KNICKS.TOWNS],
+        possessions: 48,
+        opp_possessions: 47,
+        pts_for: 50,
+        pts_against: 58,
+        net_rating: -19.2,
+      },
+    ],
+    closing: null,
+  },
+  home: {
+    team_id: BOS_ID,
+    tricode: "BOS",
+    score: 126,
+    players: [
+      gamePlayer(TATUM, true, 2010),
+      gamePlayer(BROWN, true, 1950),
+      gamePlayer(WHITE, true, 1890),
+      gamePlayer(HOLIDAY, true, 1700),
+      gamePlayer(PORZINGIS, true, 1600),
+      gamePlayer(DAVISON, false, 300),
+    ],
+    lineups: [
+      {
+        players: [TATUM, BROWN, WHITE, HOLIDAY, PORZINGIS],
+        possessions: 47,
+        opp_possessions: 48,
+        pts_for: 58,
+        pts_against: 50,
+        net_rating: 19.2,
+      },
+    ],
+    closing: null,
+  },
+  stints: [
+    stint(KNICKS.BRUNSON.player_id, NYK_ID, 1, 0, 480),
+    stint(KNICKS.MCBRIDE.player_id, NYK_ID, 4, 420, 720, true),
+    stint(TATUM.player_id, BOS_ID, 1, 0, 540),
+    stint(TATUM.player_id, BOS_ID, 3, 0, 720),
+    stint(DAVISON.player_id, BOS_ID, 4, 420, 720, true),
+  ],
+  garbage_time_from: { period: 4, start_sec: 420 },
+};
+
+/** The same game won by 4 instead, so both closing fives and no garbage time. */
+export const CLOSE_GAME_PAGE: GamePage = {
+  ...GAME_PAGE,
+  away: {
+    ...GAME_PAGE.away,
+    score: 108,
+    closing: [KNICKS.BRUNSON, KNICKS.HART, KNICKS.ANUNOBY, KNICKS.BRIDGES, KNICKS.MCBRIDE],
+  },
+  home: {
+    ...GAME_PAGE.home,
+    score: 112,
+    closing: [TATUM, BROWN, WHITE, HOLIDAY, PORZINGIS],
+  },
+  stints: GAME_PAGE.stints.map((s) => ({ ...s, is_garbage_time: false })),
+  garbage_time_from: null,
 };
 
 /**
