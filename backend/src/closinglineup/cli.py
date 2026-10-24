@@ -22,6 +22,7 @@ from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
 from closinglineup.db.session import make_engine, make_session_factory, ping
 from closinglineup.derive.events import SignalRule, compute_events
+from closinglineup.derive.flags import FlagRule, compute_flags
 from closinglineup.derive.garbage_time import GarbageTimeRule, write_garbage_time
 from closinglineup.derive.reconcile import (
     LINEUP_TOLERANCE_POSSESSIONS,
@@ -387,6 +388,11 @@ def derive(date: DateOption = None, start: FromOption = None, end: ToOption = No
             typer.echo(
                 f"derive {day}: rotation events: {events['events']} written, "
                 f"{events['removed']} replaced"
+            )
+            # Flags read the date's events among their inputs.
+            raised = compute_flags(db, day, FlagRule())
+            typer.echo(
+                f"derive {day}: flags: {raised['flags']} raised, {raised['removed']} replaced"
             )
     finally:
         engine.dispose()

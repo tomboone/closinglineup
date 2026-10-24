@@ -296,14 +296,16 @@ def test_derive_flags_each_date_in_the_range_and_re_runs_unchanged(
         "derive 2016-11-01: garbage time: 2 games, 34 stints, 8 flagged, 34 changed",
         "derive 2016-11-02: garbage time: 1 games, 18 stints, 8 flagged, 18 changed",
     ]
-    # The windows are refreshed once, after the range's flags, and rotation state and events
-    # follow them, date by date.
+    # The windows are refreshed once, after the range's garbage-time flags, and rotation state,
+    # events and player flags follow them, date by date.
     assert lines[2].startswith("derive: windows: ")
     assert [line.split(":")[0:2] for line in lines[3:]] == [
         ["derive 2016-11-01", " rotation state"],
         ["derive 2016-11-01", " rotation events"],
+        ["derive 2016-11-01", " flags"],
         ["derive 2016-11-02", " rotation state"],
         ["derive 2016-11-02", " rotation events"],
+        ["derive 2016-11-02", " flags"],
     ]
     assert second.output.splitlines()[:2] == [
         "derive 2016-11-01: garbage time: 2 games, 34 stints, 8 flagged, 0 changed",

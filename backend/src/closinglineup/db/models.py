@@ -70,6 +70,15 @@ IMPACT_SOURCES = ("epm", "darko", "bpm_local")
 CONTRACT_SOURCES = ("hoopsrumors",)
 # Spec §7.5, in order of precedence.
 ROTATION_TIERS = ("injured", "starter", "core", "fringe", "out")
+# Spec §7.7's flags.
+PLAYER_FLAGS = (
+    "minutes_cliff",
+    "usage_up_efficiency_down",
+    "bleeding",
+    "earning_trust",
+    "yo_yo",
+    "contract_pressure",
+)
 # CONTEXT.md, "Availability": the injury report's statuses, lowercased, and what the box score or
 # a G League assignment says of a player no report lists.
 AVAILABILITIES = (
@@ -504,3 +513,17 @@ class RotationEvent(Timestamps, Base):
     from_tier: Mapped[str | None] = mapped_column(String)
     to_tier: Mapped[str] = mapped_column(String)
     signals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+
+
+class PlayerFlag(Timestamps, Base):
+    """A flag raised on a player on a team on one of its game dates, with the numbers that raised
+    it (spec §7.7, `derive.flags`)."""
+
+    __tablename__ = "player_flag"
+    __table_args__ = (Index(None, "game_date"), _one_of("flag", PLAYER_FLAGS))
+
+    player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"), primary_key=True)
+    game_date: Mapped[date] = mapped_column(primary_key=True)
+    flag: Mapped[str] = mapped_column(String, primary_key=True)
+    detail: Mapped[dict[str, Any]]
