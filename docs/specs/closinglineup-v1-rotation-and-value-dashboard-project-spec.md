@@ -240,7 +240,7 @@ Every table has `created_at` / `updated_at`. IDs are NBA's (`nba_player_id`, `nb
 - `player_window_stats` — **materialized view**, one row per `(player_id, team_id NULL for production windows, game_date, window ∈ {5, 10, 20, season, prior_season})` with every §7 metric plus `games_in_window` and `is_short`. Role rows (team set) are windows 5, 10, 20 and season over the player's spell with the team, his roster spans there run together; production rows (team NULL) add prior_season. Every window but prior_season stays within the date's season. Each windowed metric has `<metric>_delta_prior` and `<metric>_delta_season` columns; a production row's season window has the prior season as its prior, a role row's has none. §7.3's 2-man combos and garbage-time-included ratings are not in it yet. Defined in `db/views.sql`, refreshed by `derive.windows.refresh_windows` (NEU-1875).
 - `rotation_state(player_id, team_id, game_date, tier, minutes_share_10, starter_rate_5, played_rate_10, availability, badges text[], is_short, inputs jsonb)` PK `(player_id, team_id, game_date)`
 - `rotation_event(id, player_id, team_id, game_date, prev_game_date NULL, from_tier NULL, to_tier, signals jsonb)` — `from_tier NULL` means arrival on the team; one per `(player_id, team_id, game_date)` (NEU-1877).
-- `player_flag(player_id, team_id, game_date, flag, detail jsonb)` PK `(player_id, team_id, game_date, flag)`
+- `player_flag(player_id, team_id, game_date, flag, detail jsonb)` PK `(player_id, team_id, game_date, flag)` — `detail` carries the numbers that raised the flag (NEU-1878).
 - `load_log(table_name, game_date, step, status, started_at, finished_at, detail)` and `job_run(job, started_at, finished_at, status, detail)`.
 
 ## 7. Metrics and rules
@@ -290,6 +290,8 @@ An event is written whenever the tier at date d differs from the tier at the tea
 - `earning_trust` — minutes share up across three consecutive 5-game windows
 - `yo_yo` — ≥ 3 rotation events in the last 20 team games
 - `contract_pressure` — non-guaranteed money with a guarantee date within 30 days, or a two-way player within 5 of the NBA-day limit
+
+Every player-team with a `rotation_state` row on the date is evaluated; thresholds live in `FlagRule`. "At least", "at most" and "within" are inclusive, the cliff's "below" strict, and values within 1e-9 count as equal. A NULL metric raises nothing. `usage_up_efficiency_down` reads the 10-game production window's `_delta_season` columns; `bleeding` the 10-game role window's `on_court_net` and `on_court_poss`, the team's net with him off being `on_court_net − on_off_net`. `earning_trust` compares the 5-game role window at the date and 5 and 10 team games before it, each strictly higher than the last, and needs 15 games of his current spell this season. `yo_yo` counts tier changes in the team's last 20 final games this season, the date included; an arrival is not a change. `contract_pressure` reads the latest weekly `contract` snapshot on or before the date (a player it omits is fully guaranteed): a `guarantee_date` 0 to 30 days ahead whose `guaranteed_after` exceeds `guaranteed`, or is NULL; or a two-way span covering the date with at least 45 of the CBA's 50 regular-season games active (a box-score line he played in or sat out as a coach's decision) since it started, this season. A date's flags are deleted and rewritten on every run (`derive/flags.py`, NEU-1878).
 
 ## 8. API (`/api`)
 

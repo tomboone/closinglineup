@@ -29,6 +29,7 @@ DATA_TABLES = {
     "contract",
     "rotation_state",
     "rotation_event",
+    "player_flag",
 }
 
 
