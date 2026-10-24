@@ -3,13 +3,16 @@
 
 The CDN sits behind the same Akamai TLS fingerprinting as stats.nba.com, so it is fetched through
 the same `NbaSession` (ADR-0002). Every function goes through `fetch_json`, so a response is in the
-raw cache, under `raw/cdn/<endpoint>/<key>.json`, before anything parses it (spec §5).
+raw cache, under `raw/cdn/<endpoint>/<key>.json`, before anything parses it (spec §5). Each feed
+declares the top-level keys its data is under, and a response without one raises `SchemaDrift`
+(`sources.drift`).
 """
 
 from datetime import UTC
 from typing import Any
 
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.drift import Shape, top_level
 from closinglineup.sources.nba_http import NbaHttpError, NbaSession, fetch_json
 
 SOURCE = "cdn"
@@ -27,6 +30,14 @@ SCOREBOARD_URL = f"{CDN_BASE}/liveData/scoreboard/todaysScoreboard_00.json"
 SCOREBOARD_KEY_FORMAT = "%Y%m%dT%H%M%SZ"
 # The live data's `gameStatus`: 1 scheduled, 2 in progress, 3 final.
 GAME_FINAL = 3
+
+# Each feed's top-level keys, as recorded under `tests/fixtures/cdn/`.
+SHAPES: dict[str, Shape] = {
+    SCHEDULE: top_level("leagueSchedule"),
+    SCOREBOARD: top_level("scoreboard"),
+    BOXSCORE: top_level("game"),
+    PLAYBYPLAY: top_level("game"),
+}
 
 
 def fetch_schedule(
@@ -46,7 +57,15 @@ def fetch_schedule(
             raise NbaHttpError(f"{SCHEDULE_URL} holds season {found}, not {season}")
 
     return fetch_json(
-        session, cache, SOURCE, SCHEDULE, season, SCHEDULE_URL, force=force, check=check
+        session,
+        cache,
+        SOURCE,
+        SCHEDULE,
+        season,
+        SCHEDULE_URL,
+        force=force,
+        check=check,
+        shape=SHAPES[SCHEDULE],
     )
 
 
@@ -57,7 +76,9 @@ def fetch_todays_scoreboard(session: NbaSession, cache: RawCache) -> dict[str, A
     than one write-once file per date.
     """
     key = cache.clock.now().astimezone(UTC).strftime(SCOREBOARD_KEY_FORMAT)
-    return fetch_json(session, cache, SOURCE, SCOREBOARD, key, SCOREBOARD_URL)
+    return fetch_json(
+        session, cache, SOURCE, SCOREBOARD, key, SCOREBOARD_URL, shape=SHAPES[SCOREBOARD]
+    )
 
 
 def fetch_live_boxscore(
@@ -75,7 +96,10 @@ def fetch_live_boxscore(
             raise NbaHttpError(f"game {game_id} is not final (gameStatus {status})")
 
     url = f"{CDN_BASE}/liveData/{BOXSCORE}/{BOXSCORE}_{game_id}.json"
-    return fetch_json(session, cache, SOURCE, BOXSCORE, game_id, url, force=force, check=check)
+    shape = SHAPES[BOXSCORE]
+    return fetch_json(
+        session, cache, SOURCE, BOXSCORE, game_id, url, force=force, check=check, shape=shape
+    )
 
 
 def fetch_live_pbp(
@@ -93,4 +117,7 @@ def fetch_live_pbp(
             raise NbaHttpError(f"game {game_id} is not final (no game end action)")
 
     url = f"{CDN_BASE}/liveData/{PLAYBYPLAY}/{PLAYBYPLAY}_{game_id}.json"
-    return fetch_json(session, cache, SOURCE, PLAYBYPLAY, game_id, url, force=force, check=check)
+    shape = SHAPES[PLAYBYPLAY]
+    return fetch_json(
+        session, cache, SOURCE, PLAYBYPLAY, game_id, url, force=force, check=check, shape=shape
+    )

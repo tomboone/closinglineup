@@ -20,7 +20,7 @@ step), so a rerun refreshes that row rather than adding another. A `shot` file h
 and no `load_log` row: `load_keyed` reloads every file, which writes nothing for those unchanged.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, cast
@@ -222,13 +222,15 @@ def load_dates(
     dates: Iterable[date] | None = None,
     *,
     missing: bool = False,
+    tables: Collection[str] | None = None,
 ) -> list[LoadResult]:
-    """Load every table of each date, date by date in order; with no `dates`, every date the
-    store holds a file for. `missing` skips the (table, date) pairs whose last load succeeded,
-    and those with no file: a date parsed before its table existed has nothing a load can heal,
-    and only a re-parse writes its file."""
+    """Load every table of each date, or only `tables`, date by date in order; with no `dates`,
+    every date the store holds a file for. `missing` skips the (table, date) pairs whose last
+    load succeeded, and those with no file: a date parsed before its table existed has nothing a
+    load can heal, and only a re-parse writes its file."""
     days = sorted(set(dates)) if dates is not None else store.dates()
-    pairs = [(name, day) for day in days for name in ROW_MODELS]
+    names = [name for name in ROW_MODELS if tables is None or name in tables]
+    pairs = [(name, day) for day in days for name in names]
     if missing:
         done = _loaded(db, days)
         pairs = [pair for pair in pairs if pair not in done and store.path(*pair).is_file()]

@@ -103,11 +103,12 @@ def test_fetch_returns_the_json_and_caches_it_under_its_key(
 def test_each_scoreboard_poll_is_kept_as_its_own_snapshot(
     session: NbaSession, cache: RawCache, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _script(session, monkeypatch, b'{"poll": 1}', b'{"poll": 2}')
+    first, second = {"scoreboard": {"poll": 1}}, {"scoreboard": {"poll": 2}}
+    _script(session, monkeypatch, json.dumps(first).encode(), json.dumps(second).encode())
 
     nba_cdn.fetch_todays_scoreboard(session, cache)
     clock.current += timedelta(minutes=30)
-    assert nba_cdn.fetch_todays_scoreboard(session, cache) == {"poll": 2}
+    assert nba_cdn.fetch_todays_scoreboard(session, cache) == second
 
     assert cache.list("cdn", "scoreboard") == ["20261021T233005Z", "20261022T000005Z"]
 

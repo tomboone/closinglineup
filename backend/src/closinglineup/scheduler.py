@@ -5,11 +5,14 @@ row as it starts and finishes (spec §3.3, §6.4).
 rosters, transactions and games, then derives the date (`derive.run`): garbage time, windows,
 rotation state, events, flags, local BPM, and a sample of two teams' stints reconciled with
 NBA.com's. A game stats.nba.com fails for is marked `stats_failed` in `load_log` and parsed from
-cdn.nba.com's live box (spec §4.2); `fetch_missing` re-tries stats.nba.com for those games.
+cdn.nba.com's live box (spec §4.2); `fetch_missing` re-tries stats.nba.com for those games. A
+response whose shape has drifted from its endpoint's (`sources.drift`) is recorded in `load_log`
+with status `drift`, and fails the run once the rest of it is done.
 `weekly` re-fetches, parses and loads the season's shot charts, then runs the weekly overlays;
 `injuries` and `daily_overlays` run theirs (`closinglineup.overlays`).
 """
 
+import json
 import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
@@ -45,6 +48,7 @@ from closinglineup.season import Phase, is_counted, season_bounds, season_label
 from closinglineup.settings import Settings
 from closinglineup.sources import nba_cdn, nba_stats
 from closinglineup.sources.cache import RawCache
+from closinglineup.sources.drift import SchemaDrift
 from closinglineup.sources.nba_http import NbaHttpError, NbaSession, NbaUnreachableError
 from closinglineup.sources.nba_stats import (
     EndpointResult,
@@ -197,6 +201,37 @@ def stats_failed_games(db: sessionmaker[Session]) -> dict[date, list[str]]:
         return {day: sorted((detail or {}).get(STATS_FAILED, {})) for day, detail in found}
 
 
+# The `load_log` row of a date's responses from one endpoint that drifted: its table is the
+# endpoint, as `<source>/<endpoint>`, its status `drift`, and its detail lists each drifted
+# response by cache key, with how it differs.
+DRIFT_STEP = "fetch"
+
+
+def record_drift(
+    db: sessionmaker[Session],
+    day: date,
+    drifted: list[EndpointResult],
+    started_at: datetime,
+    finished_at: datetime,
+) -> None:
+    """Record each endpoint of `drifted`, the DRIFT results of `day`'s fetch, in `load_log`."""
+    by_endpoint: dict[str, dict[str, str | None]] = {}
+    for result in drifted:
+        by_endpoint.setdefault(f"{result.source}/{result.endpoint}", {})[result.key] = result.error
+    with db.begin() as session:
+        for endpoint, keys in by_endpoint.items():
+            write_load_log(
+                session,
+                endpoint,
+                day,
+                RunStatus.DRIFT,
+                started_at,
+                finished_at,
+                {"drift": keys},
+                step=DRIFT_STEP,
+            )
+
+
 def shot_chart_players(db: sessionmaker[Session], season: str) -> list[tuple[int, SeasonType]]:
     """Every player who has played in `season`, with each season type he has played in, sorted:
     the shot charts `weekly` fetches. A player who has not played has no shots, and stats.nba.com
@@ -214,17 +249,21 @@ def shot_chart_players(db: sessionmaker[Session], season: str) -> list[tuple[int
 def _fetch_cdn_game(
     session: NbaSession, cache: RawCache, game_id: str, *, force: bool = False
 ) -> list[EndpointResult]:
-    """`fetch_game` for the cdn.nba.com feeds: a feed that answers badly is FAILED, not raised."""
+    """`fetch_game` for the cdn.nba.com feeds: a feed that answers badly is FAILED, and one that
+    has drifted DRIFT, not raised."""
     results: list[EndpointResult] = []
     for endpoint, fetch in CDN_GAME_ENDPOINTS.items():
         cached = not force and cache.exists(nba_cdn.SOURCE, endpoint, game_id)
         try:
             fetch(session, cache, game_id, force=force)
         except NbaHttpError as exc:
-            results.append(EndpointResult(endpoint, game_id, FetchStatus.FAILED, str(exc)))
-            continue
-        status = FetchStatus.CACHED if cached else FetchStatus.FETCHED
-        results.append(EndpointResult(endpoint, game_id, status))
+            status, error = FetchStatus.FAILED, str(exc)
+        except SchemaDrift as exc:
+            status, error = FetchStatus.DRIFT, str(exc)
+        else:
+            status = FetchStatus.CACHED if cached else FetchStatus.FETCHED
+            error = None
+        results.append(EndpointResult(endpoint, game_id, status, error, source=nba_cdn.SOURCE))
     return results
 
 
@@ -322,6 +361,13 @@ class Jobs:
         (`pipeline`). Once stats.nba.com stops answering altogether, the rest of the date's games
         are fetched from cdn.nba.com alone and reconciliation is skipped (`fetch_final_games`).
         `fetch_missing` re-tries them.
+
+        A response whose shape has drifted from its endpoint's is not cached (`sources.drift`), so
+        a game's drifted stats.nba.com endpoint leaves it `stats_failed`, as one that failed does;
+        a drifted schedule gives way to the copy cached before it, and with none the run fails.
+        Each endpoint that drifted has a `load_log` row of the date with status `drift`
+        (`record_drift`), and once the run is done it fails with every difference in its error,
+        which the heartbeat's `/fail` carries.
         """
         return self._run(NIGHTLY, lambda: self._nightly(day), family="nightly")
 
@@ -392,8 +438,22 @@ class Jobs:
 
     def _nightly(self, day: date) -> Detail:
         started_at = self.clock.now()
+        drifted: list[EndpointResult] = []
         with self.nba() as session:
-            schedule = nba_cdn.fetch_schedule(session, self.cache, season_label(day), force=True)
+            season = season_label(day)
+            try:
+                schedule = nba_cdn.fetch_schedule(session, self.cache, season, force=True)
+            except SchemaDrift as exc:
+                drifted.append(
+                    EndpointResult(
+                        nba_cdn.SCHEDULE, season, FetchStatus.DRIFT, str(exc), nba_cdn.SOURCE
+                    )
+                )
+                # Recorded at once: with no copy cached before it, the run stops here.
+                record_drift(self.db, day, drifted, started_at, self.clock.now())
+                if (cached := self.cache.get(nba_cdn.SOURCE, nba_cdn.SCHEDULE, season)) is None:
+                    raise
+                schedule = json.loads(cached)
             noted = {g for g in self.finals.get(day, set()) if is_counted(_Game(g, ""))}
             games = sorted(final_games(schedule, day) | noted)
             pending = [game_id for game_id in games if not fully_cached(self.cache, game_id)]
@@ -424,6 +484,10 @@ class Jobs:
             if r.status is FetchStatus.FAILED
         ]
         self.finals.pop(day, None)
+        drifted += [r for r in results if r.status is FetchStatus.DRIFT]
+        record_drift(self.db, day, drifted, started_at, self.clock.now())
+        for result in drifted:
+            log.warning("schema drift: %s", result.error, extra={"date": day.isoformat()})
         stats_failed = {g: missing for g in games if (missing := stats_missing(self.cache, g))}
         record_stats_fetch(self.db, day, stats_failed, started_at, self.clock.now())
         parsed = parse_date(self.cache, self.store, day, self.settings.tz)
@@ -455,11 +519,12 @@ class Jobs:
             reconcile_skip=f"{stale.endpoint} {stale.key} failed to refresh" if stale else None,
         )
         raise_for_derive_failures(derived)
-        return {
+        detail: Detail = {
             "date": day.isoformat(),
             "games": games,
             "fetched": pending,
             "failed": failed,
+            "drift": [r.error for r in drifted],
             "stats_failed": sorted(stats_failed),
             "warnings": warnings,
             "parsed": parsed.parsed,
@@ -473,6 +538,10 @@ class Jobs:
             "derive": {r.step.name: r.detail for r in derived if r.day == day},
             "reconcile": next((r.detail for r in derived if r.step == RECONCILE), None),
         }
+        if drifted:
+            listed = "; ".join(str(r.error) for r in drifted)
+            raise JobFailedError(f"{len(drifted)} responses drifted: {listed}", detail)
+        return detail
 
     def _fetch_missing(self) -> Detail:
         started_at = self.clock.now()
@@ -548,7 +617,9 @@ class Jobs:
                     session, self.cache, player_id, season, season_type, force=True
                 )
             ]
-        fetched = [r.key for r in results if r.status is not FetchStatus.FAILED]
+        # A shot chart that drifted is not cached, and parsing it would read last week's copy.
+        missed = (FetchStatus.FAILED, FetchStatus.DRIFT)
+        fetched = [r.key for r in results if r.status not in missed]
         if results and not fetched:
             raise NbaHttpError(f"every one of {len(results)} shot charts failed to fetch")
         parsed = parse_shot_charts(self.cache, self.store, fetched)
@@ -558,9 +629,7 @@ class Jobs:
             "season": season,
             "shot_charts": len(players),
             "fetched": len(fetched),
-            "failed": [
-                {"key": r.key, "error": r.error} for r in results if r.status is FetchStatus.FAILED
-            ],
+            "failed": [{"key": r.key, "error": r.error} for r in results if r.status in missed],
             "parse_failed": parsed.failed,
             "rows": sum(r.rows for r in loaded),
             "changed": sum(r.changed for r in loaded),
