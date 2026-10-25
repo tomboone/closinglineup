@@ -70,6 +70,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Fails the build, rather than serving `/api` alone, if the package stops resolving to /app/src.
 RUN python -c "from closinglineup.api.app import STATIC_DIR; assert (STATIC_DIR / 'index.html').is_file(), STATIC_DIR"
+# Likewise for the alembic config the worker reads its schema head from (`db.schema.PYPROJECT`).
+RUN python -c "from closinglineup.db.schema import script_head; script_head()"
 # Likewise for the pbpstats overrides, which resolve relative to the package.
 RUN python -c "from closinglineup.parse.pbp import ACTION_OVERRIDES, OVERRIDE_FILES, OVERRIDES_SOURCE as d; assert all((d / f).is_file() for f in (*OVERRIDE_FILES, ACTION_OVERRIDES)), d"
 

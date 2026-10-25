@@ -25,6 +25,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.nba_rps == 1.0
     assert settings.nba_timeout_seconds == 30
     assert settings.nightly_lookback_days == 3
+    assert settings.schema_wait_timeout_seconds == 300
     assert settings.healthchecks_url_nightly is None
     assert settings.healthchecks_url_daily is None
     assert settings.healthchecks_url_weekly is None
@@ -101,6 +102,7 @@ def test_log_level_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
         ("TIER_CORE_SHARE", "1.5"),
         ("TIER_FRINGE_PLAYED_RATE", "-0.1"),
         ("NBA_RPS", "0"),
+        ("SCHEMA_WAIT_TIMEOUT_SECONDS", "0"),
         ("SEASON", "2025-2026"),
         ("TZ", "Not/AZone"),
         ("LOG_LEVEL", "LOUD"),

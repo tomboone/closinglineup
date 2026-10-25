@@ -502,7 +502,10 @@ above, since `worker` waits on `app` and would otherwise never start to catch up
 with its status and detail.
 
 **Updates** are automatic: Watchtower checks GHCR every 5 minutes and restarts `app` and `worker` on the new
-image, removing the old one, and `app` applies any new migration as it starts. Watchtower runs with
+image, removing the old one, and `app` applies any new migration as it starts. Watchtower restarts each
+container on its own and ignores `depends_on`, so `worker` itself waits, polling every 5 s, until the
+database is at its image's alembic head; after `SCHEMA_WAIT_TIMEOUT_SECONDS` (300) it exits 1 and the
+restart policy starts it again (`docker compose logs worker` shows each attempt). Watchtower runs with
 `--scope closinglineup`, so it only touches containers labelled with that scope, and leaves `postgres`
 and `tailscale` alone. To update by hand, the sidecar included: `docker compose pull && docker compose up -d`.
 A sidecar restart interrupts tailnet access for a few seconds; the loopback port is not affected.

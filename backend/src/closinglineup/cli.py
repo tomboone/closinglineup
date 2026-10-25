@@ -19,6 +19,7 @@ import uvicorn
 from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
+from closinglineup.db.schema import SchemaNotAtHeadError, wait_for_schema_head
 from closinglineup.db.session import make_engine, make_session_factory
 from closinglineup.derive.reconcile import (
     LINEUP_TOLERANCE_POSSESSIONS,
@@ -727,6 +728,20 @@ def overlays(
 def worker() -> None:
     settings = Settings()
     configure_logging(settings.log_level)
+    # Before the signal handlers, so a SIGTERM during the wait stops the process outright (the
+    # compose services run with `init: true`, so this is not PID 1, which ignores it).
+    engine = make_engine(settings)
+    try:
+        wait_for_schema_head(
+            engine,
+            timeout=timedelta(seconds=settings.schema_wait_timeout_seconds),
+            clock=SystemClock(),
+        )
+    except SchemaNotAtHeadError as exc:
+        log.error("worker not started: %s", exc)
+        raise typer.Exit(1) from None
+    finally:
+        engine.dispose()
     stop = threading.Event()
 
     def on_signal(signum: int, frame: FrameType | None) -> None:

@@ -77,7 +77,9 @@ services:
     command: ["closinglineup", "worker"]
     depends_on:
       # `app` is healthy only once it has migrated and is serving, so the worker never writes
-      # `job_run` rows into a schema that is not there yet.
+      # `job_run` rows into a schema that is not there yet. That orders `docker compose up` alone;
+      # Watchtower restarts each container on its own, so the worker also waits for the schema to
+      # reach its image's alembic head before it starts (`db.schema`).
       app:
         condition: service_healthy
 
