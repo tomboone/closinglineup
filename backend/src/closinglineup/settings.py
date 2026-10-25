@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # The days before its date whose games' missing endpoints `nightly` fetches again.
     nightly_lookback_days: int = Field(default=3, ge=0)
 
+    # How long `worker` waits for `app` to migrate the schema to head before it exits (non-zero,
+    # for the restart policy to start it again).
+    schema_wait_timeout_seconds: float = Field(default=300, gt=0)
+
     healthchecks_url_nightly: str | None = None
     healthchecks_url_daily: str | None = None
     healthchecks_url_weekly: str | None = None

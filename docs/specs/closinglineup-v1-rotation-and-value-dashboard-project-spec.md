@@ -324,6 +324,7 @@ Routes: `/` (league morning page), `/teams/:tricode`, `/players/:id`, `/games/:g
 | `NBA_RPS` | `1.0` | NBA.com requests per second |
 | `NBA_TIMEOUT_SECONDS` | `30` | |
 | `NIGHTLY_LOOKBACK_DAYS` | `3` | days before its date whose games' missing endpoints `nightly` fetches again |
+| `SCHEMA_WAIT_TIMEOUT_SECONDS` | `300` | how long `worker` waits for the schema to reach the image's alembic head before it exits 1 (NEU-1950) |
 | `HEALTHCHECKS_URL_NIGHTLY` / `_DAILY` / `_WEEKLY` | unset → no-op | |
 | `EPM_ENABLED`, `DARKO_ENABLED`, `HOOPSRUMORS_ENABLED` | `false` until terms are checked | Hoops Rumors replaces `SPOTRAC_ENABLED` (ADR-0004) |
 | `GARBAGE_TIME_RULE` | `25:540,20:360,15:180,10:60` | |

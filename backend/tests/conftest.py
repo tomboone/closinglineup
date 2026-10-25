@@ -40,6 +40,18 @@ def db(database_url: str) -> Iterator[sessionmaker[Session]]:
 
 
 @pytest.fixture
+def behind(database_url: str) -> Iterator[str]:
+    """The database one revision behind head, put back at head afterwards."""
+    assert alembic("upgrade", "head", database_url=database_url).returncode == 0
+    downgrade = alembic("downgrade", "-1", database_url=database_url)
+    assert downgrade.returncode == 0, downgrade.stderr
+    try:
+        yield database_url
+    finally:
+        alembic("upgrade", "head", database_url=database_url)
+
+
+@pytest.fixture
 def registry(monkeypatch: pytest.MonkeyPatch) -> dict[str, Overlay]:
     """An empty overlay registry in place of the real one, for the test to register fakes in."""
     fresh: dict[str, Overlay] = {}
