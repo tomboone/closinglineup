@@ -9,7 +9,7 @@ ENV_FILE=${ENV_FILE:-$HOME/.config/closinglineup-backup.env}
 . "$ENV_FILE"
 : "${MOUNT_POINT:?}" "${BACKUP_DIR:?}" "${REMOTE:?}"
 
-# Reports to a Kuma push monitor (the personal Kuma): status=up after a good run, status=down with
+# Reports to a Kuma push monitor (the Kuma on kumadrome): status=up after a good run, status=down with
 # the reason on failure. A run that never happens is caught by the monitor's heartbeat interval.
 ping() {  # $1=status (up|down) $2=msg
   [ -n "${PING_URL:-}" ] || return 0

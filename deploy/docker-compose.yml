@@ -82,8 +82,8 @@ services:
         condition: service_healthy
 
   # closinglineup's own Tailscale node on the personal tailnet (ADR-0001), serving `app` over HTTPS at
-  # https://closinglineup.<tailnet>.ts.net (tailscale/serve.json). The host itself is on no tailnet,
-  # and one tailscaled is on one tailnet at a time, so each stack on kumadrome brings its own sidecar.
+  # https://closinglineup.<tailnet>.ts.net (tailscale/serve.json). The node is tagged tag:app. Each
+  # app on kumadrome brings its own sidecar so that it gets its own MagicDNS name and HTTPS on 443.
   tailscale:
     image: tailscale/tailscale:stable
     # Never the name of a service it proxies: Docker maps a container's own hostname to itself in
