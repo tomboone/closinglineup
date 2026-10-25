@@ -7,7 +7,7 @@ Mac mini (Ubuntu, Docker with the Compose plugin, residential IP, which stats.nb
 ADR-0001). The database and the raw cache live on the USB drive at `/mnt/music`, and a systemd timer
 on the host dumps the database nightly to B2. The outside accounts involved are
 [healthchecks.io](https://healthchecks.io) (the jobs' alerting), the personal tailnet, and the B2 bucket
-the Navidrome backup uses; the backup reports to the personal Uptime Kuma on kumadrome.
+the Navidrome backup uses; the backup reports to the Uptime Kuma on kumadrome.
 
 Images are published by `.github/workflows/image.yml` on every push to `main`:
 
@@ -86,9 +86,9 @@ previous season's schedule, so pause the nightly check over the off-season.
 
 ## 4. Get a Tailscale auth key
 
-The sidecar is closinglineup's own node on the personal tailnet, `closinglineup`, the same pattern as
-Navidrome's. The host itself is on no tailnet, and one `tailscaled` is on one tailnet at a time, so each
-stack brings its own sidecar. Never run `tailscale up`, `login` or `switch` on the host for its sake.
+The sidecar is closinglineup's own node on the personal tailnet, `closinglineup`, tagged `tag:app`, the
+same pattern as Navidrome's. The host is on the same tailnet too, as `kumadrome`, but each app brings its
+own sidecar so that it gets its own MagicDNS name and HTTPS on 443.
 
 1. **Tailnet settings**, already on for Navidrome: in the personal tailnet's admin console, under *DNS*,
    MagicDNS on and *HTTPS Certificates* enabled. Serve needs both for a `*.ts.net` certificate.
@@ -96,10 +96,10 @@ stack brings its own sidecar. Never run `tailscale up`, `login` or `switch` on t
    node is removed from the tailnet once it goes offline, so after a reboot or a recreate the sidecar
    would come back as a new node, perhaps `closinglineup-1`. Copy it for `.env` (next step). It is used
    once: `TS_AUTH_ONCE` logs in only while the state directory holds no node key.
-3. **After the node joins** (step 6), open it in *Machines* and choose *Disable key expiry*. Otherwise it
-   drops off the tailnet when the node key expires, after 180 days by default. If you would rather tag the
-   node: add `"tag:closinglineup": ["autogroup:admin"]` to the policy's `tagOwners`, generate the key with
-   that tag, and set `TS_EXTRA_ARGS=--advertise-tags=tag:closinglineup`. A tagged node's key never expires.
+3. **The tag.** The tailnet policy (ops) already owns `tag:app`, so generate the key with that tag and
+   set `TS_EXTRA_ARGS=--advertise-tags=tag:app`, or tag the node after it joins (step 6): *Machines* →
+   the node → *Edit ACL tags*. A tagged node's key never expires; an untagged one drops off the tailnet
+   when its key expires, after 180 days by default.
 
 If a node named `closinglineup` is already listed in *Machines*, remove it first, or the new one comes up
 as `closinglineup-1`.
@@ -363,7 +363,8 @@ the host, as `tom`, after the 03:30 nightly job and Monday's 04:30 weekly. It:
 - `rclone sync`s that directory to `closinglineup-backups/` in the B2 bucket the Navidrome backup uses.
   The `b2` remote has `hard_delete = false`, so a dump aged out stays recoverable per the bucket's
   lifecycle;
-- pings a push monitor on the personal Kuma: `up` after a good run, `down` with the reason on failure.
+- pings a push monitor on the Kuma on kumadrome: `up` after a good run, `down` with the reason on
+  failure.
 
 | File | Purpose |
 |---|---|
@@ -382,7 +383,7 @@ lists `b2:`).
    ssh -t kumadrome 'sudo install -d -o tom -g tom /mnt/music/closinglineup/backups'
    ```
 
-2. **A push monitor** on the personal Kuma (`http://127.0.0.1:3002` on kumadrome): *Add New Monitor*,
+2. **A push monitor** on the Kuma on kumadrome (`http://127.0.0.1:3001`): *Add New Monitor*,
    type *Push*, name `kumadrome/closinglineup-backup`, heartbeat interval 25 h (90000 s), retries 0. Copy
    its push URL.
 3. **Settings.** Fill in `<bucket>` (the Navidrome backup's, which `grep REMOTE
