@@ -74,7 +74,7 @@ does not alert, so the `daily` and `weekly` checks wait quietly until their jobs
 | Check | Pinged by | Period | Grace |
 |---|---|---|---|
 | `closinglineup-nightly` | `nightly`, 03:30 every day (and hourly 04:00–12:00 for now, see [Nightly schedule](#nightly-schedule)) | 1 day | 3 hours |
-| `closinglineup-daily` | `injuries` and `daily_overlays`, 09:00–18:30 | 1 day | 6 hours |
+| `closinglineup-daily` | `injuries` and `daily_overlays`, 07:30–18:30 | 1 day | 6 hours |
 | `closinglineup-weekly` | `weekly`, Mondays 04:30 | 7 days | 1 day |
 
 For each one: **Add Check**, set the period and grace, make sure at least one notification channel is
