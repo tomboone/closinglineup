@@ -1,6 +1,6 @@
-"""Waiting for `app` to migrate. Only `app` runs `alembic upgrade head`, and Watchtower waits at
-most 5 minutes for `app` to turn healthy before it starts the worker, so the worker can start on a
-new image before the schema it expects is there; it waits on this first."""
+"""Waiting for `app` to migrate. Only `app` runs `alembic upgrade head`, and Watchtower starts the
+worker right after `app` without waiting for it to turn healthy, so the worker can start on a new
+image before the schema it expects is there; it waits on this first."""
 
 import logging
 from datetime import timedelta
