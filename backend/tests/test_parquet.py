@@ -113,6 +113,7 @@ def test_the_schema_types_and_nullability_follow_the_row_model() -> None:
             pa.field("game_id", pa.string(), nullable=False),
             pa.field("season", pa.string(), nullable=False),
             pa.field("game_date", pa.date32(), nullable=False),
+            pa.field("tip_time", pa.timestamp("us", tz="UTC"), nullable=True),
             pa.field("phase", pa.string(), nullable=False),
             pa.field("home_team_id", pa.int64(), nullable=False),
             pa.field("away_team_id", pa.int64(), nullable=False),

@@ -207,6 +207,8 @@ class Game(Timestamps, Base):
     game_id: Mapped[str] = mapped_column(String, primary_key=True)
     season: Mapped[str] = mapped_column(String)
     game_date: Mapped[date] = mapped_column(index=True)
+    # Tip-off, where the schedule states one.
+    tip_time: Mapped[datetime | None]
     phase: Mapped[str] = mapped_column(String)
     home_team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
     away_team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))

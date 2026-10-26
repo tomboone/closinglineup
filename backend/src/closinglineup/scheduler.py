@@ -47,9 +47,16 @@ from closinglineup.derive.run import (
 )
 from closinglineup.derive.run import raise_for_failures as raise_for_derive_failures
 from closinglineup.heartbeat import Heartbeat, JobFamily
-from closinglineup.load.loader import load_dates, load_keyed, raise_for_failures, write_load_log
+from closinglineup.load.loader import (
+    load_dates,
+    load_keyed,
+    load_schedule,
+    raise_for_failures,
+    write_load_log,
+)
 from closinglineup.load.parquet import ParquetStore
 from closinglineup.overlays import OverlayFamily, by_name, overlays_in
+from closinglineup.parse.schedule import parse_schedule
 from closinglineup.pipeline import SHOT_TABLE, parse_date, parse_shot_charts
 from closinglineup.season import Phase, is_counted, season_bounds, season_label
 from closinglineup.settings import Settings
@@ -380,6 +387,9 @@ class Jobs:
         """Refresh the schedule, fetch every per-game endpoint of each counted game final on `day`
         that is not yet fully cached, then parse, load and derive the date.
 
+        Every game of the refreshed schedule not yet final is loaded into `game` with its tip-off
+        (`load_schedule`), so the slate has the games of a date before any of them is played.
+
         A game is final if the schedule says so or `poll_finals` saw it go final. Its endpoints are
         fetched once nothing of it is cached (`fetched`); a game an earlier run left with endpoints
         missing, of `day` or the `NIGHTLY_LOOKBACK_DAYS` before it, has just those fetched again,
@@ -570,6 +580,7 @@ class Jobs:
         drifted = [r for on_day in drifted_on.values() for r in on_day]
         stats_failed = {g: missing for g in games if (missing := stats_missing(self.cache, g))}
         record_stats_fetch(self.db, day, stats_failed, started_at, self.clock.now())
+        scheduled = load_schedule(self.db, parse_schedule(schedule))
         parsed = parse_date(self.cache, self.store, day, self.settings.tz)
         reparsed = [parse_date(self.cache, self.store, d, self.settings.tz) for d in reloaded]
         warnings = [
@@ -620,6 +631,7 @@ class Jobs:
             "drift": [r.error for r in drifted],
             "stats_failed": sorted(stats_failed),
             "warnings": warnings,
+            "scheduled": scheduled,
             "parsed": parsed.parsed,
             "parse_fallback": parsed.fallback,
             "parse_failed": {
