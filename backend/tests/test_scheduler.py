@@ -64,6 +64,11 @@ FINAL_B = "0022600002"
 SCHEDULED = "0022600003"
 PRESEASON_FINAL = "0012600009"
 FINAL_DAY_BEFORE = "0022600004"
+# A game five days after DAY, not yet played.
+LATER = "0022600010"
+LATER_DAY = date(2026, 10, 25)
+# A final game two days before DAY, which a `nightly` for DAY neither fetches nor parses.
+PLAYED_EARLIER = "0022600011"
 
 
 def _game(game_id: str, status: int) -> dict[str, Any]:
@@ -71,10 +76,11 @@ def _game(game_id: str, status: int) -> dict[str, Any]:
 
 
 def _schedule_game(game_id: str, status: int, day: date) -> dict[str, Any]:
-    """A schedule game, GSW hosting DEN, with what `parse.schedule` reads."""
+    """A schedule game, GSW hosting DEN at 7:00 pm ET, with what `parse.schedule` reads."""
     return {
         **_game(game_id, status),
         "gameDateEst": f"{day.isoformat()}T00:00:00Z",
+        "gameDateTimeEst": f"{day.isoformat()}T19:00:00Z",
         "homeTeam": {"teamId": 1610612744, "score": 100},
         "awayTeam": {"teamId": 1610612743, "score": 90},
     }
@@ -273,6 +279,42 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
     expected += [(step.name, "succeeded") for step in [*WRITES, RECONCILE]]
     assert sorted(logged) == sorted(expected)
     assert ok.call_count == 1
+
+
+def test_nightly_loads_every_game_of_the_schedule_not_yet_played_with_its_tip_off(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    schedule: dict[str, Any] = copy.deepcopy(SCHEDULE)
+    earlier = DAY - timedelta(days=2)
+    schedule["leagueSchedule"]["gameDates"][:0] = [
+        {"gameDate": "10/18/2026 00:00:00", "games": [_schedule_game(PLAYED_EARLIER, 3, earlier)]}
+    ]
+    schedule["leagueSchedule"]["gameDates"].append(
+        {"gameDate": "10/25/2026 00:00:00", "games": [_schedule_game(LATER, 1, LATER_DAY)]}
+    )
+    with db.begin() as session:
+        session.execute(delete(Game).where(Game.game_id.in_([LATER, PLAYED_EARLIER])))
+    get = RoutedGet(nba_routes(schedule, FINAL_A, FINAL_B))
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    detail = jobs.nightly(DAY)
+
+    assert detail["scheduled"] >= 1
+    with db() as session:
+        later = session.get_one(Game, LATER)
+        tips = {
+            game_id: tip for game_id, tip in session.execute(select(Game.game_id, Game.tip_time))
+        }
+    assert (later.game_date, later.status) == (LATER_DAY, "scheduled")
+    # 7:00 pm EDT; the date's games, final or not, carry theirs through the date's load.
+    assert later.tip_time == datetime(2026, 10, 25, 23, 0, tzinfo=UTC)
+    assert tips[FINAL_A] == tips[SCHEDULED] == datetime(2026, 10, 20, 23, 0, tzinfo=UTC)
+    # A final game comes only through its date's load, beside its box score.
+    assert PLAYED_EARLIER not in tips
 
 
 def test_nightly_logs_a_warning_for_each_reconciliation_row_outside_tolerance(

@@ -141,3 +141,19 @@ def test_the_contract_migration_upgrades_and_downgrades_its_columns(database_url
         }
     finally:
         alembic("upgrade", "head", database_url=database_url)
+
+
+# NEU-1983: each game's tip-off, from the schedule.
+GAME_TIP_TIME = "a3f1c2d4e5b6"
+
+
+def test_the_tip_time_migration_adds_and_drops_its_column(database_url: str) -> None:
+    assert alembic("upgrade", "head", database_url=database_url).returncode == 0
+    assert "tip_time" in _columns(database_url, "game")
+
+    downgrade = alembic("downgrade", f"{GAME_TIP_TIME}-1", database_url=database_url)
+    try:
+        assert downgrade.returncode == 0, downgrade.stderr
+        assert "tip_time" not in _columns(database_url, "game")
+    finally:
+        alembic("upgrade", "head", database_url=database_url)

@@ -1,6 +1,6 @@
 import copy
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,7 @@ def test_a_final_game_carries_its_season_date_teams_and_score() -> None:
         game_id="0022500001",
         season="2025-26",
         game_date=date(2025, 10, 21),
+        tip_time=datetime(2025, 10, 21, 23, 30, tzinfo=UTC),
         phase=Phase.REGULAR,
         home_team_id=1610612760,
         away_team_id=1610612745,
@@ -74,6 +75,23 @@ def test_a_final_game_carries_its_season_date_teams_and_score() -> None:
 def test_a_scheduled_game_has_no_score() -> None:
     game = _by_id(parse_schedule(_load(SCHEDULE_2026_27)))["0022600015"]
     assert (game.status, game.home_score, game.away_score) == ("scheduled", None, None)
+
+
+def test_tip_off_is_the_eastern_time_the_schedule_states_as_an_instant() -> None:
+    rows = _by_id(parse_schedule(_load(SCHEDULE_2026_27)))
+    # 7:00 pm ET on each: Eastern Daylight Time (UTC-4) in October, Standard (UTC-5) in February.
+    assert rows["0022600015"].tip_time == datetime(2026, 10, 30, 23, 0, tzinfo=UTC)
+    assert rows["0022600731"].tip_time == datetime(2027, 2, 4, 0, 0, tzinfo=UTC)
+
+
+def test_a_game_with_no_time_has_no_tip_off() -> None:
+    payload = _load(SCHEDULE_2026_27)
+    # The schedule's "TBD" time: midnight Eastern, on the game's date.
+    tbd = _edit_game(payload, "0022600015", gameDateTimeEst="2026-10-30T00:00:00Z")
+    assert _by_id(parse_schedule(tbd))["0022600015"].tip_time is None
+
+    unlisted = _edit_game(payload, "0022600015", gameDateTimeEst="")
+    assert _by_id(parse_schedule(unlisted))["0022600015"].tip_time is None
 
 
 def test_a_game_whose_teams_are_not_set_yet_has_no_row() -> None:

@@ -279,6 +279,11 @@ docker compose run --rm worker closinglineup load --memberships
 `parse` lists any game it could not read (a play-by-play pbpstats needs an override for, say) and exits 1;
 the rest of the date is written. `load --missing` reloads whatever failed to load.
 
+A date's `game` file holds each game's tip-off from the schedule (`game.tip_time`). A file parsed before
+its row model last changed, as `game`'s did when it gained `tip_time`, no longer loads (`load` names the
+file and its schema): run `parse` and `load` over its dates again, as above, to rewrite it and fill the
+tip-offs of games already played. `nightly` fills those of the season's games not yet played.
+
 **Check it.** Every final game in the schedule is in `game`:
 
 ```sh

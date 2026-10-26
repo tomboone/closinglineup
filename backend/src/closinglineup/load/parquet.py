@@ -11,7 +11,7 @@ under the wrong columns.
 """
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import NoneType, UnionType
@@ -60,6 +60,8 @@ _ARROW_TYPES: dict[Any, pa.DataType] = {
     float: pa.float64(),
     str: pa.string(),
     date: pa.date32(),
+    # Aware, as every row's datetime is; arrow keeps the instant, in UTC.
+    datetime: pa.timestamp("us", tz="UTC"),
 }
 
 

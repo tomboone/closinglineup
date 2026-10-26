@@ -7,7 +7,7 @@ NULL defaults to None, so a source that leaves it out still parses. A game ID mu
 ten digits: an integer-typed one has lost its leading zeros and is rejected rather than coerced.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -53,6 +53,7 @@ class GameRow(Row):
     game_id: GameId
     season: str
     game_date: date
+    tip_time: datetime | None = None
     phase: Phase
     home_team_id: int
     away_team_id: int
