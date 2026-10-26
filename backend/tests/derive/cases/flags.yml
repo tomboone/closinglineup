@@ -89,6 +89,24 @@
     0.4%. usage_up_efficiency_down: usage 0.738 over his last 10 team games vs 0.096 for the season
     (+0.642), TS% 0.000 vs 0.375 (-0.375).
 
+- id: early-season-no-yo-yo-krejci-atl
+  player: Vít Krejčí
+  player_id: 1630249
+  team: ATL
+  game_date: 2025-11-10
+  expected_tier: core
+  expected_flags: []
+  expected_badges: []
+  note: >-
+    ATL played 0022500206 on 2025-11-10. NBA.com box scores: started 0 of his last 5 games played
+    for ATL (0022500151, 0022500166, 0022500030, 0022500185, 0022500206); minutes share 5.6% over
+    ATL's last 10 games (0022500090 to 0022500206), in 7 of which he played. Fewer than 4 starts
+    and a share of at least 3.6%: Core. No yo_yo, early in the season: his 6 rotation events on
+    ATL are his arrival (2025-10-22 arrival→out) and five changes in ATL's first 9 games, while
+    his 10-game role window was short: 2025-10-24 out→fringe, 2025-10-25 fringe→core, 2025-10-29
+    core→out, 2025-11-04 out→fringe, 2025-11-07 fringe→core. The window filled on 2025-11-08,
+    ATL's 10th game, and his tier has not changed since.
+
 - id: yo-yo-bronny-lal
   player: Bronny James
   player_id: 1642355

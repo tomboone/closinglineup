@@ -16,8 +16,10 @@ numbers that raised it in `detail`:
 - `earning_trust`: his minutes share rises across three consecutive non-overlapping 5-game role
   windows, the latest ending on the date, each higher than the one before; all three must lie in
   his current spell with the team this season;
-- `yo_yo`: at least `yo_yo_events` (3) rotation events on the team, arrivals among them, in its
-  last `yo_yo_games` (20) final games this season, the date included;
+- `yo_yo`: at least `yo_yo_events` (3) tier changes on the team in its last `yo_yo_games` (20)
+  final games this season, the date included: rotation events with a `from_tier`, on a date whose
+  `rotation_state` row is not short. An arrival, and a change raised while his role window was
+  still filling, do not count, so a mid-season signing yo-yos only once his window is full;
 - `contract_pressure`: in the latest weekly `contract` snapshot on or before the date, a contract
   with the team whose `guarantee_date` is within `guarantee_days` (30) of the date, the date
   itself included, and whose `guaranteed_after` exceeds `guaranteed`, or is NULL, an unpriced
@@ -35,7 +37,7 @@ flag. A date's flags are deleted and rewritten on every run.
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, func, insert, or_, select, text, tuple_
 from sqlalchemy.orm import Session, sessionmaker
@@ -87,10 +89,10 @@ class Guarantee:
 
 @dataclass(frozen=True, slots=True)
 class TierChange:
-    """A rotation event on the team: when, from (None for an arrival) and to."""
+    """A tier change on the team, a rotation event other than an arrival: when, from and to."""
 
     game_date: date
-    from_tier: str | None
+    from_tier: str
     to_tier: str
 
 
@@ -413,8 +415,9 @@ def _team_dates(session: Session, day: date, team_ids: set[int], games: int) -> 
 def _tier_changes(
     session: Session, day: date, keys: set[tuple[int, int]], games: int
 ) -> dict[tuple[int, int], tuple[TierChange, ...]]:
-    """Each player-team's rotation events, arrivals included, over the team's last `games` final
-    game dates through `day` this season, the oldest first."""
+    """Each player-team's tier changes over the team's last `games` final game dates through `day`
+    this season, the oldest first: its rotation events but arrivals, on dates whose
+    `rotation_state` row is not short."""
     since = _team_dates(session, day, {team_id for _, team_id in keys}, games)
     if not since:
         return {}
@@ -426,15 +429,24 @@ def _tier_changes(
             RotationEvent.from_tier,
             RotationEvent.to_tier,
         )
+        .join(
+            RotationState,
+            (RotationState.player_id == RotationEvent.player_id)
+            & (RotationState.team_id == RotationEvent.team_id)
+            & (RotationState.game_date == RotationEvent.game_date),
+        )
         .where(tuple_(RotationEvent.player_id, RotationEvent.team_id).in_(list(keys)))
         .where(RotationEvent.game_date >= min(since.values()), RotationEvent.game_date <= day)
+        .where(RotationEvent.from_tier.is_not(None), RotationState.is_short.is_(False))
         .order_by(RotationEvent.game_date)
     )
     changes: dict[tuple[int, int], list[TierChange]] = defaultdict(list)
     for player_id, team_id, game_date, from_tier, to_tier in found:
         start = since.get(team_id)
         if start is not None and game_date >= start:
-            changes[(player_id, team_id)].append(TierChange(game_date, from_tier, to_tier))
+            # Arrivals, the events with no `from_tier`, are left out above.
+            change = TierChange(game_date, cast(str, from_tier), to_tier)
+            changes[(player_id, team_id)].append(change)
     return {key: tuple(listed) for key, listed in changes.items()}
 
 

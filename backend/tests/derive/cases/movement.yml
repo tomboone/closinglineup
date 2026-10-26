@@ -234,15 +234,16 @@
   team: OKC
   game_date: 2026-02-09
   expected_tier: core
-  expected_flags: [yo_yo]
+  expected_flags: []
   expected_badges: []
   note: >-
     OKC played 0022500769 on 2026-02-09. NBA.com box scores: started 0 of his last 2 games played
     for OKC (0022500748, 0022500769); minutes share 3.8% over OKC's last 3 games (0022500730 to
     0022500769), in 2 of which he played. Fewer than 4 starts and a share of at least 3.6%: Core.
     NBA.com player movement: 2026-02-04 trade: Oklahoma City Thunder received guard Jared McCain
-    from Philadelphia 76ers. yo_yo: 3 tier changes in OKC's last 20 games: 2026-02-04 arrival→out,
-    2026-02-07 out→fringe, 2026-02-09 fringe→core.
+    from Philadelphia 76ers. No yo_yo: his 3 rotation events on OKC are his arrival (2026-02-04
+    arrival→out) and two changes raised while his 10-game role window was short, holding only the
+    3 OKC games since the trade: 2026-02-07 out→fringe, 2026-02-09 fringe→core.
 
 - id: trade-kennard-lal
   player: Luke Kennard
@@ -289,11 +290,34 @@
     PHI's last 10 games (0022500849 to 0022500980), in 5 of which he played. A share under 3.6%,
     but he played in at least half: Fringe. NBA.com player movement: 2026-02-05 waive: Brooklyn
     Nets waived forward Tyrese Martin; 2026-02-19 two_way_sign: Philadelphia 76ers signed forward
-    Tyrese Martin to a Two-Way Contract. yo_yo: 8 tier changes in PHI's last 20 games: 2026-02-19
-    arrival→out, 2026-02-21 out→fringe, 2026-02-26 fringe→out, 2026-03-04 out→fringe, 2026-03-07
-    fringe→out, 2026-03-09 out→fringe, 2026-03-14 fringe→out, 2026-03-15 out→fringe. On a two-way
-    contract (span from 2026-02-19), active in 11 games this season: under 45, so no
-    contract_pressure.
+    Tyrese Martin to a Two-Way Contract. yo_yo: 3 tier changes in PHI's last 20 games, his 10-game
+    role window full: 2026-03-09 out→fringe, 2026-03-14 fringe→out, 2026-03-15 out→fringe. His
+    arrival (2026-02-19 arrival→out) and the four changes while the window was short (2026-02-21
+    out→fringe, 2026-02-26 fringe→out, 2026-03-04 out→fringe, 2026-03-07 fringe→out) do not
+    count. On a two-way contract (span from 2026-02-19), active in 11 games this season: under 45,
+    so no contract_pressure.
+
+- id: signing-yo-yo-bufkin-lal
+  player: Kobe Bufkin
+  player_id: 1641723
+  team: LAL
+  game_date: 2026-03-10
+  expected_tier: fringe
+  expected_flags: [minutes_cliff, yo_yo]
+  expected_badges: []
+  note: >-
+    LAL played 0022500946 on 2026-03-10. NBA.com box scores: started 0 of his last 5 games played
+    for LAL (0022500823, 0022500866, 0022500878, 0022500914, 0022500946); minutes share 0.8% over
+    LAL's last 10 games (0022500823 to 0022500946), in 5 of which he played. A share under 3.6%,
+    but he played in at least half: Fringe. NBA.com player movement: 2026-01-13 sign: Los Angeles
+    Lakers signed guard Kobe Bufkin to a 10-Day Contract; 2026-02-08 sign: Los Angeles Lakers
+    signed guard Kobe Bufkin to a Rest-of-Season Contract. A mid-season signing who yo-yos once
+    his window is full. minutes_cliff: 5-game share 0.5% is under 60% of the 20-game 0.9%. yo_yo:
+    3 tier changes in LAL's last 20 games, his 10-game role window full: 2026-03-01 out→fringe,
+    2026-03-08 fringe→out, 2026-03-10 out→fringe. The one rotation event before them in those 20
+    games, 2026-01-28 fringe→out, was raised while the window was short and does not count. His
+    arrival (2026-01-13 arrival→fringe), 2026-01-15 fringe→core and 2026-01-22 core→fringe are
+    older than LAL's last 20 games.
 
 - id: two-way-in-rotation-smith-lal
   player: Nick Smith Jr.
