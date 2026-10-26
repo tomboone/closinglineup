@@ -203,11 +203,13 @@ LATE = 980005  # A guarantee 31 days after DAY; an older snapshot's, 5 days afte
 SHOOTER = 980006  # 5 of SAC's 50 attempts for 10 points in games 1 to 10, then 10 for 10.
 TWO_WAY = 980007  # 10 minutes a game on a two-way; inactive in game 1, DNP-CD in game 2.
 BLEED = 980008  # On the floor for SAC's bad first quarters in games 11 to 20.
-YO_YO = 980009  # An arrival and two tier changes in the last 20 games.
-TWICE = 980010  # Two tier changes in them, and one before them.
+YO_YO = 980009  # An arrival, then three tier changes on full windows in the last 20 games.
+TWICE = 980010  # Two tier changes on full windows in them, and one before them.
+ARRIVED = 980013  # An arrival on a full window, and two tier changes after it.
+SHORT = 980014  # A tier change while his 10-game window was short, and two after it was full.
 SAC_BENCH = 980011  # The rest of SAC's minutes and attempts.
 POR_BENCH = 980012
-NAMED = [CLIFF, HURT, TRUST, GUARANTEE, LATE, SHOOTER, TWO_WAY, BLEED, YO_YO, TWICE]
+NAMED = [CLIFF, HURT, TRUST, GUARANTEE, LATE, SHOOTER, TWO_WAY, BLEED, YO_YO, TWICE, ARRIVED, SHORT]
 PLAYERS = [*NAMED, SAC_BENCH, POR_BENCH]
 SAC_FILLERS = [980031, 980032, 980033, 980034]
 POR_FIVE = "-".join(str(player_id) for player_id in range(980041, 980046))
@@ -378,7 +380,7 @@ def _clear(db: sessionmaker[Session]) -> None:
 def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """SAC's and POR's 20 games with their box scores and stints, roster spans, HURT's injury
     report, two contract snapshots and the events, the view refreshed over them, and rotation
-    state written for DAY."""
+    state written for every game date, each row short through game 9."""
     _clear(db)
     with db.begin() as session:
         session.execute(
@@ -435,16 +437,24 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
         session.execute(
             insert(RotationEvent),
             [
-                _event(YO_YO, _day(2), None, "fringe"),
-                _event(YO_YO, _day(8), "fringe", "core"),
-                _event(YO_YO, _day(20), "core", "fringe"),
+                _event(YO_YO, _day(1), None, "fringe"),
+                _event(YO_YO, _day(10), "fringe", "core"),
+                _event(YO_YO, _day(14), "core", "fringe"),
+                _event(YO_YO, _day(20), "fringe", "core"),
                 _event(TWICE, FIRST - timedelta(days=5), "fringe", "core"),
-                _event(TWICE, _day(5), "core", "fringe"),
-                _event(TWICE, _day(12), "fringe", "core"),
+                _event(TWICE, _day(12), "core", "fringe"),
+                _event(TWICE, _day(16), "fringe", "core"),
+                _event(ARRIVED, _day(11), None, "core"),
+                _event(ARRIVED, _day(14), "core", "fringe"),
+                _event(ARRIVED, _day(18), "fringe", "core"),
+                _event(SHORT, _day(5), "core", "fringe"),
+                _event(SHORT, _day(14), "fringe", "core"),
+                _event(SHORT, _day(18), "core", "fringe"),
             ],
         )
     refresh_windows(db)
-    compute_rotation_state(db, DAY, TierRule())
+    for g in GAMES:
+        compute_rotation_state(db, _day(g), TierRule())
     yield db
     _clear(db)
     refresh_windows(db)
@@ -482,6 +492,8 @@ def test_each_flag_is_raised_on_its_player_and_no_other(seeded: sessionmaker[Ses
         BLEED: {"bleeding"},
         YO_YO: {"yo_yo"},
         TWICE: set(),
+        ARRIVED: set(),
+        SHORT: set(),
         SAC_BENCH: set(),
     }
 
@@ -527,14 +539,41 @@ def test_flag_details_carry_the_numbers(seeded: sessionmaker[Session]) -> None:
             pytest.approx(1200 / GAME_SECONDS, abs=1e-4),
         ]
     }
+    # The arrival on game 1 is not among them; game 10's row is the first not short.
     assert found[YO_YO]["yo_yo"] == {
         "events": 3,
         "changes": [
-            {"game_date": _day(2).isoformat(), "from_tier": None, "to_tier": "fringe"},
-            {"game_date": _day(8).isoformat(), "from_tier": "fringe", "to_tier": "core"},
-            {"game_date": _day(20).isoformat(), "from_tier": "core", "to_tier": "fringe"},
+            {"game_date": _day(10).isoformat(), "from_tier": "fringe", "to_tier": "core"},
+            {"game_date": _day(14).isoformat(), "from_tier": "core", "to_tier": "fringe"},
+            {"game_date": _day(20).isoformat(), "from_tier": "fringe", "to_tier": "core"},
         ],
     }
+
+
+def test_a_yo_yo_counts_neither_an_arrival_nor_a_change_on_a_short_window(
+    seeded: sessionmaker[Session],
+) -> None:
+    with seeded() as session:
+        short = dict(
+            session.execute(
+                select(RotationState.game_date, RotationState.is_short).where(
+                    RotationState.player_id == SHORT
+                )
+            ).all()
+        )
+    assert (short[_day(5)], short[_day(9)], short[_day(10)]) == (True, True, False)
+
+    compute_flags(seeded, DAY, FlagRule(yo_yo_events=2))
+
+    found = _flags(seeded)
+    assert [c["game_date"] for c in found[ARRIVED]["yo_yo"]["changes"]] == [
+        _day(14).isoformat(),
+        _day(18).isoformat(),
+    ]
+    assert [c["game_date"] for c in found[SHORT]["yo_yo"]["changes"]] == [
+        _day(14).isoformat(),
+        _day(18).isoformat(),
+    ]
 
 
 def test_a_two_way_six_games_from_the_limit_is_not_flagged(
