@@ -77,9 +77,9 @@ services:
     command: ["closinglineup", "worker"]
     depends_on:
       # `app` is healthy only once it has migrated and is serving, so the worker never writes
-      # `job_run` rows into a schema that is not there yet. Watchtower follows this too, but gives up
-      # waiting for `app`'s health after 5 minutes and starts the worker anyway, so the worker also
-      # waits for the schema to reach its image's alembic head before it starts (`db.schema`).
+      # `job_run` rows into a schema that is not there yet. Watchtower restarts `app` before the worker
+      # too, but does not wait for `app` to be healthy first, so the worker also waits for the schema
+      # to reach its image's alembic head before it starts (`db.schema`).
       app:
         condition: service_healthy
 
