@@ -949,7 +949,8 @@ def test_worker_registers_every_job_with_the_spec_triggers(
         datetime(2026, 11, 2, 4, 30, tzinfo=tz),
     ]
     assert _fire_times(registered[INJURIES].trigger, midnight, next_midnight) == [
-        datetime(2026, 10, 22, h, m, tzinfo=tz) for h, m in [(10, 0), (13, 0), (16, 0), (18, 30)]
+        datetime(2026, 10, 22, h, m, tzinfo=tz)
+        for h, m in [(7, 30), (10, 0), (13, 0), (16, 0), (18, 30)]
     ]
     assert _fire_times(registered[DAILY_OVERLAYS].trigger, midnight, next_midnight) == [
         datetime(2026, 10, 22, 9, 0, tzinfo=tz)
@@ -1197,14 +1198,14 @@ def test_only_the_last_injuries_run_of_the_day_pings_daily(
     tz = settings.tz
 
     pings: list[int] = []
-    for hour, minute in [(10, 0), (13, 0), (16, 0), (18, 30)]:
+    for hour, minute in [(7, 30), (10, 0), (13, 0), (16, 0), (18, 30)]:
         clock.advance(datetime(2026, 10, 21, hour, minute, tzinfo=tz) - clock.now())
         jobs.injuries_now()
         pings.append(ok.call_count)
 
-    assert pings == [0, 0, 0, 1]
-    assert [day for _, day in injury_report.calls] == [date(2026, 10, 21)] * 4
-    assert [(run.job, run.status) for run in runs(db)] == [(INJURIES, "succeeded")] * 4
+    assert pings == [0, 0, 0, 0, 1]
+    assert [day for _, day in injury_report.calls] == [date(2026, 10, 21)] * 5
+    assert [(run.job, run.status) for run in runs(db)] == [(INJURIES, "succeeded")] * 5
 
 
 @respx.mock

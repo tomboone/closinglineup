@@ -817,9 +817,11 @@ def weekly_trigger(tz: tzinfo) -> CronTrigger:
 
 
 def injuries_trigger(tz: tzinfo) -> OrTrigger:
-    """10:00, 13:00, 16:00 and 18:30."""
+    """07:30, so the morning slate holds the reports published overnight, then 10:00, 13:00, 16:00
+    and 18:30."""
     return OrTrigger(
         [
+            CronTrigger(hour=7, minute=30, timezone=tz),
             CronTrigger(hour="10,13,16", minute=0, timezone=tz),
             CronTrigger(hour=LAST_INJURIES_RUN.hour, minute=LAST_INJURIES_RUN.minute, timezone=tz),
         ]
