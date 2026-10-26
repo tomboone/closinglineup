@@ -502,17 +502,19 @@ above, since `worker` waits on `app` and would otherwise never start to catch up
 with its status and detail.
 
 **Updates** are automatic: Watchtower checks GHCR every 5 minutes and restarts `app` and `worker` on the new
-image, removing the old one, and `app` applies any new migration as it starts. Watchtower restarts each
-container on its own and ignores `depends_on`, so `worker` itself waits, polling every 5 s, until the
+image, removing the old one, and `app` applies any new migration as it starts. Watchtower follows
+`depends_on`, so it restarts `app` first and waits for it to be healthy before `worker`, but it gives up
+waiting after 5 minutes. A longer migration is why `worker` itself also waits, polling every 5 s, until the
 database is at its image's alembic head; after `SCHEMA_WAIT_TIMEOUT_SECONDS` (300) it exits 1 and the
 restart policy starts it again (`docker compose logs worker` shows each attempt). Watchtower runs with
 `--scope closinglineup`, so it only touches containers labelled with that scope, and leaves `postgres`
 and `tailscale` alone. To update by hand, the sidecar included: `docker compose pull && docker compose up -d`.
 A sidecar restart interrupts tailnet access for a few seconds; the loopback port is not affected.
 
-Every other Watchtower on the host (nba-today's, mlb-today's) must be scoped too. An unscoped Watchtower
-updates every enabled container whatever its scope, and when it starts it stops every other Watchtower on
-the host ([Watchtower docs](https://containrrr.dev/watchtower/running-multiple-instances/)).
+Every other Watchtower on the host (nba-today's, mlb-today's) is scoped too. Each instance updates only the
+enabled containers in its own scope, and when it starts it stops only the other Watchtowers in that scope, so
+no two instances may share a scope ([Watchtower
+docs](https://watchtower.nickfedor.com/advanced-features/running-multiple-instances/)).
 
 **Roll back** by pinning a commit: change the `image` tag in `docker-compose.yml` to `sha-<7>` and run
 `docker compose up -d`. Watchtower keeps following that tag, which never moves, so updates stop until you
