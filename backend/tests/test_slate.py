@@ -9,7 +9,7 @@ from sqlalchemy import delete, insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.api.app import create_app
-from closinglineup.api.routers.slate import line_change
+from closinglineup.api.routers.slate import line_change, projected_starters
 from closinglineup.db.models import (
     Game,
     ImpactSnapshot,
@@ -52,10 +52,16 @@ BACK = 9_700_007  # Doubtful, now Available
 OFF = 9_700_008  # Questionable, now off it
 ASSIGNED = 9_700_009  # on a G League line on the morning's report
 TWO_WAY = 9_700_012  # a two-way player with the affiliate on it: neither a line nor a badge
+BENCH = 9_700_013  # on neither report, with the lowest starter rate
 # NYK's only report is ESPN's.
 NYK_OUT = 9_700_010
 # PHI has no report for the game; this player's last official line put him on assignment.
 PHI_ASSIGNED = 9_700_011
+# Each team's other players with a starter rate, the highest first: NYK's six behind NYK_OUT, PHI's
+# six on a date before last night, and LAL's three and one with none.
+NYK_ROTATION = list(range(9_700_020, 9_700_026))
+PHI_ROTATION = list(range(9_700_030, 9_700_036))
+LAL_ROTATION = list(range(9_700_040, 9_700_044))
 PLAYERS = [
     NEW_OUT,
     SAME,
@@ -69,6 +75,10 @@ PLAYERS = [
     NYK_OUT,
     PHI_ASSIGNED,
     TWO_WAY,
+    BENCH,
+    *NYK_ROTATION,
+    *PHI_ROTATION,
+    *LAL_ROTATION,
 ]
 # The two Out lines order by tier, the reverse of their names'; the two Questionable lines share a
 # tier, so they order by name, the reverse of their IDs'.
@@ -78,15 +88,18 @@ NAMES = {
     DOWNGRADED: "Able Questionable",
     UPGRADED: "Baker Questionable",
 }
-# BOS's tiers and minutes shares last night; NEW_PROBABLE's row is older than the team's latest.
+# BOS's tiers, minutes shares and starter rates last night; NEW_PROBABLE's row is older than the
+# team's latest. BACK and OFF share a starter rate, so they order by share; DOWNGRADED and UPGRADED
+# share both, so they order by name.
 STATES = {
-    NEW_OUT: ("starter", 0.7),
-    SAME: ("core", 0.4),
-    NOW_DOUBTFUL: ("core", 0.3),
-    DOWNGRADED: ("fringe", 0.1),
-    UPGRADED: ("fringe", 0.1),
-    BACK: ("starter", 0.6),
-    OFF: ("core", 0.35),
+    NEW_OUT: ("starter", 0.7, 1.0),
+    NOW_DOUBTFUL: ("core", 0.3, 0.8),
+    BACK: ("starter", 0.6, 0.6),
+    OFF: ("core", 0.35, 0.6),
+    DOWNGRADED: ("fringe", 0.1, 0.4),
+    UPGRADED: ("fringe", 0.1, 0.4),
+    SAME: ("core", 0.4, 0.2),
+    BENCH: ("fringe", 0.05, 0.0),
 }
 
 PREVIOUS = datetime.combine(LAST_NIGHT, time(17), EASTERN)
@@ -168,14 +181,22 @@ def _game(game_id: str) -> dict[str, Any]:
     }
 
 
-def _state(player_id: int, day: date, tier: str, share: float) -> dict[str, Any]:
+def _state(
+    player_id: int,
+    day: date,
+    tier: str,
+    share: float,
+    rate: float | None = None,
+    *,
+    team_id: int = BOS,
+) -> dict[str, Any]:
     return {
         "player_id": player_id,
-        "team_id": BOS,
+        "team_id": team_id,
         "game_date": day,
         "tier": tier,
         "minutes_share_10": share,
-        "starter_rate_5": None,
+        "starter_rate_5": rate,
         "played_rate_10": None,
         "availability": "active",
         "badges": [],
@@ -221,10 +242,31 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
         session.execute(
             insert(RotationState),
             [
-                *(_state(p, LAST_NIGHT, tier, share) for p, (tier, share) in STATES.items()),
-                _state(NEW_PROBABLE, LAST_NIGHT - timedelta(days=2), "core", 0.3),
+                *(_state(p, LAST_NIGHT, *state) for p, state in STATES.items()),
+                # The highest starter rate, but older than the team's latest.
+                _state(NEW_PROBABLE, LAST_NIGHT - timedelta(days=2), "core", 0.3, 1.0),
                 # After last night, so not read.
-                _state(NEW_OUT, MORNING, "injured", 0.0),
+                _state(NEW_OUT, MORNING, "injured", 0.0, 0.0),
+                _state(NYK_OUT, LAST_NIGHT, "starter", 0.7, 1.0, team_id=NYK),
+                *(
+                    _state(p, LAST_NIGHT, "core", 0.5, 0.9 - 0.1 * i, team_id=NYK)
+                    for i, p in enumerate(NYK_ROTATION)
+                ),
+                # PHI_ROTATION's second and third share a starter rate; the third's higher share
+                # puts him first.
+                *(
+                    _state(p, LAST_NIGHT - timedelta(days=3), "core", share, rate, team_id=PHI)
+                    for p, rate, share in zip(
+                        PHI_ROTATION,
+                        (1.0, 0.8, 0.8, 0.6, 0.4, 0.2),
+                        (0.6, 0.3, 0.4, 0.5, 0.2, 0.1),
+                        strict=True,
+                    )
+                ),
+                *(
+                    _state(p, LAST_NIGHT, "core", 0.5, rate, team_id=LAL)
+                    for p, rate in zip(LAL_ROTATION, (1.0, 0.6, 0.2, None), strict=True)
+                ),
             ],
         )
         session.execute(
@@ -292,6 +334,23 @@ def test_a_line_s_change_is_the_spec_s(
     was: str | None, now: str | None, change: str | None
 ) -> None:
     assert line_change(was, now) == change
+
+
+@pytest.mark.parametrize(
+    ("out", "starters"),
+    [
+        ((), [(1, False), (2, False), (3, False), (4, False), (5, False)]),
+        ((1,), [(2, False), (3, False), (4, False), (5, False), (6, True)]),
+        ((3,), [(1, False), (2, False), (4, False), (5, False), (6, True)]),
+        ((1, 2), [(3, False), (4, False), (5, False), (6, True), (7, True)]),
+        ((6, 7), [(1, False), (2, False), (3, False), (4, False), (5, False)]),
+        (tuple(range(1, 8)), []),
+    ],
+)
+def test_projected_starters_are_the_first_five_not_out(
+    out: tuple[int, ...], starters: list[tuple[int, bool]]
+) -> None:
+    assert projected_starters(range(1, 8), out) == starters
 
 
 def test_the_morning_s_games_by_tip_off_with_back_to_backs(
@@ -402,7 +461,6 @@ def test_a_team_with_no_report_shows_its_g_league_badges_alone(
         for line in phi["lines"]
     ] == [(PHI_ASSIGNED, None, None, True)]
     assert lal["lines"] == []
-    assert phi["projected_starters"] == lal["projected_starters"] == []
 
 
 def test_a_date_with_no_games_has_an_empty_slate(
@@ -419,3 +477,82 @@ def test_a_date_with_no_games_has_an_empty_slate(
 
 def test_a_morning_before_any_derived_date_has_no_last_night(client: TestClient) -> None:
     assert _slate(client, date(1950, 1, 1))["last_night"] is None
+
+
+def _starters(team: dict[str, Any]) -> list[tuple[int, bool]]:
+    return [
+        (starter["player"]["player_id"], starter["replacement"])
+        for starter in team["projected_starters"]
+    ]
+
+
+def test_a_team_with_its_top_starter_out_projects_the_sixth_man_as_his_replacement(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    nyk = _side(_slate(client), "NYK")
+
+    assert _starters(nyk) == [
+        *((p, False) for p in NYK_ROTATION[:4]),
+        (NYK_ROTATION[4], True),
+    ]
+    first = nyk["projected_starters"][0]
+    assert (first["starter_rate_5"], first["minutes_share_10"], first["impact"]) == (
+        0.9,
+        0.5,
+        None,
+    )
+
+
+def test_a_team_with_no_out_lines_projects_its_top_five(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    phi = _side(_slate(client), "PHI")
+
+    # From its latest derived date, three days before last night.
+    assert _starters(phi) == [
+        (PHI_ROTATION[0], False),
+        (PHI_ROTATION[2], False),
+        (PHI_ROTATION[1], False),
+        (PHI_ROTATION[3], False),
+        (PHI_ROTATION[4], False),
+    ]
+
+
+def test_doubtful_removes_a_starter_and_questionable_does_not(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    bos = _side(_slate(client), "BOS")
+
+    # NEW_OUT (Out) and NOW_DOUBTFUL (Doubtful) removed; DOWNGRADED and UPGRADED (Questionable),
+    # OFF (off the report) and BACK (Available) kept; SAME (Out) removed below them, so BENCH is
+    # fifth. UPGRADED and BENCH rank sixth and eighth, so replace the two removed. NEW_PROBABLE's
+    # rate is from before the team's latest date.
+    assert _starters(bos) == [
+        (BACK, False),
+        (OFF, False),
+        (DOWNGRADED, False),
+        (UPGRADED, True),
+        (BENCH, True),
+    ]
+
+
+def test_a_team_with_three_players_with_a_starter_rate_projects_three(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    lal = _side(_slate(client), "LAL")
+
+    assert _starters(lal) == [(p, False) for p in LAL_ROTATION[:3]]
+
+
+def test_a_team_with_no_derived_date_this_season_projects_none(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    with seeded.begin() as session:
+        session.execute(delete(RotationState).where(RotationState.team_id == LAL))
+        session.execute(
+            insert(RotationState),
+            # Last season's finale.
+            [_state(p, date(2013, 4, 17), "starter", 0.5, 1.0, team_id=LAL) for p in LAL_ROTATION],
+        )
+
+    assert _side(_slate(client), "LAL")["projected_starters"] == []
