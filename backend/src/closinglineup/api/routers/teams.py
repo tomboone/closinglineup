@@ -16,6 +16,8 @@ The team page reads the team's final games of the date's season through the date
 - **roster counts** and **contract notes** are its roster spans covering the date, and those
   players' rows in the latest weekly contract snapshot on or before it with a guarantee date still
   to come.
+
+The injury report and contract rules are shared with the player page (v2 spec §15.2).
 """
 
 from collections import defaultdict
@@ -26,7 +28,7 @@ from itertools import combinations
 from typing import Any, NamedTuple, cast
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import ColumnElement, Select, and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
@@ -161,7 +163,7 @@ def team_page(
     closing = _closing(session, team_id, games)
     lineups = top_groups(stints, 5, recent)
     combos = top_groups(stints, 2, recent)
-    contracts = _contracts(session, team_id, day, set(roster))
+    contracts = contract_notes(session, team_id, day, set(roster))
     availability = _availability(session, team_id, day, roster)
     names = player_names(
         session,
@@ -169,7 +171,7 @@ def team_page(
             *(row.player_id for row in board),
             *(p for lineup in closing for p in lineup.players),
             *(p for group in (*lineups, *combos) for p in group.players),
-            *(row.player_id for row in contracts),
+            *(contract.player_id for contract in contracts),
             *(row.player_id for row in availability.players),
         },
     )
@@ -190,7 +192,7 @@ def team_page(
             two_way=sum(contract == TWO_WAY for contract in roster.values()),
             two_way_limit=TWO_WAY_LIMIT,
         ),
-        contracts=[row.model(names) for row in contracts],
+        contracts=[contract_note(contract, day, names) for contract in contracts],
     )
 
 
@@ -578,13 +580,31 @@ class _Board:
         )
 
 
-def _availability(session: Session, team_id: int, day: date, roster: dict[int, str]) -> _Board:
+class Report(NamedTuple):
+    """One injury report of a team's: when it was reported, by which source, and the nearest game
+    it covers."""
+
+    report_datetime: datetime
+    source: str
+    game_date: date
+
+    def lines(self, team_id: int, *where: ColumnElement[bool]) -> Select[int, str, str | None]:
+        """Its lines for that game: each player, his status and its reason."""
+        return select(InjuryStatus.player_id, InjuryStatus.status, InjuryStatus.reason).where(
+            InjuryStatus.team_id == team_id,
+            InjuryStatus.report_datetime == self.report_datetime,
+            InjuryStatus.source == self.source,
+            InjuryStatus.game_date == self.game_date,
+            *where,
+        )
+
+
+def newest_report(session: Session, team_id: int, day: date) -> Report | None:
     """The team's newest injury report reported by the end of `day` in Eastern time, the official
-    one on a tie with ESPN's, as `derive.availability` picks it, its lines for the nearest game it
-    covers (a report on the night of a back-to-back lists both) by status then player; then the
-    rostered players on G League assignment it does not list."""
+    one on a tie with ESPN's, as `derive.availability` picks it; a report on the night of a
+    back-to-back lists both games, and is read for the nearer."""
     end = datetime.combine(day + timedelta(days=1), time(), EASTERN)
-    report = session.execute(
+    found = session.execute(
         select(InjuryStatus.report_datetime, InjuryStatus.source, InjuryStatus.game_date)
         .where(InjuryStatus.team_id == team_id, InjuryStatus.report_datetime < end)
         .order_by(
@@ -594,20 +614,20 @@ def _availability(session: Session, team_id: int, day: date, roster: dict[int, s
         )
         .limit(1)
     ).first()
+    return None if found is None else Report(*found)
+
+
+def _availability(session: Session, team_id: int, day: date, roster: dict[int, str]) -> _Board:
+    """The team's newest injury report by the end of `day`, its lines by status then player; then
+    the rostered players on G League assignment it does not list."""
+    report = newest_report(session, team_id, day)
     assigned = {
         player_id for player_id in roster if current_g_league_assignment(session, player_id, day)
     }
     lines: list[tuple[int, str, str | None]] = []
     if report is not None:
         lines = sorted(
-            session.execute(
-                select(InjuryStatus.player_id, InjuryStatus.status, InjuryStatus.reason).where(
-                    InjuryStatus.team_id == team_id,
-                    InjuryStatus.report_datetime == report.report_datetime,
-                    InjuryStatus.source == report.source,
-                    InjuryStatus.game_date == report.game_date,
-                )
-            ).all(),
+            session.execute(report.lines(team_id)).all(),
             key=lambda line: (_STATUS_RANK[line[1]], line[0]),
         )
     listed = [
@@ -624,42 +644,33 @@ def _availability(session: Session, team_id: int, day: date, roster: dict[int, s
 # Contract notes.
 
 
-@dataclass(frozen=True, slots=True)
-class _Note:
-    player_id: int
-    contract: Contract
-    days: int
-
-    def model(self, names: dict[int, str]) -> ContractNote:
-        contract = self.contract
-        return ContractNote(
-            player=player_ref(self.player_id, names),
-            salary=contract.salary,
-            minimum_salary=contract.minimum_salary,
-            guaranteed=contract.guaranteed,
-            guarantee_date=contract.guarantee_date,
-            guaranteed_after=contract.guaranteed_after,
-            days_until_guarantee=self.days,
-        )
-
-
-def _contracts(session: Session, team_id: int, day: date, roster: set[int]) -> list[_Note]:
-    """The rostered players' contracts with the team in the latest snapshot on or before `day`
-    whose guarantee date is on or after it, the soonest first, as `derive.flags` reads them."""
-    as_of = session.scalar(select(func.max(Contract.as_of_date)).where(Contract.as_of_date <= day))
-    if as_of is None or not roster:
-        return []
-    found = session.scalars(
-        select(Contract)
-        .where(
-            Contract.as_of_date == as_of,
-            Contract.team_id == team_id,
-            Contract.player_id.in_(roster),
-            Contract.guarantee_date >= day,
-        )
-        .order_by(Contract.guarantee_date, Contract.player_id)
+def contract_note(contract: Contract, day: date, names: dict[int, str]) -> ContractNote:
+    return ContractNote(
+        player=player_ref(contract.player_id, names),
+        salary=contract.salary,
+        minimum_salary=contract.minimum_salary,
+        guaranteed=contract.guaranteed,
+        guarantee_date=contract.guarantee_date,
+        guaranteed_after=contract.guaranteed_after,
+        days_until_guarantee=(contract.guarantee_date - day).days,
     )
-    return [
-        _Note(contract.player_id, contract, (contract.guarantee_date - day).days)
-        for contract in found
-    ]
+
+
+def contract_notes(session: Session, team_id: int, day: date, players: set[int]) -> list[Contract]:
+    """The players' contracts with the team in the latest snapshot on or before `day` whose
+    guarantee date is on or after it, the soonest first, as `derive.flags` reads them."""
+    as_of = session.scalar(select(func.max(Contract.as_of_date)).where(Contract.as_of_date <= day))
+    if as_of is None or not players:
+        return []
+    return list(
+        session.scalars(
+            select(Contract)
+            .where(
+                Contract.as_of_date == as_of,
+                Contract.team_id == team_id,
+                Contract.player_id.in_(players),
+                Contract.guarantee_date >= day,
+            )
+            .order_by(Contract.guarantee_date, Contract.player_id)
+        )
+    )

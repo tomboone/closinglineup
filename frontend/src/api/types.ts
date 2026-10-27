@@ -148,7 +148,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** Annotation */
+        /**
+         * Annotation
+         * @description A change on one of the window's dates: an injury status, a transaction, a rotation event's
+         *     tier ("Fringe → Core", "Joined as Core"), or whether he started or closed.
+         */
         Annotation: {
             /**
              * Game Date
@@ -159,7 +163,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "injury" | "transaction" | "starter" | "closer";
+            kind: "injury" | "transaction" | "tier" | "starter" | "closer";
             /** Label */
             label: string;
         };
@@ -386,6 +390,15 @@ export interface components {
             /** Tricode */
             tricode: string;
         };
+        /**
+         * InjuryLine
+         * @description A player's line on his team's newest injury report by the end of the date.
+         */
+        InjuryLine: {
+            /** Reason */
+            reason: string | null;
+            status: components["schemas"]["InjuryStatus"];
+        };
         /** @enum {string} */
         InjurySource: "pdf" | "espn";
         /**
@@ -530,10 +543,16 @@ export interface components {
             /** Value */
             value: number | null;
         };
-        /** PlayerHeader */
+        /**
+         * PlayerHeader
+         * @description `tier`, `availability` and `badges` are his `rotation_state` on his latest team game date,
+         *     null and empty with none; `injury` his line on his team's newest report, null off it.
+         */
         PlayerHeader: {
+            availability: components["schemas"]["Availability"] | null;
             /** Badges */
             badges: components["schemas"]["Badge"][];
+            injury: components["schemas"]["InjuryLine"] | null;
             player: components["schemas"]["PlayerRef"];
             /** Position */
             position: string | null;
@@ -541,10 +560,16 @@ export interface components {
             /** Tricode */
             tricode: string | null;
         };
-        /** PlayerPage */
+        /**
+         * PlayerPage
+         * @description `tiers` is his tier on each of his team's game dates in the window, the oldest first;
+         *     `contract` his non-guaranteed contract with his team, as the team page's contract notes read
+         *     one, null with none.
+         */
         PlayerPage: {
             /** Annotations */
             annotations: components["schemas"]["Annotation"][];
+            contract: components["schemas"]["ContractNote"] | null;
             /**
              * Date
              * Format: date
@@ -562,6 +587,8 @@ export interface components {
             shot_profile: components["schemas"]["ShotZone"][];
             /** Teammates */
             teammates: components["schemas"]["Teammate"][];
+            /** Tiers */
+            tiers: components["schemas"]["TierPoint"][];
             window: components["schemas"]["Window"];
         };
         /**

@@ -4,18 +4,21 @@ The page reads the player's team games: the final games of the date's season thr
 a team of his played while he was on its roster, as `player_window_stats` keys its role rows, oldest
 first. `?window=` keeps the latest 5, 10 or 20 of them, or all for `season`:
 
-- the **header** is his `rotation_state` on the latest of them; with none, the team whose roster he
-  is on that date, and no tier;
+- the **header** is his `rotation_state` on the latest of them, his tier and availability; with
+  none, the team whose roster he is on that date, and no tier; and his line on the newest injury
+  report by the date of the team whose roster he is on, as the team page reads one;
 - the **series** have a point per game in the window: his minutes and share of his team's
   box-score seconds; his team's net rating with him on the floor and that less its net with him
   off, from its stints, garbage time left out unless `?garbage_time=include` as on the team page;
   his TS% and USG%, null in a game he did not play; and each impact source's latest snapshot by the
   date;
+- the **tiers** are his `rotation_state` tier on each game in the window, null where he has none;
 - the **annotations** are the changes on the window's dates: his status on the injury reports of
   the team whose roster he is on, a report covering it that omits him after one listing him taking
   him off it, and ESPN's fallback read only where no official report covers the game; his
-  transactions; and whether he started, or closed a game with a closing situation (spec §7.1, as
-  `player_window_stats` reads one), against the previous game he played this season;
+  transactions; his rotation events; and whether he started, or closed a game with a closing
+  situation (spec §7.1, as `player_window_stats` reads one), against the previous game he played
+  this season;
 - the **shot profile** is `player_window_stats`' production rows on the latest game for the window,
   the season and the prior season, or before his first game of the season the prior season's only;
 - the **production** table reads the same rows for every window at once, a row per metric (v2 spec
@@ -24,7 +27,9 @@ first. `?window=` keeps the latest 5, 10 or 20 of them, or all for `season`:
   the window's stints, garbage time as for the series, with the net rating while they did;
 - the **matchups** are the 5 defenders who guarded him, and the 5 players he guarded, for the most
   partial possessions over the window's games;
-- the **flags** are those raised on him this season through the date, newest first.
+- the **flags** are those raised on him this season through the date, newest first;
+- the **contract** is his with the team whose roster he is on, as its page's contract notes read
+  one.
 """
 
 from bisect import bisect_right
@@ -43,16 +48,21 @@ from closinglineup.api.deps import DateDep, SessionDep
 from closinglineup.api.routers.teams import (
     StintRow,
     Totals,
+    contract_note,
+    contract_notes,
     lineup_members,
+    newest_report,
     player_names,
     player_ref,
 )
 from closinglineup.api.schemas import (
     Annotation,
+    Availability,
     Badge,
     Flag,
     GarbageTime,
     ImpactSeries,
+    InjuryLine,
     MatchupRow,
     Matchups,
     PlayerHeader,
@@ -68,12 +78,17 @@ from closinglineup.api.schemas import (
     ShotZone,
     Teammate,
     Tier,
+    TierPoint,
     Window,
+)
+from closinglineup.api.schemas import (
+    InjuryStatus as InjuryStatusName,
 )
 from closinglineup.db.models import (
     IMPACT_RATINGS,
     SHOT_ZONES,
     VALUE_METRICS,
+    Contract,
     ImpactSnapshot,
     InjuryStatus,
     Matchup,
@@ -81,6 +96,7 @@ from closinglineup.db.models import (
     PlayerFlag,
     PlayerGame,
     RosterMembership,
+    RotationEvent,
     RotationState,
     Stint,
     Transaction,
@@ -106,7 +122,7 @@ OFF_REPORT = "Off the injury report"
 PRODUCTION_WINDOWS = ("5", "10", "20", "season", "prior_season")
 # VORP is snapshotted as a season-to-date total and kept for these windows only (NEU-2003).
 SEASON_WINDOWS = ("season", "prior_season")
-_KIND_RANK = {"injury": 0, "transaction": 1, "starter": 2, "closer": 3}
+_KIND_RANK = {"injury": 0, "transaction": 1, "tier": 2, "starter": 3, "closer": 4}
 
 
 class _Game(NamedTuple):
@@ -157,6 +173,8 @@ def player_page(
     teammates = _teammates(player_id, shown, stints, garbage_time)
     defenders, guarded = _matchups(session, player_id, [game.game_id for game in shown])
     flags = _flags(session, player_id, day)
+    rostered = _rostered_team(session, player_id, day)
+    contract = _contract(session, player_id, rostered, day)
     names = player_names(
         session,
         {
@@ -169,14 +187,16 @@ def player_page(
     annotations = [
         *_injuries(session, player_id, games, day),
         *_transactions(session, player_id, day),
+        *_tier_events(session, player_id, since, day),
         *_roles(player_id, games, lines, stints),
     ]
     return PlayerPage(
         date=day,
         window=window,
         garbage_time=garbage_time,
-        header=_header(session, player_id, player, games, day, names),
+        header=_header(session, player_id, player, rostered, games, day, names),
         series=_series(session, player_id, shown, lines, stints, garbage_time, day),
+        tiers=_tiers(session, player_id, shown),
         annotations=sorted(
             (note for note in annotations if since <= note.game_date <= day),
             key=lambda note: (note.game_date, _KIND_RANK[note.kind]),
@@ -208,6 +228,7 @@ def player_page(
             )
             for flag in flags
         ],
+        contract=None if contract is None else contract_note(contract, day, names),
     )
 
 
@@ -328,35 +349,87 @@ def _stints(session: Session, games: Sequence[_Game]) -> dict[str, list[_Stint]]
 # Header.
 
 
+def _rostered_team(session: Session, player_id: int, day: date) -> int | None:
+    """The team whose roster he is on on `day`, if any."""
+    return session.scalar(
+        select(RosterMembership.team_id).where(
+            RosterMembership.player_id == player_id,
+            RosterMembership.start_date <= day,
+            or_(RosterMembership.end_date.is_(None), RosterMembership.end_date >= day),
+        )
+    )
+
+
 def _header(
     session: Session,
     player_id: int,
     player: Player | None,
+    rostered: int | None,
     games: Sequence[_Game],
     day: date,
     names: dict[int, str],
 ) -> PlayerHeader:
+    """His team and state at his latest team game, or before his first the team whose roster he
+    is on; his injury line is always that roster team's, which a trade can make another."""
     state = None
-    team_id: int | None
+    team_id = rostered
     if games:
         latest = games[-1]
         team_id = latest.team_id
         state = session.get(RotationState, (player_id, latest.team_id, latest.game_date))
-    else:
-        team_id = session.scalar(
-            select(RosterMembership.team_id).where(
-                RosterMembership.player_id == player_id,
-                RosterMembership.start_date <= day,
-                or_(RosterMembership.end_date.is_(None), RosterMembership.end_date >= day),
-            )
-        )
     return PlayerHeader(
         player=player_ref(player_id, names),
         position=None if player is None else player.position,
         tricode=None if team_id is None else by_nba_team_id(team_id).tricode,
         tier=None if state is None else cast(Tier, state.tier),
+        availability=None if state is None else cast(Availability, state.availability),
         badges=[] if state is None else [cast(Badge, badge) for badge in state.badges],
+        injury=None if rostered is None else _injury_line(session, player_id, rostered, day),
     )
+
+
+def _injury_line(session: Session, player_id: int, team_id: int, day: date) -> InjuryLine | None:
+    """His line on the team's newest injury report by the end of `day`, as the team page's
+    availability board reads it."""
+    report = newest_report(session, team_id, day)
+    if report is None:
+        return None
+    line = session.execute(report.lines(team_id, InjuryStatus.player_id == player_id)).first()
+    if line is None:
+        return None
+    _, line_status, reason = line
+    return InjuryLine(status=cast(InjuryStatusName, line_status), reason=reason)
+
+
+def _contract(session: Session, player_id: int, rostered: int | None, day: date) -> Contract | None:
+    """His contract with the team whose roster he is on, as its page's contract notes read one."""
+    if rostered is None:
+        return None
+    found = contract_notes(session, rostered, day, {player_id})
+    return found[0] if found else None
+
+
+# Tiers.
+
+
+def _tiers(session: Session, player_id: int, shown: Sequence[_Game]) -> list[TierPoint]:
+    """His tier on each game's date with the team he played it for, null where he has no row."""
+    if not shown:
+        return []
+    found = dict(
+        session.execute(
+            select(RotationState.game_date, RotationState.tier).where(
+                RotationState.player_id == player_id,
+                tuple_(RotationState.team_id, RotationState.game_date).in_(
+                    [(game.team_id, game.game_date) for game in shown]
+                ),
+            )
+        ).all()
+    )
+    return [
+        TierPoint(game_date=game.game_date, tier=cast(Tier | None, found.get(game.game_date)))
+        for game in shown
+    ]
 
 
 # Series.
@@ -539,6 +612,30 @@ def _transactions(session: Session, player_id: int, day: date) -> list[Annotatio
     return [
         Annotation(game_date=when, kind="transaction", label=detail or kind)
         for when, kind, detail in found
+    ]
+
+
+def _tier_events(session: Session, player_id: int, since: date, day: date) -> list[Annotation]:
+    """A note per rotation event of his from `since` through `day`: "Fringe → Core", or "Joined as
+    Core" for an arrival."""
+    found = session.execute(
+        select(RotationEvent.game_date, RotationEvent.from_tier, RotationEvent.to_tier)
+        .where(
+            RotationEvent.player_id == player_id,
+            RotationEvent.game_date >= since,
+            RotationEvent.game_date <= day,
+        )
+        .order_by(RotationEvent.game_date, RotationEvent.team_id)
+    ).all()
+    return [
+        Annotation(
+            game_date=when,
+            kind="tier",
+            label=f"Joined as {to_tier.capitalize()}"
+            if from_tier is None
+            else f"{from_tier.capitalize()} → {to_tier.capitalize()}",
+        )
+        for when, from_tier, to_tier in found
     ]
 
 

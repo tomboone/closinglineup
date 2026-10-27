@@ -416,12 +416,24 @@ class SlatePage(BaseModel):
 # `/api/players/{id}`
 
 
+class InjuryLine(BaseModel):
+    """A player's line on his team's newest injury report by the end of the date."""
+
+    status: InjuryStatus
+    reason: str | None
+
+
 class PlayerHeader(BaseModel):
+    """`tier`, `availability` and `badges` are his `rotation_state` on his latest team game date,
+    null and empty with none; `injury` his line on his team's newest report, null off it."""
+
     player: PlayerRef
     position: str | None
     tricode: str | None
     tier: Tier | None
+    availability: Availability | None
     badges: list[Badge]
+    injury: InjuryLine | None
 
 
 class ImpactSeries(BaseModel):
@@ -446,8 +458,11 @@ class PlayerSeries(BaseModel):
 
 
 class Annotation(BaseModel):
+    """A change on one of the window's dates: an injury status, a transaction, a rotation event's
+    tier ("Fringe → Core", "Joined as Core"), or whether he started or closed."""
+
     game_date: dt.date
-    kind: Literal["injury", "transaction", "starter", "closer"]
+    kind: Literal["injury", "transaction", "tier", "starter", "closer"]
     label: str
 
 
@@ -547,17 +562,23 @@ class Matchups(BaseModel):
 
 
 class PlayerPage(BaseModel):
+    """`tiers` is his tier on each of his team's game dates in the window, the oldest first;
+    `contract` his non-guaranteed contract with his team, as the team page's contract notes read
+    one, null with none."""
+
     date: dt.date
     window: Window
     garbage_time: GarbageTime
     header: PlayerHeader
     series: PlayerSeries
+    tiers: list[TierPoint]
     annotations: list[Annotation]
     shot_profile: list[ShotZone]
     production: list[ProductionRow]
     teammates: list[Teammate]
     matchups: Matchups
     flags: list[RaisedFlag]
+    contract: ContractNote | None
 
 
 # `/api/games/{game_id}`

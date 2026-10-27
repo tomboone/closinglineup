@@ -12,10 +12,11 @@ type TierPoint = components["schemas"]["TierPoint"];
 /**
  * A player's tier over a run of his team's game dates: a cell per date, the oldest first, each in
  * its tier's colour, a gap for a date he had no row on. Hovering a cell gives its date and tier.
+ * Flag-row sized unless `className` sizes it otherwise.
  */
-function TierStrip({ tiers }: { tiers: TierPoint[] }) {
+function TierStrip({ tiers, className = "chart-flag" }: { tiers: TierPoint[]; className?: string }) {
   const option = useMemo(() => stripOption(tiers), [tiers]);
-  return <EChart option={option} className="chart-flag" />;
+  return <EChart option={option} className={className} />;
 }
 
 function stripOption(tiers: TierPoint[]): ChartOption {
