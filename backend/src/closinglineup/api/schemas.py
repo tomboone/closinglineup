@@ -338,6 +338,78 @@ class LeaguePage(BaseModel):
     impact_fallers: list[Mover]
 
 
+# `/api/slate`
+
+
+type LineChange = Literal["new", "upgraded", "downgraded", "off"]
+
+
+class SlateReport(BaseModel):
+    """The team's newest injury report for the game by the end of the date, `stale` when it is
+    ESPN's fallback; `submitted` false, the other fields null, when it has none (v2 spec §5.1)."""
+
+    report_datetime: dt.datetime | None
+    source: InjurySource | None
+    stale: bool
+    submitted: bool
+
+
+class SlateLine(BaseModel):
+    """A player on the team's report for the game, or on G League assignment: his `status` and
+    `reason` on the report (null for a G League badge alone, and for an `off` line, which carries
+    its previous ones), his status on the previous report, the `change` between them (v2 spec
+    §5.2), and his tier and 10-game minutes share on the team's latest derived date on or before
+    last night."""
+
+    player: PlayerRef
+    status: InjuryStatus | None
+    reason: str | None
+    previous_status: InjuryStatus | None
+    change: LineChange | None
+    tier: Tier | None
+    minutes_share_10: float | None
+    g_league: bool
+    impact: Impact | None
+
+
+class ProjectedStarter(BaseModel):
+    """One of the first five of the team's players by `starter_rate_5` on its latest derived date
+    whose line on the report is not Out or Doubtful; `replacement` when one ranked above him was
+    removed (v2 spec §5.3)."""
+
+    player: PlayerRef
+    starter_rate_5: float | None
+    minutes_share_10: float | None
+    replacement: bool
+    impact: Impact | None
+
+
+class SlateTeam(BaseModel):
+    """One side of a slate game; `b2b` when it is the team's second night in a row."""
+
+    tricode: str
+    b2b: bool
+    report: SlateReport
+    lines: list[SlateLine]
+    projected_starters: list[ProjectedStarter]
+
+
+class SlateGame(BaseModel):
+    game_id: str
+    tip_time: dt.datetime | None
+    home: SlateTeam
+    away: SlateTeam
+
+
+class SlatePage(BaseModel):
+    """The date's games, by tip-off; `last_night` is the latest derived date before it, null
+    before the first (v2 spec §3, §9)."""
+
+    date: dt.date
+    last_night: dt.date | None
+    games: list[SlateGame]
+
+
 # `/api/players/{id}`
 
 

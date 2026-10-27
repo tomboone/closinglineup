@@ -11,7 +11,7 @@ from starlette.responses import Response as StarletteResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from closinglineup.api.routers import games, league, meta, players, teams
+from closinglineup.api.routers import games, league, meta, players, slate, teams
 from closinglineup.api.schemas import HealthResponse
 from closinglineup.db.session import make_engine, make_session_factory
 from closinglineup.health import unhealthy_reason
@@ -56,7 +56,7 @@ def create_app(settings: Settings, static_dir: Path = STATIC_DIR) -> FastAPI:
     )
     # What `api.deps.get_session` opens each request's session from.
     app.state.sessions = make_session_factory(engine)
-    for routes in (meta, teams, league, players, games):
+    for routes in (meta, teams, league, slate, players, games):
         app.include_router(routes.router)
 
     @app.get("/api/health")
