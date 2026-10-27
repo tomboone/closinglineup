@@ -128,8 +128,8 @@ describe("PlayerPage", () => {
     expect(within(table).getAllByRole("rowheader").map((th) => th.textContent)).toEqual(
       PLAYER_PAGE.production.map((row) => row.label),
     );
-    // The 20-game window is short for each of the 13 metrics it has.
-    expect(within(table).getAllByText("short window")).toHaveLength(13);
+    // The 20-game window is short for each of the 15 metrics it has.
+    expect(within(table).getAllByText("short window")).toHaveLength(15);
 
     const cells = (label: string) =>
       within(within(table).getByRole("rowheader", { name: label }).closest("tr")!).getAllByRole("cell");
@@ -137,11 +137,18 @@ describe("PlayerPage", () => {
     expect(cells("TS%")[0]).toHaveTextContent("66.0%+6.0");
     expect(cells("TS%")[3]).toHaveTextContent(/^60\.0%$/);
     expect(cells("3PAr")[4]).toHaveTextContent(".360−.040");
-    // Win Shares has no 5, 10 or 20-game window, and its parts on hover.
+    // Win Shares over each window, with no difference from the season's, and their parts on hover.
     const ws = cells("Win Shares");
-    expect(ws.slice(0, 3).map((td) => td.textContent)).toEqual(["—", "—", "—"]);
+    expect(ws[0]).toHaveTextContent(/^0\.9$/);
+    expect(ws[0]).toHaveAttribute("title", "OWS 0.6 · DWS 0.3");
     expect(ws[3]).toHaveTextContent("2.4");
     expect(ws[3]).toHaveAttribute("title", "OWS 1.6 · DWS 0.8");
+    // WS/48 under them, a ratio with its difference, as Basketball Reference prints it.
+    const labels = within(table).getAllByRole("rowheader").map((th) => th.textContent);
+    expect(labels[labels.indexOf("Win Shares") + 1]).toBe("WS/48");
+    expect(cells("WS/48")[0]).toHaveTextContent(".165+.015");
+    // VORP is the season's and the prior season's only.
+    expect(cells("VORP").slice(0, 3).map((td) => td.textContent)).toEqual(["—", "—", "—"]);
   });
 
   it("says so when no impact metric has a value, still charting the rest", async () => {

@@ -360,6 +360,8 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 {"date": FIRST, "player_id": PLAYER, "source": "bpm_local", "value": 1.0},
                 {"date": INJURY_DAY, "player_id": PLAYER, "source": "bpm_local", "value": 2.0},
                 {"date": _day(11), "player_id": PLAYER, "source": "darko", "value": 3.0},
+                _value(_day(2), "ws_local", 0.3, 0.2, 0.1),
+                _value(_day(7), "ws_local", 1.0, 0.6, 0.4),
                 _value(_day(11), "ws_local", 1.5, 1.0, 0.5),
                 _value(_day(12), "vorp_local", 0.3),
                 _value(PRIOR_DAY, "ws_local", 0.2, 0.1, 0.1),
@@ -602,6 +604,7 @@ PRODUCTION = [
     ("ast_per36", "AST/36", "number"),
     ("game_score", "Game Score", "per_game"),
     ("ws", "Win Shares", "number"),
+    ("ws_48", "WS/48", "rate"),
     ("vorp", "VORP", "number"),
 ]
 
@@ -637,22 +640,44 @@ def test_production_windows_count_his_games_and_mark_a_short_one(
     assert pts["5"]["o_value"] is None
 
 
-def test_win_shares_and_vorp_are_the_season_s_and_the_prior_season_s_only(
+def test_win_shares_are_over_each_window_with_no_delta_and_vorp_the_season_s_only(
     seeded: sessionmaker[Session], client: TestClient
 ) -> None:
     production = _production(_page(client))
     ws, vorp = production["ws"], production["vorp"]
 
+    assert (vorp["5"], vorp["10"], vorp["20"]) == (None, None, None)
     for windows in (ws, vorp):
-        assert (windows["5"], windows["10"], windows["20"]) == (None, None, None)
-        assert windows["season"]["delta_season"] is None
-        assert windows["prior_season"]["delta_season"] is None
+        for cell in windows.values():
+            assert cell is None or cell["delta_season"] is None
+    # His snapshot at game 12, carried from game 11, less those at games 7 and 2; the 20-game
+    # window starts before his first game.
+    assert (ws["5"]["value"], ws["5"]["o_value"], ws["5"]["d_value"]) == pytest.approx(
+        (0.5, 0.4, 0.1)
+    )
+    assert (ws["10"]["value"], ws["10"]["o_value"]) == pytest.approx((1.2, 0.8))
+    assert ws["20"]["value"] == 1.5
     season, prior = ws["season"], ws["prior_season"]
     assert (season["value"], season["o_value"], season["d_value"]) == (1.5, 1.0, 0.5)
     # The prior season's final snapshot, not its first.
     assert (prior["value"], prior["o_value"], prior["d_value"]) == (4.0, 2.5, 1.5)
     assert (vorp["season"]["value"], vorp["prior_season"]["value"]) == (0.3, 1.1)
     assert vorp["season"]["o_value"] is None
+
+
+def test_ws_48_is_each_window_s_win_shares_per_48_minutes_with_its_delta(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    ws_48 = _production(_page(client))["ws_48"]
+
+    # 40 minutes a game.
+    assert ws_48["5"]["value"] == pytest.approx(0.5 * 48 / (5 * 40))
+    assert ws_48["10"]["value"] == pytest.approx(1.2 * 48 / (10 * 40))
+    assert ws_48["season"]["value"] == pytest.approx(1.5 * 48 / (12 * 40))
+    assert ws_48["5"]["delta_season"] == pytest.approx(0.5 * 48 / 200 - 1.5 * 48 / 480)
+    assert ws_48["season"]["delta_season"] == pytest.approx(0.0)
+    assert ws_48["prior_season"]["value"] == pytest.approx(4.0 * 48 / 40)
+    assert ws_48["5"]["o_value"] is None
 
 
 def test_before_his_first_game_production_is_the_prior_season_s(
@@ -666,6 +691,7 @@ def test_before_his_first_game_production_is_the_prior_season_s(
     assert (pts["games"], pts["is_short"], pts["delta_season"]) == (1, False, None)
     ws = production["ws"]["prior_season"]
     assert (ws["value"], ws["o_value"], ws["d_value"]) == (4.0, 2.5, 1.5)
+    assert production["ws_48"]["prior_season"]["delta_season"] is None
     assert production["vorp"]["prior_season"]["value"] == 1.1
 
 

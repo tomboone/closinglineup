@@ -33,7 +33,7 @@ Production rows (team_id NULL) gain:
 | `ws_window_o`, `ws_window_d` | the same, over `ws_local_o` / `ws_local_d` | `ws_local_o` / `_d` | final `_o` / `_d` |
 | `ws_48` | `ws_window * 2880 / nullif(seconds, 0)` | same | same, over the prior season's seconds |
 | `ws_48_delta_prior` | as every windowed metric: the window's value less its own n games back | less prior_season's | NULL |
-| `ws_48_delta_season` | less the season window's at the same date | 0 | NULL |
+| `ws_48_delta_season` | less the season window's at the same date | 0 | less the season window's, as every metric's |
 
 - **Lag over `k`.** `k` is the player's production game count, his teams' games, across spells, one per date. Every production window counts it, and a traded player's `ws_local` snapshot is already summed over his teams, so the difference is right across a trade.
 - **Missing start snapshot → NULL.** The view already carries the latest snapshot forward within the season, so a single missed night is covered. Only when `k > n` and no snapshot exists at or before the window's start (the value step began partway into the season) is the start NULL, and then `ws_window` is NULL, not the season to date. Before the season's first game (`k <= n`) the start counts as 0.

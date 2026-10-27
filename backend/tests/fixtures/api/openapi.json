@@ -1456,6 +1456,7 @@
           "ast_per36",
           "game_score",
           "ws",
+          "ws_48",
           "vorp"
         ],
         "type": "string"

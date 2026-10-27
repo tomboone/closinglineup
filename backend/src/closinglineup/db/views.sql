@@ -15,7 +15,8 @@
 --   same team does, are one spell (CONTEXT.md, "Role window").
 -- * Production rows (team_id NULL; every window) carry the §7.2 metrics, Game Score (v2 spec
 --   §8.1), the latest impact snapshots and the latest value snapshots, Win Shares and VORP (v2
---   spec §8.4), over the player's games whatever his team (CONTEXT.md, "Production window").
+--   spec §8.4), and Win Shares and WS/48 over the window (NEU-2003), over the player's games
+--   whatever his team (CONTEXT.md, "Production window").
 --
 -- Windows count team games, not games played: a 5-game window at date d is his team's last five
 -- games through d, d included (spec §7). Every window but prior_season stays within d's season, so
@@ -30,7 +31,7 @@
 -- window computes on what it has too, and is absent, its deltas NULL, before the player's
 -- (n + 1)th team game. A production row's season window has the prior season as its prior window;
 -- a role row's season window, and prior_season, have none. The games and possession counts and
--- the impact and value snapshots carry no deltas.
+-- the impact and value snapshots, and Win Shares over the window, carry no deltas.
 --
 -- Not here yet: §7.3's net rating of the player's three most-used 2-man combos, and on-court
 -- ratings with garbage time included, which the API's `garbage_time=include` will need.
@@ -640,6 +641,8 @@ prod_metric AS (
         window_name,
         n,
         games,
+        -- Carried for WS/48 (v2 spec §8.4), not an output column.
+        seconds,
         -- §7.2 true shooting: points over twice the true shot attempts, a free throw attempt
         -- 0.44 of one.
         pts / nullif(2 * (fga + 0.44 * fta), 0) AS ts_pct,
@@ -718,6 +721,7 @@ prod_all AS (
         'prior_season',
         NULL,
         t.games,
+        t.seconds,
         t.ts_pct,
         t.efg_pct,
         t.usg_pct,
@@ -893,6 +897,48 @@ value_final AS (
         ORDER BY player_id, source, start_year, date DESC
     ) final
     GROUP BY player_id, start_year
+),
+-- v2 spec §8.4 the value snapshots in every production window, and Win Shares over the window: the
+-- season-to-date snapshot at the date less the one n games back, as the windows' sums are, 0
+-- before the season's first game and NULL if the window's start has none; the season window's is
+-- the snapshot itself, the prior season's its final one. WS/48 is the window's Win Shares per 48
+-- minutes of his.
+prod_value AS (
+    SELECT
+        m.*,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local ELSE v.ws_local END AS ws_local,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_o ELSE v.ws_local_o END
+            AS ws_local_o,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_d ELSE v.ws_local_d END
+            AS ws_local_d,
+        CASE WHEN m.window_name = 'prior_season' THEN f.vorp_local ELSE v.vorp_local END
+            AS vorp_local,
+        CASE
+            WHEN m.window_name = 'prior_season' THEN f.ws_local
+            WHEN m.k <= coalesce(m.n, m.k) THEN v.ws_local
+            ELSE v.ws_local - lag(v.ws_local, m.n) OVER back
+        END AS ws_window,
+        CASE
+            WHEN m.window_name = 'prior_season' THEN f.ws_local_o
+            WHEN m.k <= coalesce(m.n, m.k) THEN v.ws_local_o
+            ELSE v.ws_local_o - lag(v.ws_local_o, m.n) OVER back
+        END AS ws_window_o,
+        CASE
+            WHEN m.window_name = 'prior_season' THEN f.ws_local_d
+            WHEN m.k <= coalesce(m.n, m.k) THEN v.ws_local_d
+            ELSE v.ws_local_d - lag(v.ws_local_d, m.n) OVER back
+        END AS ws_window_d
+    FROM prod_all m
+    LEFT JOIN value_asof v ON v.player_id = m.player_id AND v.game_date = m.game_date
+    LEFT JOIN value_final f
+        ON f.player_id = m.player_id
+        AND f.start_year = left(m.season, 4)::int - 1
+        AND m.window_name = 'prior_season'
+    WINDOW back AS (PARTITION BY m.player_id, m.season, m.window_name ORDER BY m.k)
+),
+prod_value_rate AS (
+    SELECT *, ws_window * 2880 / nullif(seconds, 0) AS ws_48
+    FROM prod_value
 ),
 -- The prior window's value is the window's own value n games back in the season; the season's is
 -- the prior season's whole, and the prior season's has none.
@@ -1131,20 +1177,23 @@ prod_row AS (
         i.bpm_local,
         i.bpm_local_o,
         i.bpm_local_d,
-        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local ELSE v.ws_local END AS ws_local,
-        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_o ELSE v.ws_local_o END
-            AS ws_local_o,
-        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_d ELSE v.ws_local_d END
-            AS ws_local_d,
-        CASE WHEN m.window_name = 'prior_season' THEN f.vorp_local ELSE v.vorp_local END
-            AS vorp_local
-    FROM prod_all m
+        m.ws_local,
+        m.ws_local_o,
+        m.ws_local_d,
+        m.vorp_local,
+        m.ws_window,
+        m.ws_window_o,
+        m.ws_window_d,
+        m.ws_48,
+        m.ws_48 - CASE
+            WHEN m.window_name = 'season'
+                THEN max(m.ws_48) FILTER (WHERE m.window_name = 'prior_season') OVER anchor
+            ELSE lag(m.ws_48, m.n) OVER back
+        END AS ws_48_delta_prior,
+        m.ws_48 - max(m.ws_48) FILTER (WHERE m.window_name = 'season') OVER anchor
+            AS ws_48_delta_season
+    FROM prod_value_rate m
     LEFT JOIN impact_asof i ON i.player_id = m.player_id AND i.game_date = m.game_date
-    LEFT JOIN value_asof v ON v.player_id = m.player_id AND v.game_date = m.game_date
-    LEFT JOIN value_final f
-        ON f.player_id = m.player_id
-        AND f.start_year = left(m.season, 4)::int - 1
-        AND m.window_name = 'prior_season'
     WINDOW
         back AS (PARTITION BY m.player_id, m.season, m.window_name ORDER BY m.k),
         anchor AS (PARTITION BY m.player_id, m.season, m.k)
@@ -1292,7 +1341,13 @@ SELECT
     p.ws_local,
     p.ws_local_o,
     p.ws_local_d,
-    p.vorp_local
+    p.vorp_local,
+    p.ws_window,
+    p.ws_window_o,
+    p.ws_window_d,
+    p.ws_48,
+    p.ws_48_delta_prior,
+    p.ws_48_delta_season
 FROM role_row r
 FULL JOIN prod_row p ON p.team_id = r.team_id;
 

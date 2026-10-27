@@ -479,10 +479,11 @@ type ProductionMetric = Literal[
     "ast_per36",
     "game_score",
     "ws",
+    "ws_48",
     "vorp",
 ]
-# How a metric reads: a fraction as a percentage, a ratio to three decimals (FTr, 3PAr), a number
-# (per-36 rates, Win Shares, VORP), or a number per game played (Game Score).
+# How a metric reads: a fraction as a percentage, a ratio to three decimals (FTr, 3PAr, WS/48), a
+# number (per-36 rates, Win Shares, VORP), or a number per game played (Game Score).
 type ProductionFormat = Literal["percent", "rate", "number", "per_game"]
 
 
