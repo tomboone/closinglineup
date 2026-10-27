@@ -2,8 +2,9 @@ import type { SlatePage } from "../api/client";
 import type { components } from "../api/types";
 import { ReportLine } from "../components/AvailabilityBoard";
 import { TIER_COLOURS } from "../components/charts/theme";
-import { percent, signed } from "../components/format";
-import { IMPACT_LABELS, TIER_LABELS } from "../components/labels";
+import { percent } from "../components/format";
+import ImpactValue from "../components/ImpactValue";
+import { TIER_LABELS } from "../components/labels";
 import PlayerLink from "../components/PlayerLink";
 import TeamLink from "../components/TeamLink";
 
@@ -79,7 +80,7 @@ function SlateSide({ team }: { team: SlateTeam }) {
         <ol className="projected-starters">
           {team.projected_starters.map((starter) => (
             <li key={starter.player.player_id}>
-              <PlayerLink player={starter.player} />
+              <PlayerLink player={starter.player} /> <ImpactValue impact={starter.impact} />
               {starter.replacement && (
                 <span className="marker marker-replacement" title="In for a player ranked above him who is out">
                   replacement
@@ -133,10 +134,7 @@ function Lines({ lines }: { lines: SlateLine[] }) {
             </td>
             <td className="number">{percent(line.minutes_share_10)}</td>
             <td className="number">
-              {signed(line.impact?.value)}
-              {line.impact && (
-                <span className="impact-source">{IMPACT_LABELS[line.impact.source]}</span>
-              )}
+              <ImpactValue impact={line.impact} />
             </td>
           </tr>
         ))}

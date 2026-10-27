@@ -127,6 +127,10 @@ body {
   font-style: normal;
 }
 
+.impact {
+  font-variant-numeric: tabular-nums;
+}
+
 .impact-source {
   margin-left: 4px;
   font-size: 0.75em;
@@ -308,7 +312,8 @@ body {
   align-items: start;
 }
 
-.league-page .league-events {
+.league-page .league-events,
+.league-page .league-quiet {
   grid-column: 1 / -1;
 }
 

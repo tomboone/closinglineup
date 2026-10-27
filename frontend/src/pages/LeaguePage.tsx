@@ -6,6 +6,7 @@ import SparklineCell, { type SparklineRange } from "../components/charts/Sparkli
 import { TIER_COLOURS } from "../components/charts/theme";
 import { FlagGroups } from "../components/FlagList";
 import { percent, signed } from "../components/format";
+import ImpactValue from "../components/ImpactValue";
 import { IMPACT_LABELS, TIER_LABELS, TRANSACTION_LABELS } from "../components/labels";
 import PlayerLink from "../components/PlayerLink";
 import TeamLink from "../components/TeamLink";
@@ -15,10 +16,17 @@ import TodayTab from "./TodayTab";
 
 type Schemas = components["schemas"];
 type Mover = Schemas["Mover"];
+type TeamSummary = Schemas["TeamSummary"];
 
 // The API's counts (`api/routers/league.py`), which the tables never exceed.
 const MINUTES_MOVERS = 15;
 const IMPACT_MOVERS = 10;
+// The team games each empty list needs before it can fill: a minutes mover's 10-game window against
+// the 10 before it (`player_window_stats`' `_delta_prior`), an impact mover's value 10 games back, and
+// the flags' longest window, minutes cliff's 20 games.
+const MINUTES_MOVER_GAMES = 20;
+const IMPACT_MOVER_GAMES = 11;
+const FLAG_GAMES = 20;
 
 const TAB_LABELS: Record<Tab, string> = {
   today: "Today",
@@ -46,6 +54,7 @@ function LeaguePage() {
   const lagging = lastNight !== null && lastNight < yesterday;
   const dayBeforeLeague = useLeague({ date: yesterday }, { enabled: lagging });
   const morningLeague = lagging ? dayBeforeLeague : league;
+  const summaries = useTeams().data?.teams;
   const ids = useId();
   const tabId = (one: Tab) => `${ids}-tab-${one}`;
   const panelId = `${ids}-panel`;
@@ -73,7 +82,7 @@ function LeaguePage() {
                   </button>
                 ))}
               </div>
-              <TeamFilter selected={teams} onChange={setTeams} />
+              <TeamFilter teams={summaries} selected={teams} onChange={setTeams} />
             </div>
             <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)} className="league-page">
               {tab === "today" ? (
@@ -89,11 +98,16 @@ function LeaguePage() {
                           <DerivedPanel
                             tab={tab}
                             page={filtered(withMoves(derived, ofMorning, morning), teams)}
+                            games={played(summaries, teams)}
                           />
                         )}
                       </QueryStatus>
                     ) : (
-                      <DerivedPanel tab={tab} page={filtered(derived, teams)} />
+                      <DerivedPanel
+                        tab={tab}
+                        page={filtered(derived, teams)}
+                        games={played(summaries, teams)}
+                      />
                     )
                   }
                 </QueryStatus>
@@ -125,13 +139,14 @@ function FeedDates({ morning, lastNight }: { morning: string; lastNight: string 
 
 /** A checkbox per tricode; none checked is every team. */
 function TeamFilter({
+  teams,
   selected,
   onChange,
 }: {
+  teams: TeamSummary[] | undefined;
   selected: ReadonlySet<string>;
   onChange: (teams: ReadonlySet<string>) => void;
 }) {
-  const teams = useTeams();
   const toggle = (tricode: string, on: boolean) => {
     const next = new Set(selected);
     if (on) next.add(tricode);
@@ -143,7 +158,7 @@ function TeamFilter({
       <summary>Teams: {selected.size === 0 ? "all" : [...selected].sort().join(", ")}</summary>
       <fieldset>
         <legend>Show teams</legend>
-        {teams.data?.teams.map((team) => (
+        {teams?.map((team) => (
           <label key={team.tricode}>
             <input
               type="checkbox"
@@ -163,8 +178,8 @@ function TeamFilter({
 
 /**
  * The page's rows of the selected teams, every row when none is selected: an event by its team, a
- * mover or a flag by its tricode, a transaction by either of its teams. The movers are filtered after
- * the API ranked them league-wide.
+ * quiet signal, a mover or a flag by its tricode, a transaction by either of its teams. The movers
+ * are filtered after the API ranked them league-wide.
  */
 function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
   const has = (tricode: string | null) => tricode !== null && teams.has(tricode);
@@ -177,6 +192,7 @@ function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
     // come of its games; a transaction can still land on it (spec §8).
     noGames: [
       page.rotation_events,
+      page.quiet_signals,
       page.minutes_risers,
       page.minutes_fallers,
       page.flags,
@@ -184,6 +200,7 @@ function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
       page.impact_fallers,
     ].every((list) => list.length === 0),
     rotation_events: keep(page.rotation_events, byTricode),
+    quiet_signals: keep(page.quiet_signals, byTricode),
     minutes_risers: keep(page.minutes_risers, byTricode),
     minutes_fallers: keep(page.minutes_fallers, byTricode),
     impact_risers: keep(page.impact_risers, byTricode),
@@ -194,6 +211,39 @@ function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
 }
 
 type FeedPage = LeaguePageData & { noGames: boolean };
+
+/** The regular-season games the selected teams, or the league, have played: who, and how many. */
+type Played = { who: string; plural: boolean; least: number; most: number };
+
+/**
+ * The selected teams' games, the league's when none is selected; null before the teams have loaded
+ * or when no selected team is one of them. A team's games are its wins and losses (`GET /api/teams`).
+ */
+function played(summaries: TeamSummary[] | undefined, selected: ReadonlySet<string>): Played | null {
+  const rows =
+    summaries?.filter((team) => selected.size === 0 || selected.has(team.tricode)) ?? [];
+  if (rows.length === 0) return null;
+  const counts = rows.map((team) => team.wins + team.losses);
+  return {
+    who: selected.size === 0 ? "the league" : rows.map((team) => team.tricode).join(", "),
+    plural: selected.size > 0 && rows.length > 1,
+    least: Math.min(...counts),
+    most: Math.max(...counts),
+  };
+}
+
+/**
+ * An empty list's message: while no counted team has played the `needs` games its window takes,
+ * `window`, the window it needs, and the games played ("BOS has played 3.", a range when they
+ * differ); once one has, the list is empty for the date alone and says `none`.
+ */
+function emptyList(none: string, window: string, needs: number, games: Played | null) {
+  if (games === null) return window;
+  if (games.most >= needs) return none;
+  const n = games.least === games.most ? `${games.least}` : `${games.least}–${games.most}`;
+  const who = `${games.who[0]!.toUpperCase()}${games.who.slice(1)}`;
+  return `${window} ${who} ${games.plural ? "have" : "has"} played ${n}.`;
+}
 
 /** Last night's page with its transactions narrowed to last night's and the morning's (v2 spec §3). */
 function withMoves(
@@ -210,8 +260,20 @@ function withMoves(
   };
 }
 
-/** One of the tabs that read last night, its page already filtered to the selected teams. */
-function DerivedPanel({ tab, page }: { tab: Exclude<Tab, "today">; page: FeedPage }) {
+/**
+ * One of the tabs that read last night, its page already filtered to the selected teams. An empty
+ * movers or flags list early in the season says what window it needs and how many `games` the
+ * selected teams have played, so the morning reads as early rather than broken (v2 spec §2).
+ */
+function DerivedPanel({
+  tab,
+  page,
+  games,
+}: {
+  tab: Exclude<Tab, "today">;
+  page: FeedPage;
+  games: Played | null;
+}) {
   const empty = (emptyMessage: string) => (
     <p>{page.noGames ? `No games on ${page.date}.` : emptyMessage}</p>
   );
@@ -219,14 +281,28 @@ function DerivedPanel({ tab, page }: { tab: Exclude<Tab, "today">; page: FeedPag
   switch (tab) {
     case "rotation":
       return (
-        <section className="league-events" aria-labelledby="league-events">
-          <h2 id="league-events">Rotation changes</h2>
-          {page.rotation_events.length === 0 ? (
-            empty("No rotation changes.")
-          ) : (
-            <RotationEvents teams={page.rotation_events} />
-          )}
-        </section>
+        <>
+          <section className="league-events" aria-labelledby="league-events">
+            <h2 id="league-events">Rotation changes</h2>
+            {page.rotation_events.length === 0 ? (
+              empty("No rotation changes.")
+            ) : (
+              <RotationEvents teams={page.rotation_events} />
+            )}
+          </section>
+          <section className="league-quiet" aria-labelledby="league-quiet">
+            <h2 id="league-quiet">Quiet signals</h2>
+            <p className="note">
+              Starters and Core players under 60% of their 10-game minutes, or sat by coach&apos;s
+              decision, with no rotation change yet.
+            </p>
+            {page.quiet_signals.length === 0 ? (
+              empty("No quiet signals.")
+            ) : (
+              <QuietSignals signals={page.quiet_signals} />
+            )}
+          </section>
+        </>
       );
     case "movers":
       return (
@@ -235,7 +311,14 @@ function DerivedPanel({ tab, page }: { tab: Exclude<Tab, "today">; page: FeedPag
             <h2 id="league-minutes">Minutes movers</h2>
             <p className="note">10-game minutes share against the 10 games before.</p>
             {page.minutes_risers.length + page.minutes_fallers.length === 0 ? (
-              empty("No minutes movers.")
+              empty(
+                emptyList(
+                  "No minutes movers.",
+                  `Minutes movers need ${MINUTES_MOVER_GAMES} team games.`,
+                  MINUTES_MOVER_GAMES,
+                  games,
+                ),
+              )
             ) : (
               <>
                 <MoverTable caption="Rising" movers={page.minutes_risers} kind="minutes" />
@@ -249,7 +332,14 @@ function DerivedPanel({ tab, page }: { tab: Exclude<Tab, "today">; page: FeedPag
               Impact against 10 team games before, in the first of EPM, DARKO and BPM with both.
             </p>
             {page.impact_risers.length + page.impact_fallers.length === 0 ? (
-              empty("No impact movers.")
+              empty(
+                emptyList(
+                  "No impact movers.",
+                  "Impact movers need an impact value 10 games back.",
+                  IMPACT_MOVER_GAMES,
+                  games,
+                ),
+              )
             ) : (
               <>
                 <MoverTable caption="Rising" movers={page.impact_risers} kind="impact" />
@@ -263,7 +353,19 @@ function DerivedPanel({ tab, page }: { tab: Exclude<Tab, "today">; page: FeedPag
       return (
         <section aria-labelledby="league-flags">
           <h2 id="league-flags">Flags</h2>
-          {page.flags.length === 0 ? empty("No flags raised.") : <FlagGroups flags={page.flags} />}
+          {page.flags.length === 0 ? (
+            empty(
+              emptyList(
+                "No flags raised.",
+                "No flags raised. Earning trust needs 15 games of a spell; minutes cliff needs the " +
+                  "5- and 20-game windows to differ.",
+                FLAG_GAMES,
+                games,
+              ),
+            )
+          ) : (
+            <FlagGroups flags={page.flags} />
+          )}
         </section>
       );
     case "moves":
@@ -289,7 +391,10 @@ function Tier({ tier }: { tier: Schemas["Tier"] | null }) {
   );
 }
 
-/** Each team's tier transitions, from → to, with the signals that explain them. */
+/**
+ * Each team's tier transitions, from → to, with the player's impact and the signals that explain
+ * them.
+ */
 function RotationEvents({ teams }: { teams: Schemas["TeamRotationEvents"][] }) {
   return teams.map((team) => (
     <section key={team.tricode} aria-label={team.tricode} className="league-team">
@@ -299,7 +404,8 @@ function RotationEvents({ teams }: { teams: Schemas["TeamRotationEvents"][] }) {
       <ul className="rotation-events">
         {team.events.map((event) => (
           <li key={event.player.player_id}>
-            <PlayerLink player={event.player} /> <Tier tier={event.from_tier} /> →{" "}
+            <PlayerLink player={event.player} /> <ImpactValue impact={event.impact} />{" "}
+            <Tier tier={event.from_tier} /> →{" "}
             <Tier tier={event.to_tier} />
             <ul className="signals">
               {event.signals.map((signal) => (
@@ -314,9 +420,31 @@ function RotationEvents({ teams }: { teams: Schemas["TeamRotationEvents"][] }) {
 }
 
 /**
- * Movers one way, with their 10-game value, its change and a line from the prior window to it, the
- * table's lines sharing one y range so a bigger move is a steeper one; a minutes mover's value is a
- * share, an impact mover's a rating named by its source.
+ * Last night's quiet signals in the API's order, a DNP-CD first and then the largest shortfall: each
+ * player with his impact, team and tier, and his minutes against his 10-game average.
+ */
+function QuietSignals({ signals }: { signals: Schemas["QuietSignal"][] }) {
+  return (
+    <ul className="league-list">
+      {signals.map((signal) => (
+        <li key={`${signal.tricode}-${signal.player.player_id}`}>
+          <PlayerLink player={signal.player} /> <ImpactValue impact={signal.impact} />{" "}
+          <TeamLink tricode={signal.tricode} /> <Tier tier={signal.tier} />{" "}
+          <span className="note">
+            {signal.dnp_reason === "cd"
+              ? "DNP-CD"
+              : `${Math.round(signal.seconds / 60)} min vs ${signal.minutes_per_game_10.toFixed(1)} avg`}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Movers one way, each with his impact beside him, with their 10-game value, its change and a line
+ * from the prior window to it, the table's lines sharing one y range so a bigger move is a steeper
+ * one; a minutes mover's value is a share, an impact mover's an impact value named by its source.
  */
 function MoverTable({
   caption,
@@ -347,7 +475,7 @@ function MoverTable({
         {shown.map((mover) => (
           <tr key={mover.player.player_id}>
             <td>
-              <PlayerLink player={mover.player} />
+              <PlayerLink player={mover.player} /> <ImpactValue impact={mover.impact} />
             </td>
             <td>{mover.tricode && <TeamLink tricode={mover.tricode} />}</td>
             <td className="number">
@@ -396,14 +524,17 @@ function MoverSparkline({
   );
 }
 
-/** Last night's and the morning's transactions, each dated, with the teams it moved the player between. */
+/**
+ * Last night's and the morning's transactions, each dated, with the player's impact and the teams it
+ * moved him between.
+ */
 function Transactions({ transactions }: { transactions: Schemas["TransactionSummary"][] }) {
   return (
     <ul className="league-list">
       {transactions.map((transaction, i) => (
         <li key={`${transaction.player.player_id}-${i}`}>
           <span className="flag-date">{transaction.date}</span>{" "}
-          <PlayerLink player={transaction.player} />
+          <PlayerLink player={transaction.player} /> <ImpactValue impact={transaction.impact} />
           <span className="badge">
             {TRANSACTION_LABELS[transaction.type] ?? transaction.type}
           </span>{" "}
