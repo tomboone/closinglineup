@@ -1457,7 +1457,7 @@
         "type": "object"
       },
       "RaisedFlag": {
-        "description": "A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the\nteam's last 20 final game dates this season through it, the oldest first, a date he has no row\non left out (v2 spec \u00a76.2); other flags', and every flag's elsewhere, are null.",
+        "description": "A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the\nteam's last 20 final game dates this season through it, the oldest first, a date he has no row\non kept with a null tier (v2 spec \u00a76.2); other flags', and every flag's elsewhere, are null.",
         "properties": {
           "detail": {
             "additionalProperties": true,
@@ -2350,7 +2350,7 @@
         "type": "object"
       },
       "TierPoint": {
-        "description": "His tier on one of his team's game dates.",
+        "description": "His tier on one of his team's game dates, null on a date he has no row on.",
         "properties": {
           "game_date": {
             "format": "date",
@@ -2358,7 +2358,14 @@
             "type": "string"
           },
           "tier": {
-            "$ref": "#/components/schemas/Tier"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

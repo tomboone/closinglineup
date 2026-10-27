@@ -272,6 +272,44 @@ describe("LeaguePage", () => {
     );
   });
 
+  it("draws a visual beside each flag's text, but contract pressure's", async () => {
+    const [cliff, contract] = LEAGUE_PAGE.flags;
+    const flag = (kind: (typeof LEAGUE_PAGE.flags)[number]["flag"], detail: object, tiers = null) => ({
+      ...cliff!,
+      flag: kind,
+      detail,
+      tiers,
+    });
+    const tiers = Array.from({ length: 20 }, (_, i) => ({
+      game_date: `2026-03-${String(i + 1).padStart(2, "0")}`,
+      tier: i % 2 ? ("core" as const) : ("fringe" as const),
+    }));
+    morning({
+      ...LEAGUE_PAGE,
+      flags: [
+        cliff,
+        flag("usage_up_efficiency_down", { usg_pct_delta_season: 0.04, ts_pct_delta_season: -0.05 }),
+        flag("bleeding", { on_court_net: -8.2, possessions: 412, off_court_net: 3.1 }),
+        flag("earning_trust", { shares: [0.08, 0.1, 0.13] }),
+        { ...flag("yo_yo", { events: 4, changes: [] }), tiers },
+        contract,
+      ],
+    });
+    renderApp(`${MORNING}&tab=flags`);
+
+    const flags = await screen.findByRole("region", { name: "Flags" });
+    const visuals = (name: string) =>
+      within(flags).getByRole("region", { name }).querySelectorAll(".chart-flag").length;
+    expect(
+      ["Minutes cliff", "Usage up, efficiency down", "Bleeding", "Earning trust", "Yo-yo"].map(visuals),
+    ).toEqual([1, 1, 1, 1, 1]);
+    expect(visuals("Contract pressure")).toBe(0);
+    // The text stays beside the drawing.
+    expect(within(flags).getByRole("region", { name: "Bleeding" })).toHaveTextContent(
+      "On-court net −8.2 on 412 poss, off-court +3.1",
+    );
+  });
+
   it("lists last night's and the morning's transactions, each dated", async () => {
     const tomorrows = { ...LEAGUE_PAGE.transactions[0]!, date: "2026-03-21", type: "waive" };
     morning({ ...LEAGUE_PAGE, transactions: [...LEAGUE_PAGE.transactions, tomorrows] });

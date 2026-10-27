@@ -363,7 +363,8 @@ def _tier_strips(
     session: Session, day: date, keys: set[tuple[int, int]]
 ) -> dict[tuple[int, int], list[TierPoint]]:
     """Each player-team's tier on each of the team's last `STRIP_GAMES` final game dates through
-    `day` this season, the oldest first, a date he has no `rotation_state` row on left out."""
+    `day` this season, the oldest first, a date he has no `rotation_state` row on kept with a null
+    tier, so the strip leaves its gap in place."""
     season = session.scalar(select(Game.season).where(Game.game_date == day).limit(1))
     if not keys or season is None:
         return {}
@@ -380,21 +381,29 @@ def _tier_strips(
             # A team plays once a date.
             if team_id in team_ids and len(dates[team_id]) < STRIP_GAMES:
                 dates[team_id].add(game_date)
-    strips: dict[tuple[int, int], list[TierPoint]] = {key: [] for key in keys}
-    for player_id, team_id, game_date, tier in session.execute(
-        select(
-            RotationState.player_id,
-            RotationState.team_id,
-            RotationState.game_date,
-            RotationState.tier,
+    tiers: dict[tuple[int, int, date], str] = {
+        (player_id, team_id, game_date): tier
+        for player_id, team_id, game_date, tier in session.execute(
+            select(
+                RotationState.player_id,
+                RotationState.team_id,
+                RotationState.game_date,
+                RotationState.tier,
+            )
+            .where(tuple_(RotationState.player_id, RotationState.team_id).in_(list(keys)))
+            .where(RotationState.game_date.in_({d for team in dates.values() for d in team}))
         )
-        .where(tuple_(RotationState.player_id, RotationState.team_id).in_(list(keys)))
-        .where(RotationState.game_date.in_({d for team in dates.values() for d in team}))
-        .order_by(RotationState.game_date)
-    ):
-        if game_date in dates[team_id]:
-            strips[player_id, team_id].append(TierPoint(game_date=game_date, tier=cast(Tier, tier)))
-    return strips
+    }
+    return {
+        (player_id, team_id): [
+            TierPoint(
+                game_date=game_date,
+                tier=cast(Tier | None, tiers.get((player_id, team_id, game_date))),
+            )
+            for game_date in sorted(dates[team_id])
+        ]
+        for player_id, team_id in keys
+    }
 
 
 def _transactions(session: Session, day: date) -> list[Transaction]:

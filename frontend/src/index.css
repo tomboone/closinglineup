@@ -236,6 +236,23 @@ body {
   border-bottom: 1px solid #eee;
 }
 
+/* A flag's text, then its drawing at the row's right edge, the drawings one column down the list. */
+.flag-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chart-flag {
+  flex: none;
+  width: 160px;
+  height: 40px;
+}
+
+.flag-row .chart-flag {
+  margin-left: auto;
+}
+
 .flag-date {
   font-variant-numeric: tabular-nums;
   color: #57606a;

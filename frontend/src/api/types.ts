@@ -664,7 +664,7 @@ export interface components {
          * RaisedFlag
          * @description A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the
          *     team's last 20 final game dates this season through it, the oldest first, a date he has no row
-         *     on left out (v2 spec §6.2); other flags', and every flag's elsewhere, are null.
+         *     on kept with a null tier (v2 spec §6.2); other flags', and every flag's elsewhere, are null.
          */
         RaisedFlag: {
             /** Detail */
@@ -947,7 +947,7 @@ export interface components {
         };
         /**
          * TierPoint
-         * @description His tier on one of his team's game dates.
+         * @description His tier on one of his team's game dates, null on a date he has no row on.
          */
         TierPoint: {
             /**
@@ -955,7 +955,7 @@ export interface components {
              * Format: date
              */
             game_date: string;
-            tier: components["schemas"]["Tier"];
+            tier: components["schemas"]["Tier"] | null;
         };
         /** TransactionSummary */
         TransactionSummary: {

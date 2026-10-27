@@ -430,8 +430,9 @@ def test_a_yo_yo_flag_carries_his_tier_on_each_team_game_date_the_oldest_first(
     flags = _page(client)["flags"]
 
     (yo_yo,) = (flag for flag in flags if flag["flag"] == "yo_yo")
+    # Game 7, on which he has no row, is kept in its place with no tier, for the strip's gap.
     assert yo_yo["tiers"] == [
-        {"game_date": _day(g).isoformat(), "tier": tier} for g, tier in STRIP.items()
+        {"game_date": _day(g).isoformat(), "tier": STRIP.get(g)} for g in GAMES
     ]
     assert [flag["tiers"] for flag in flags if flag["flag"] != "yo_yo"] == [None, None]
 
