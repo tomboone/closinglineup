@@ -64,7 +64,7 @@ from closinglineup.api.schemas import (
     Window,
 )
 from closinglineup.db.models import (
-    IMPACT_SOURCES,
+    IMPACT_RATINGS,
     SHOT_ZONES,
     ImpactSnapshot,
     InjuryStatus,
@@ -429,7 +429,7 @@ def _impact(
     for source, when, value in found:
         snapshots[source].append((when, value))
     series: list[ImpactSeries] = []
-    for source in IMPACT_SOURCES:
+    for source in IMPACT_RATINGS:
         taken = snapshots.get(source, [])
         taken_dates = [when for when, _ in taken]
         points = [

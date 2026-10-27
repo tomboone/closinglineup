@@ -3,8 +3,9 @@
 
 The steps, in order, for each date in date order: garbage time on its stints
 (`derive.garbage_time`), the `player_window_stats` refresh (`derive.windows`), rotation state,
-events and flags (`derive.rotation`, `derive.events`, `derive.flags`), and the local BPM snapshot
-(`derive.bpm`); then a reconciliation sample (`derive.reconcile`). Two depart from per-date order:
+events and flags (`derive.rotation`, `derive.events`, `derive.flags`), the local BPM snapshot
+(`derive.bpm`) and the value metrics over it (`derive.value`); then a reconciliation sample
+(`derive.reconcile`). Two depart from per-date order:
 
 - The view is computed whole, so it is refreshed once for the run, after every date's garbage time
   (a refresh takes about 40 s over a full season, spec §6.4), and each date's `windows` row
@@ -49,6 +50,7 @@ from closinglineup.derive.reconcile import (
     season_type_of,
 )
 from closinglineup.derive.rotation import TierRule, compute_rotation_state
+from closinglineup.derive.value import compute_value
 from closinglineup.derive.windows import refresh_windows
 from closinglineup.load.loader import LOAD_STEP, write_load_log
 from closinglineup.season import season_label
@@ -75,9 +77,10 @@ TIERS = Step("rotation_state", "tiers")
 EVENTS = Step("rotation_event", "events")
 FLAGS = Step("player_flag", "flags")
 BPM = Step("impact_snapshot", "bpm")
+VALUE = Step("impact_snapshot", "value")
 RECONCILE = Step("stint", "reconcile")
 # The steps that write, all of which a date needs to have succeeded to count as derived.
-WRITES = (GARBAGE_TIME, WINDOWS, TIERS, EVENTS, FLAGS, BPM)
+WRITES = (GARBAGE_TIME, WINDOWS, TIERS, EVENTS, FLAGS, BPM, VALUE)
 # A date counts as loaded, and so due a derive, once its box scores have loaded.
 LOADED_TABLE = "player_game"
 
@@ -263,6 +266,8 @@ def derive(
         # Flags read the date's events among their inputs.
         run.step(FLAGS, [day], partial(compute_flags, db, day, rules.flags))
         run.step(BPM, [day], partial(write_bpm, db, day))
+        # VORP reads the date's BPM.
+        run.step(VALUE, [day], partial(compute_value, db, day))
     last = ordered[-1]
     if reconcile:
         run.step(
