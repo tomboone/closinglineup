@@ -128,27 +128,85 @@ describe("TeamPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows one tab's sections at a time, the tab kept in ?tab=", async () => {
+    mockApi({ "/api/teams/BOS": { body: TEAM_PAGE } });
+    const router = renderApp("/teams/BOS?date=2026-03-20");
+    await screen.findByText("Boston Celtics, as of 2026-03-19.");
+
+    const regions = () =>
+      within(screen.getByRole("tabpanel"))
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent);
+    expect(screen.getByRole("tab", { name: "Rotation" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Rotation" })).toBeInTheDocument();
+    expect(regions()).toEqual(["Rotation"]);
+
+    for (const [tab, param, shown] of [
+      ["Availability", "availability", ["Availability"]],
+      ["Lineups", "lineups", ["Closing lineups", "Top lineups"]],
+      ["Contracts", "contracts", ["Contract notes"]],
+    ] as const) {
+      fireEvent.click(screen.getByRole("tab", { name: tab }));
+      expect(screen.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+      expect(regions()).toEqual(shown);
+      expect(router.state.location.search).toBe(`?date=2026-03-20&tab=${param}`);
+    }
+
+    // Rotation is the default, so choosing it clears the parameter.
+    fireEvent.click(screen.getByRole("tab", { name: "Rotation" }));
+    expect(router.state.location.search).toBe("?date=2026-03-20");
+  });
+
+  it("opens the tab in ?tab=", async () => {
+    mockApi({ "/api/teams/BOS": { body: TEAM_PAGE } });
+    renderApp("/teams/BOS?tab=contracts");
+    expect(await screen.findByRole("tab", { name: "Contracts" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("region", { name: "Contract notes" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Rotation" })).not.toBeInTheDocument();
+  });
+
+  it("opens Rotation for one of the feed's tabs", async () => {
+    mockApi({ "/api/teams/BOS": { body: TEAM_PAGE } });
+    renderApp("/teams/BOS?tab=movers");
+    expect(await screen.findByRole("tab", { name: "Rotation" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("region", { name: "Rotation" })).toBeInTheDocument();
+  });
+
   it("links every name to its player page and every closing lineup to its game page", async () => {
     mockApi({ "/api/teams/BOS": { body: TEAM_PAGE } });
-    renderApp("/teams/BOS?date=2026-03-20");
+    renderApp("/teams/BOS?date=2026-03-20&tab=lineups");
     await screen.findByText("Boston Celtics, as of 2026-03-19.");
 
     const closing = screen.getByRole("region", { name: "Closing lineups" });
     expect(within(closing).getByRole("link", { name: "2026-03-19 vs NYK" })).toHaveAttribute(
       "href",
-      "/games/0022500990?date=2026-03-20",
+      "/games/0022500990?date=2026-03-20&tab=lineups",
     );
     expect(within(closing).getByText("W +4")).toBeInTheDocument();
-
-    for (const region of ["Rotation", "Availability", "Closing lineups", "Top lineups", "Contract notes"]) {
-      const links = within(screen.getByRole("region", { name: region })).getAllByRole("link");
-      const playerLinks = links.filter((link) => link.getAttribute("href")!.startsWith("/players/"));
-      expect(playerLinks.length).toBeGreaterThan(0);
-    }
-    expect(screen.getAllByRole("link", { name: "Jayson Tatum" })[0]).toHaveAttribute(
+    expect(within(closing).getByRole("link", { name: "Jayson Tatum" })).toHaveAttribute(
       "href",
-      "/players/1628369?date=2026-03-20",
+      "/players/1628369?date=2026-03-20&tab=lineups",
     );
+
+    for (const [tab, regions] of [
+      ["Rotation", ["Rotation"]],
+      ["Availability", ["Availability"]],
+      ["Lineups", ["Closing lineups", "Top lineups"]],
+      ["Contracts", ["Contract notes"]],
+    ] as const) {
+      fireEvent.click(screen.getByRole("tab", { name: tab }));
+      for (const region of regions) {
+        const links = within(screen.getByRole("region", { name: region })).getAllByRole("link");
+        const playerLinks = links.filter((link) => link.getAttribute("href")!.startsWith("/players/"));
+        expect(playerLinks.length).toBeGreaterThan(0);
+      }
+    }
   });
 
   it("marks the availability board stale when the report is ESPN's", async () => {
@@ -157,7 +215,7 @@ describe("TeamPage", () => {
       availability: { ...TEAM_PAGE.availability, source: "espn", stale: true },
     };
     mockApi({ "/api/teams/BOS": { body: page } });
-    renderApp("/teams/BOS");
+    renderApp("/teams/BOS?tab=availability");
 
     const availability = await screen.findByRole("region", { name: "Availability" });
     expect(within(availability).getByText("stale")).toBeInTheDocument();

@@ -59,14 +59,7 @@ body {
 }
 
 .team-page {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 8px 32px;
-  align-items: start;
-}
-
-.team-page .team-tiers {
-  grid-row: span 2;
+  margin-top: 12px;
 }
 
 .team-page table {
@@ -278,12 +271,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.feed-header [role="tablist"] {
+.tab-list {
   display: flex;
   gap: 4px;
 }
 
-.feed-header [role="tab"] {
+.tab-list [role="tab"] {
   padding: 4px 12px;
   border: 1px solid #ddd;
   border-radius: 4px;
@@ -292,7 +285,7 @@ body {
   cursor: pointer;
 }
 
-.feed-header [role="tab"][aria-selected="true"] {
+.tab-list [role="tab"][aria-selected="true"] {
   border-color: #1a1a1a;
   background: #1a1a1a;
   color: #fff;

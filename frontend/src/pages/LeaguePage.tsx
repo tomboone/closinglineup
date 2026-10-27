@@ -9,6 +9,8 @@ import { percent, signed } from "../components/format";
 import ImpactValue from "../components/ImpactValue";
 import { IMPACT_LABELS, TIER_LABELS, TRANSACTION_LABELS } from "../components/labels";
 import PlayerLink from "../components/PlayerLink";
+import TabList from "../components/TabList";
+import { tabIds } from "../components/tabIds";
 import TeamLink from "../components/TeamLink";
 import { dayBefore, easternToday, type Tab, TABS, useShellParams } from "../shell/params";
 import QueryStatus from "./QueryStatus";
@@ -56,8 +58,7 @@ function LeaguePage() {
   const morningLeague = lagging ? dayBeforeLeague : league;
   const summaries = useTeams().data?.teams;
   const ids = useId();
-  const tabId = (one: Tab) => `${ids}-tab-${one}`;
-  const panelId = `${ids}-panel`;
+  const { tab: tabId, panel: panelId } = tabIds(ids);
 
   return (
     <>
@@ -67,21 +68,14 @@ function LeaguePage() {
           <>
             <div className="feed-header">
               <FeedDates morning={morning} lastNight={page.last_night} />
-              <div role="tablist" aria-label="Feed">
-                {TABS.map((one) => (
-                  <button
-                    key={one}
-                    type="button"
-                    role="tab"
-                    id={tabId(one)}
-                    aria-selected={one === tab}
-                    aria-controls={panelId}
-                    onClick={() => setTab(one)}
-                  >
-                    {TAB_LABELS[one]}
-                  </button>
-                ))}
-              </div>
+              <TabList
+                label="Feed"
+                prefix={ids}
+                tabs={TABS}
+                labels={TAB_LABELS}
+                selected={tab}
+                onSelect={setTab}
+              />
               <TeamFilter teams={summaries} selected={teams} onChange={setTeams} />
             </div>
             <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)} className="league-page">
