@@ -99,8 +99,12 @@ One metric value for a player on a date, with its offensive and defensive split 
 _Avoid_: rating (reserved for on-court ORtg/DRtg/NetRtg)
 
 **Value metric**:
-A player's accumulated contribution over a season to date, in wins (Win Shares, split into offensive and defensive) or in points over a replacement player (VORP), computed here from public formulas and summed across his teams as the published season total is. Not a rate: it grows with games played, so it is only ever a season or prior-season figure.
+A player's accumulated contribution over a season to date, in wins (Win Shares, split into offensive and defensive) or in points over a replacement player (VORP), computed here from public formulas and summed across his teams as the published season total is. Not a rate: it grows with games played. A shorter window's Win Shares are what accrued within it, the season-to-date total at its end less the total just before its first game; WS/48 is the rate, Win Shares per 48 minutes played. VORP is only ever a season or prior-season figure.
 _Avoid_: impact (a rate per 100 possessions), advanced stat
+
+**League table**:
+Every player with a game in a season, one row each, his production window's values at his latest game on or before the date: games played, minutes per game, impact, value metrics and efficiency rates, sortable by any of them, filtered to qualifying minutes and games. Its own page, not part of the morning feed.
+_Avoid_: leaderboard (lists of top-N per stat), rankings
 
 **Non-guaranteed contract**:
 A player's contract for a season whose salary is not yet fully guaranteed: non-guaranteed, partially guaranteed, Exhibit 9 or Exhibit 10. It carries the guaranteed amount now, the date the guarantee next rises (January 7 by default) and the amount it rises to. A player with no non-guaranteed contract in the week's snapshot is taken as fully guaranteed; two-way status is a badge from roster membership, not a contract fact (ADR-0004).
