@@ -4,6 +4,7 @@ import ShotProfile from "../components/charts/ShotProfile";
 import SparklineCell from "../components/charts/SparklineCell";
 import StintTimeline from "../components/charts/StintTimeline";
 import type { StintRow } from "../components/charts/StintTimeline";
+import { percent, signed } from "../components/format";
 
 // Every chart with made-up data, to eyeball them without a backend. Routed at `/dev/charts` in the
 // dev server only; the production bundle leaves this module out (see `routes.tsx`).
@@ -20,12 +21,23 @@ function wave(base: number, swing: number, phase: number): Schemas["Point"][] {
   return DATES.map((game_date, i) => ({ game_date, value: base + swing * Math.sin(i / 3 + phase) }));
 }
 
+// The last two share a range, as a tier-board column's cells do, so the smaller swing reads smaller.
 const SPARKLINES = [
-  { name: "Minutes share", series: wave(0.13, 0.03, 0), baseline: 0.12 },
-  { name: "On/off net", series: wave(2, 6, 1), baseline: 0 },
+  { name: "Minutes share", series: wave(0.13, 0.03, 0), baseline: 0.12, format: percent },
+  { name: "On/off net", series: wave(2, 6, 1), baseline: 0, format: signed },
   {
-    name: "Impact",
+    name: "Impact, ending early",
     series: wave(1.5, 0.8, 2).map((point, i) => (i < 15 ? point : { ...point, value: null })),
+    baseline: 0,
+    format: signed,
+    range: { min: -2, max: 4 },
+  },
+  {
+    name: "Impact, same range",
+    series: wave(0.5, 0.3, 0),
+    baseline: 0,
+    format: signed,
+    range: { min: -2, max: 4 },
   },
 ];
 
@@ -85,8 +97,6 @@ const SHOT_WINDOWS = [
   ],
 }));
 
-const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
-
 function ChartsPage() {
   return (
     <main className="shell">
@@ -95,11 +105,17 @@ function ChartsPage() {
       <h2>SparklineCell</h2>
       <table>
         <tbody>
-          {SPARKLINES.map(({ name, series, baseline }) => (
+          {SPARKLINES.map(({ name, series, baseline, format, range }) => (
             <tr key={name}>
               <td>{name}</td>
               <td>
-                <SparklineCell series={series} baseline={baseline} />
+                <SparklineCell
+                  series={series}
+                  baseline={baseline}
+                  range={range}
+                  endLabel
+                  format={format}
+                />
               </td>
             </tr>
           ))}
