@@ -6,16 +6,21 @@ a date no team played has empty lists:
 - the **minutes movers** are `player_window_stats`' 10-game role rows on the date, the 15 whose
   minutes share rose most over the 10 games before and the 15 whose fell most, a row whose share
   did not move being neither;
-- the **flags** are those raised on the date, by flag in spec §7.7's order, then team and player;
+- the **flags** are those raised on the date, by flag in spec §7.7's order, then team and player,
+  a yo-yo with his tier on each of the team's last 20 final game dates this season through it;
 - the **injury changes** are, for each team, how its newest injury report by the end of the date
   differs from its newest by the end of the league's previous game date, each read as the team
   page reads one: a
   player newly Out or Doubtful, or back to Available or off the report from either. A G League
   line is an assignment, not an injury (spec §7.5), so it counts as no line;
-- the **transactions** are the date's;
+- the **transactions** are the date's and the day after's, the morning the feed is read on (v2
+  spec §3);
 - the **impact movers** are the 10 whose impact rose most and the 10 whose fell most over the 10
   team games before the date, as `player_window_stats`' 10-game production rows carry it: each
   player's first of EPM, DARKO and local BPM with a value on both dates, named as its `source`.
+
+Every player row carries his `impact` on the date, the first of DARKO and local BPM he has a
+snapshot for, `player_impacts`' one query over them all (v2 spec §7).
 """
 
 from collections import defaultdict
@@ -24,14 +29,20 @@ from datetime import date, datetime, time, timedelta
 from typing import Any, NamedTuple, cast
 
 from fastapi import APIRouter
-from sqlalchemy import func, select, text, tuple_
+from sqlalchemy import func, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from closinglineup.api.deps import DateDep, SessionDep
-from closinglineup.api.routers.teams import IMPACT_PREFERENCE, player_names, player_ref
+from closinglineup.api.routers.teams import (
+    IMPACT_PREFERENCE,
+    player_impacts,
+    player_names,
+    player_ref,
+)
 from closinglineup.api.schemas import (
     Flag,
+    Impact,
     InjuryChange,
     LeaguePage,
     Mover,
@@ -40,6 +51,7 @@ from closinglineup.api.schemas import (
     Signal,
     TeamRotationEvents,
     Tier,
+    TierPoint,
     TransactionSummary,
 )
 from closinglineup.api.schemas import (
@@ -53,9 +65,11 @@ from closinglineup.db.models import (
     PlayerFlag,
     PlayerGame,
     RotationEvent,
+    RotationState,
     Transaction,
 )
 from closinglineup.derive.availability import NOT_INJURIES
+from closinglineup.derive.flags import FlagRule
 from closinglineup.injuries import PDF_SOURCE
 from closinglineup.season import season_bounds, season_label
 from closinglineup.sources.injury_pdf import EASTERN
@@ -67,6 +81,8 @@ TOP_MINUTES_MOVERS = 15
 TOP_IMPACT_MOVERS = 10
 # The window the movers' deltas are over, in team games.
 MOVER_GAMES = 10
+# A yo-yo's tier strip spans the games its rule counts over.
+STRIP_GAMES = FlagRule().yo_yo_games
 # A player is out on a report at these statuses; back from them at none, or Available.
 OUT = frozenset({"Out", "Doubtful"})
 _TIER_RANK = {tier: rank for rank, tier in enumerate(ROTATION_TIERS)}
@@ -80,19 +96,23 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
     minutes_risers, minutes_fallers = _minutes_movers(session, day)
     impact_risers, impact_fallers = _impact_movers(session, day, teams)
     flags = _flags(session, day)
+    strips = _tier_strips(
+        session,
+        day,
+        {(flag.player_id, flag.team_id) for flag in flags if flag.flag == "yo_yo"},
+    )
     injuries = _injury_changes(session, day)
     transactions = _transactions(session, day)
-    names = player_names(
-        session,
-        {
-            *(event.player_id for event in events),
-            *(mover.player_id for mover in (*minutes_risers, *minutes_fallers)),
-            *(mover.player_id for mover in (*impact_risers, *impact_fallers)),
-            *(flag.player_id for flag in flags),
-            *(change.player_id for change in injuries),
-            *(note.player_id for note in transactions),
-        },
-    )
+    players = {
+        *(event.player_id for event in events),
+        *(mover.player_id for mover in (*minutes_risers, *minutes_fallers)),
+        *(mover.player_id for mover in (*impact_risers, *impact_fallers)),
+        *(flag.player_id for flag in flags),
+        *(change.player_id for change in injuries),
+        *(note.player_id for note in transactions),
+    }
+    names = player_names(session, players)
+    impacts = player_impacts(session, players, day)
     by_team: dict[str, list[RotationEventSummary]] = defaultdict(list)
     for event in events:
         by_team[by_nba_team_id(event.team_id).tricode].append(
@@ -102,6 +122,7 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
                 from_tier=cast(Tier | None, event.from_tier),
                 to_tier=cast(Tier, event.to_tier),
                 signals=[Signal.model_validate(signal) for signal in event.signals],
+                impact=impacts.get(event.player_id),
             )
         )
     return LeaguePage(
@@ -110,8 +131,8 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
             TeamRotationEvents(tricode=tricode, events=by_team[tricode])
             for tricode in sorted(by_team)
         ],
-        minutes_risers=[mover.model(names) for mover in minutes_risers],
-        minutes_fallers=[mover.model(names) for mover in minutes_fallers],
+        minutes_risers=[mover.model(names, impacts) for mover in minutes_risers],
+        minutes_fallers=[mover.model(names, impacts) for mover in minutes_fallers],
         flags=[
             RaisedFlag(
                 player=player_ref(flag.player_id, names),
@@ -119,6 +140,8 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
                 game_date=flag.game_date,
                 flag=cast(Flag, flag.flag),
                 detail=flag.detail,
+                impact=impacts.get(flag.player_id),
+                tiers=strips.get((flag.player_id, flag.team_id)) if flag.flag == "yo_yo" else None,
             )
             for flag in flags
         ],
@@ -131,11 +154,12 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
                 from_tricode=_tricode(note.from_team_id),
                 to_tricode=_tricode(note.to_team_id),
                 detail=note.detail,
+                impact=impacts.get(note.player_id),
             )
             for note in transactions
         ],
-        impact_risers=[mover.model(names) for mover in impact_risers],
-        impact_fallers=[mover.model(names) for mover in impact_fallers],
+        impact_risers=[mover.model(names, impacts) for mover in impact_risers],
+        impact_fallers=[mover.model(names, impacts) for mover in impact_fallers],
     )
 
 
@@ -181,13 +205,14 @@ class MoverRow(NamedTuple):
     delta: float
     source: str | None = None
 
-    def model(self, names: dict[int, str]) -> Mover:
+    def model(self, names: dict[int, str], impacts: dict[int, Impact]) -> Mover:
         return Mover(
             player=player_ref(self.player_id, names),
             tricode=_tricode(self.team_id),
             value=self.value,
             delta=self.delta,
             source=cast(Any, self.source),
+            impact=impacts.get(self.player_id),
         )
 
 
@@ -266,9 +291,52 @@ def _flags(session: Session, day: date) -> list[PlayerFlag]:
     )
 
 
+def _tier_strips(
+    session: Session, day: date, keys: set[tuple[int, int]]
+) -> dict[tuple[int, int], list[TierPoint]]:
+    """Each player-team's tier on each of the team's last `STRIP_GAMES` final game dates through
+    `day` this season, the oldest first, a date he has no `rotation_state` row on left out."""
+    season = session.scalar(select(Game.season).where(Game.game_date == day).limit(1))
+    if not keys or season is None:
+        return {}
+    team_ids = {team_id for _, team_id in keys}
+    found = session.execute(
+        select(Game.game_date, Game.home_team_id, Game.away_team_id)
+        .where(Game.season == season, Game.game_date <= day, Game.status == "final")
+        .where(or_(Game.home_team_id.in_(team_ids), Game.away_team_id.in_(team_ids)))
+        .order_by(Game.game_date.desc())
+    )
+    dates: dict[int, set[date]] = defaultdict(set)
+    for game_date, home, away in found:
+        for team_id in (home, away):
+            # A team plays once a date.
+            if team_id in team_ids and len(dates[team_id]) < STRIP_GAMES:
+                dates[team_id].add(game_date)
+    strips: dict[tuple[int, int], list[TierPoint]] = {key: [] for key in keys}
+    for player_id, team_id, game_date, tier in session.execute(
+        select(
+            RotationState.player_id,
+            RotationState.team_id,
+            RotationState.game_date,
+            RotationState.tier,
+        )
+        .where(tuple_(RotationState.player_id, RotationState.team_id).in_(list(keys)))
+        .where(RotationState.game_date.in_({d for team in dates.values() for d in team}))
+        .order_by(RotationState.game_date)
+    ):
+        if game_date in dates[team_id]:
+            strips[player_id, team_id].append(TierPoint(game_date=game_date, tier=cast(Tier, tier)))
+    return strips
+
+
 def _transactions(session: Session, day: date) -> list[Transaction]:
+    """The date's and the day after's, the latter the morning the feed reads the date on."""
     return list(
-        session.scalars(select(Transaction).where(Transaction.date == day).order_by(Transaction.id))
+        session.scalars(
+            select(Transaction)
+            .where(Transaction.date.between(day, day + timedelta(days=1)))
+            .order_by(Transaction.date, Transaction.id)
+        )
     )
 
 

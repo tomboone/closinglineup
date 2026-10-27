@@ -38,6 +38,7 @@ from closinglineup.api.schemas import (
     ClosingLineup,
     ContractNote,
     GarbageTime,
+    Impact,
     InjurySource,
     LineupStats,
     PlayerRef,
@@ -57,6 +58,7 @@ from closinglineup.db.models import (
     ROTATION_TIERS,
     Contract,
     Game,
+    ImpactSnapshot,
     InjuryStatus,
     Player,
     RosterMembership,
@@ -84,6 +86,8 @@ TWO_WAY_LIMIT = 3
 TWO_WAY = "two_way"
 # The impact sparkline's source: the first of these the player has a value for.
 IMPACT_PREFERENCE = ("epm", "darko", "bpm_local")
+# The feed's impact source per row, the same without EPM, which is cancelled (v2 spec §7, NEU-1870).
+FEED_IMPACT_PREFERENCE = ("darko", "bpm_local")
 _TIER_RANK = {tier: rank for rank, tier in enumerate(ROTATION_TIERS)}
 _STATUS_RANK = {name: rank for rank, name in enumerate(INJURY_STATUSES)}
 
@@ -191,6 +195,34 @@ def team_page(
 
 def player_ref(player_id: int, names: dict[int, str]) -> PlayerRef:
     return PlayerRef(player_id=player_id, name=names.get(player_id))
+
+
+def player_impacts(session: Session, player_ids: set[int], day: date) -> dict[int, Impact]:
+    """Each player's latest impact snapshot on or before `day` in the first of
+    `FEED_IMPACT_PREFERENCE` he has one in; a player with none is left out (v2 spec §7)."""
+    if not player_ids:
+        return {}
+    latest = {
+        (player_id, source): value
+        for player_id, source, value in session.execute(
+            select(ImpactSnapshot.player_id, ImpactSnapshot.source, ImpactSnapshot.value)
+            .ext(distinct_on(ImpactSnapshot.player_id, ImpactSnapshot.source))
+            .where(
+                ImpactSnapshot.player_id.in_(player_ids),
+                ImpactSnapshot.source.in_(FEED_IMPACT_PREFERENCE),
+                ImpactSnapshot.date <= day,
+            )
+            .order_by(ImpactSnapshot.player_id, ImpactSnapshot.source, ImpactSnapshot.date.desc())
+        )
+    }
+    found: dict[int, Impact] = {}
+    for player_id in player_ids:
+        source = next(
+            (name for name in FEED_IMPACT_PREFERENCE if (player_id, name) in latest), None
+        )
+        if source is not None:
+            found[player_id] = Impact(source=cast(Any, source), value=latest[player_id, source])
+    return found
 
 
 def player_names(session: Session, player_ids: set[int]) -> dict[int, str]:

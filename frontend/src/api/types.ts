@@ -326,6 +326,20 @@ export interface components {
             status: "ok" | "unavailable";
         };
         /**
+         * Impact
+         * @description A feed row's player's latest impact value on or before its date, in the first of DARKO and
+         *     local BPM he has one in (v2 spec §7).
+         */
+        Impact: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "darko" | "bpm_local";
+            /** Value */
+            value: number;
+        };
+        /**
          * ImpactSeries
          * @description One impact source's latest snapshot by each game date in the window.
          */
@@ -484,6 +498,7 @@ export interface components {
         Mover: {
             /** Delta */
             delta: number;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
             /** Source */
             source: ("epm" | "darko" | "bpm_local") | null;
@@ -588,7 +603,12 @@ export interface components {
             /** Value */
             value: number | null;
         };
-        /** RaisedFlag */
+        /**
+         * RaisedFlag
+         * @description A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the
+         *     team's last 20 final game dates this season through it, the oldest first, a date he has no row
+         *     on left out (v2 spec §6.2); other flags', and every flag's elsewhere, are null.
+         */
         RaisedFlag: {
             /** Detail */
             detail: {
@@ -600,7 +620,10 @@ export interface components {
              * Format: date
              */
             game_date: string;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
+            /** Tiers */
+            tiers: components["schemas"]["TierPoint"][] | null;
             /** Tricode */
             tricode: string;
         };
@@ -627,6 +650,7 @@ export interface components {
              * Format: date
              */
             game_date: string;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
             /** Signals */
             signals: components["schemas"]["Signal"][];
@@ -788,6 +812,18 @@ export interface components {
             starter_rate_5: number | null;
             tier: components["schemas"]["Tier"];
         };
+        /**
+         * TierPoint
+         * @description His tier on one of his team's game dates.
+         */
+        TierPoint: {
+            /**
+             * Game Date
+             * Format: date
+             */
+            game_date: string;
+            tier: components["schemas"]["Tier"];
+        };
         /** TransactionSummary */
         TransactionSummary: {
             /**
@@ -799,6 +835,7 @@ export interface components {
             detail: string;
             /** From Tricode */
             from_tricode: string | null;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
             /** To Tricode */
             to_tricode: string | null;

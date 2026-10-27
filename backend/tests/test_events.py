@@ -29,6 +29,8 @@ from closinglineup.derive.windows import refresh_windows
 from closinglineup.sources.injury_pdf import EASTERN
 
 RULE = SignalRule()
+# The date of the events the unit tests rank signals for.
+ON = date(2026, 10, 25)
 
 
 def _names(found: list[dict[str, Any]]) -> list[str]:
@@ -49,7 +51,7 @@ def test_signals_rank_by_magnitude_against_the_players_own_sd() -> None:
         net_sd=8.0,
     )
 
-    assert signals(inputs, RULE) == [
+    assert signals(inputs, RULE, ON) == [
         {"name": "minutes_share", "value": -0.06, "label": "minutes share down 6 pts vs 20-game"},
         {"name": "starter_rate", "value": -0.8, "label": "starter rate down 80 pts vs 20-game"},
         {
@@ -72,7 +74,7 @@ def test_a_missing_or_zero_change_or_sd_is_no_signal() -> None:
         usage_sd=0.02,
     )
 
-    assert signals(inputs, RULE) == [
+    assert signals(inputs, RULE, ON) == [
         {"name": "usage", "value": 0.041, "label": "usage up 4.1 pts vs prior 10 games"},
     ]
 
@@ -80,13 +82,14 @@ def test_a_missing_or_zero_change_or_sd_is_no_signal() -> None:
 @pytest.mark.parametrize(
     ("change", "label"),
     [
-        (InjuryChange("active", "out", 0), "listed out today"),
-        (InjuryChange("doubtful", "active", 1), "back from doubtful 1 day ago"),
-        (InjuryChange("questionable", "out", 4), "status questionable → out 4 days ago"),
+        # Read the morning after or later, a change on the event's date is dated, not "today".
+        (InjuryChange("active", "out", 0), "listed out on Oct 25"),
+        (InjuryChange("doubtful", "active", 1), "back from doubtful 1 day before"),
+        (InjuryChange("questionable", "out", 4), "status questionable → out 4 days before"),
     ],
 )
 def test_an_injury_change_reads_as_plain_english(change: InjuryChange, label: str) -> None:
-    found = signals(SignalInputs(injury=change), RULE)
+    found = signals(SignalInputs(injury=change), RULE, ON)
 
     assert found == [
         {"name": "injury", "value": f"{change.before} → {change.after}", "label": label}
@@ -102,11 +105,11 @@ def test_categorical_signals_rank_by_their_fixed_magnitudes_and_ties_keep_spec_o
     )
 
     # The defaults: injury 1.5, the share's 1 sd, then the transaction's 1, the tie in spec order.
-    assert _names(signals(inputs, RULE)) == ["injury", "minutes_share", "transaction"]
+    assert _names(signals(inputs, RULE, ON)) == ["injury", "minutes_share", "transaction"]
     tied = SignalRule(injury_magnitude=1.0, transaction_magnitude=1.0)
-    assert _names(signals(inputs, tied)) == ["minutes_share", "injury", "transaction"]
-    assert signals(inputs, SignalRule(top=1)) == [
-        {"name": "injury", "value": "out → active", "label": "back from out today"}
+    assert _names(signals(inputs, tied, ON)) == ["minutes_share", "injury", "transaction"]
+    assert signals(inputs, SignalRule(top=1), ON) == [
+        {"name": "injury", "value": "out → active", "label": "back from out on Oct 25"}
     ]
 
 
@@ -313,7 +316,9 @@ def test_an_arrival_has_no_from_tier_and_an_unchanged_tier_no_event(
     events = _events(seeded)
     arrival = events[ARRIVAL]
     assert (arrival.from_tier, arrival.prev_game_date, arrival.to_tier) == (None, None, "starter")
-    assert arrival.signals == [{"name": "transaction", "value": "sign", "label": "signed today"}]
+    assert arrival.signals == [
+        {"name": "transaction", "value": "sign", "label": "signed on Nov 20"}
+    ]
     assert set(events) == {CLIFF, ARRIVAL, RETURN}
 
     # Game 19 changes no one's tier.
@@ -331,7 +336,7 @@ def test_a_return_from_injury_ranks_injury_above_a_transaction_only_when_it_is_l
     # His share drop, 0.06875 over a per-game sd of 0.0555, is 1.24 sd: between the injury's 1.5
     # and the transaction's 1.
     assert back.signals == [
-        {"name": "injury", "value": "out → active", "label": "back from out today"},
+        {"name": "injury", "value": "out → active", "label": "back from out on Nov 20"},
         {
             "name": "minutes_share",
             "value": pytest.approx(-0.0688, abs=1e-4),
@@ -340,7 +345,7 @@ def test_a_return_from_injury_ranks_injury_above_a_transaction_only_when_it_is_l
         {
             "name": "transaction",
             "value": "two_way_convert",
-            "label": "converted from a two-way 3 days ago",
+            "label": "converted from a two-way 3 days before",
         },
     ]
 
@@ -366,7 +371,7 @@ def test_an_injury_change_counts_on_the_first_date_of_the_lookback_and_not_befor
     injury = {
         "name": "injury",
         "value": "active → questionable",
-        "label": "listed questionable 6 days ago",
+        "label": "listed questionable 6 days before",
     }
     assert injury in _events(seeded)[CLIFF].signals
 

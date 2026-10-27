@@ -236,12 +236,28 @@ class Signal(BaseModel):
     label: str
 
 
+class Impact(BaseModel):
+    """A feed row's player's latest impact value on or before its date, in the first of DARKO and
+    local BPM he has one in (v2 spec §7)."""
+
+    source: Literal["darko", "bpm_local"]
+    value: float
+
+
+class TierPoint(BaseModel):
+    """His tier on one of his team's game dates."""
+
+    game_date: dt.date
+    tier: Tier
+
+
 class RotationEventSummary(BaseModel):
     player: PlayerRef
     game_date: dt.date
     from_tier: Tier | None
     to_tier: Tier
     signals: list[Signal]
+    impact: Impact | None
 
 
 class TeamRotationEvents(BaseModel):
@@ -258,14 +274,21 @@ class Mover(BaseModel):
     value: float | None
     delta: float
     source: Literal["epm", "darko", "bpm_local"] | None
+    impact: Impact | None
 
 
 class RaisedFlag(BaseModel):
+    """A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the
+    team's last 20 final game dates this season through it, the oldest first, a date he has no row
+    on left out (v2 spec §6.2); other flags', and every flag's elsewhere, are null."""
+
     player: PlayerRef
     tricode: str
     game_date: dt.date
     flag: Flag
     detail: dict[str, Any]
+    impact: Impact | None
+    tiers: list[TierPoint] | None
 
 
 class InjuryChange(BaseModel):
@@ -284,6 +307,7 @@ class TransactionSummary(BaseModel):
     from_tricode: str | None
     to_tricode: str | None
     detail: str
+    impact: Impact | None
 
 
 class LeaguePage(BaseModel):

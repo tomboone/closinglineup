@@ -217,6 +217,8 @@ export const PLAYER_PAGE: PlayerPage = {
       player: BROWN,
       tricode: "BOS",
       detail: { share_5: 0.08, share_20: 0.14, ratio: 0.57 },
+      impact: null,
+      tiers: null,
     },
   ],
 };
@@ -227,7 +229,14 @@ const mover = (
   value: number,
   delta: number,
   source: LeaguePage["impact_risers"][number]["source"] = null,
-): LeaguePage["minutes_risers"][number] => ({ player: ref, tricode, value, delta, source });
+): LeaguePage["minutes_risers"][number] => ({
+  player: ref,
+  tricode,
+  value,
+  delta,
+  source,
+  impact: null,
+});
 
 const signal = (name: string, label: string, value: number | string) => ({ name, label, value });
 
@@ -251,6 +260,7 @@ export const LEAGUE_PAGE: LeaguePage = {
             signal("injury", "back from Out 2 days ago", "Out → Available"),
             signal("starter_rate", "starter rate up 20.0 pts vs 20-game", 0.2),
           ],
+          impact: null,
         },
         {
           player: PORZINGIS,
@@ -262,6 +272,7 @@ export const LEAGUE_PAGE: LeaguePage = {
             signal("minutes_volatility", "minutes volatility up 6.2 min vs 20-game", 6.2),
             signal("usage", "usage down 2.0 pts vs prior 10 games", -0.02),
           ],
+          impact: null,
         },
       ],
     },
@@ -278,6 +289,7 @@ export const LEAGUE_PAGE: LeaguePage = {
             signal("minutes_share", "minutes share up 2.0 pts vs 20-game", 0.02),
             signal("on_court_net", "on-court net down 3.1 vs prior 10 games", -3.1),
           ],
+          impact: null,
         },
       ],
     },
@@ -291,6 +303,8 @@ export const LEAGUE_PAGE: LeaguePage = {
       player: HOLIDAY,
       tricode: "BOS",
       detail: { share_5: 0.05, share_20: 0.12, ratio: 0.42 },
+      impact: null,
+      tiers: null,
     },
     {
       game_date: "2026-03-20",
@@ -298,6 +312,8 @@ export const LEAGUE_PAGE: LeaguePage = {
       player: DAVISON,
       tricode: "BOS",
       detail: { reason: "two_way", active_games: 46, limit: 50 },
+      impact: null,
+      tiers: null,
     },
   ],
   injury_changes: [
@@ -318,6 +334,7 @@ export const LEAGUE_PAGE: LeaguePage = {
       player: player(1642000, "Dalton Knecht"),
       from_tricode: null,
       to_tricode: "LAL",
+      impact: null,
     },
   ],
   impact_risers: [mover(TATUM, "BOS", 6.1, 0.8, "epm")],

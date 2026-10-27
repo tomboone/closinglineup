@@ -190,6 +190,9 @@ def player_page(
                 game_date=flag.game_date,
                 flag=cast(Flag, flag.flag),
                 detail=flag.detail,
+                # The feed's alone (v2 spec §6.2, §7); this page charts his impact series.
+                impact=None,
+                tiers=None,
             )
             for flag in flags
         ],

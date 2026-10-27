@@ -19,6 +19,7 @@ from closinglineup.db.models import (
     PlayerGame,
     RosterMembership,
     RotationEvent,
+    RotationState,
     Transaction,
 )
 from closinglineup.derive.windows import refresh_windows
@@ -70,6 +71,10 @@ LAST = _day(GAMES[-1])
 OFF_DAY = FIRST + timedelta(days=1)
 # The day between games 11 and 12, on which no one played but BOS filed a report.
 BREAK = LAST - timedelta(days=1)
+# The morning after the last game, on which a transaction is filed.
+MORNING = LAST + timedelta(days=1)
+# FALLER's tier on each BOS game, the yo-yo strip's; he has no row on game 7.
+STRIP = {g: ("core" if g % 2 else "fringe") for g in GAMES if g != 7}
 
 
 def _line(g: int, player_id: int, team_id: int) -> dict[str, Any]:
@@ -137,6 +142,22 @@ def _impact(player_id: int, day: date, source: str, value: float) -> dict[str, A
     return {"date": day, "player_id": player_id, "source": source, "value": value}
 
 
+def _state(player_id: int, team_id: int, day: date, tier: str) -> dict[str, Any]:
+    return {
+        "player_id": player_id,
+        "team_id": team_id,
+        "game_date": day,
+        "tier": tier,
+        "minutes_share_10": None,
+        "starter_rate_5": None,
+        "played_rate_10": None,
+        "availability": "active",
+        "badges": [],
+        "is_short": False,
+        "inputs": {},
+    }
+
+
 SIGNALS = [
     {"name": "minutes_share", "value": 0.2, "label": "minutes share up 20 pts"},
     {"name": "injury", "value": "Out → Available", "label": "back from injury 2 days ago"},
@@ -173,6 +194,7 @@ def clear(db: sessionmaker[Session]) -> None:
     with db.begin() as session:
         for model in (
             RotationEvent,
+            RotationState,
             PlayerFlag,
             InjuryStatus,
             Transaction,
@@ -188,8 +210,10 @@ def clear(db: sessionmaker[Session]) -> None:
 @pytest.fixture
 def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """BOS's 12 games against NYK, every other day, with box scores and rosters; impact snapshots
-    on the first and last dates; on the last, three rotation events, two flags, a transaction and
-    a BOS injury report, each with an earlier one beside it; the view refreshed."""
+    on the first and last dates and the morning after; on the last, three rotation events, three
+    flags (FALLER's yo-yo with his `rotation_state` over BOS's games), a transaction and a BOS
+    injury report, each with an earlier one beside it, and a transaction the morning after; the
+    view refreshed."""
     clear(db)
     before = datetime.combine(_day(11), time(17), EASTERN)
     on_break = datetime.combine(BREAK, time(17), EASTERN)
@@ -221,7 +245,16 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 _impact(STARTERS[0], LAST, "epm", 1.5),
                 # Unchanged: neither a riser nor a faller.
                 _impact(STARTERS[1], FIRST, "darko", 0.5),
+                # His DARKO is older than his local BPM, but comes first.
+                _impact(NYK_FIVE[0], FIRST, "darko", 0.8),
+                _impact(NYK_FIVE[0], LAST, "bpm_local", 1.2),
+                # After the date, so none on it.
+                _impact(NEWLY_OUT, MORNING, "darko", 4.0),
             ],
+        )
+        session.execute(
+            insert(RotationState),
+            [_state(FALLER, BOS, _day(g), tier) for g, tier in STRIP.items()],
         )
         session.execute(
             insert(RotationEvent),
@@ -237,6 +270,7 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
             [
                 _flag(RISER, BOS, LAST, "earning_trust"),
                 _flag(FALLER, BOS, LAST, "minutes_cliff"),
+                _flag(FALLER, BOS, LAST, "yo_yo"),
                 _flag(FALLER, BOS, _day(11), "yo_yo"),
             ],
         )
@@ -258,6 +292,22 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                     "from_team_id": NYK,
                     "to_team_id": None,
                     "detail": "New York waived Player 9500012.",
+                },
+                {
+                    "date": MORNING,
+                    "type": "waive",
+                    "player_id": STILL_OUT,
+                    "from_team_id": BOS,
+                    "to_team_id": None,
+                    "detail": "Boston waived Player 9500014.",
+                },
+                {
+                    "date": MORNING + timedelta(days=1),
+                    "type": "sign",
+                    "player_id": STILL_OUT,
+                    "from_team_id": None,
+                    "to_team_id": NYK,
+                    "detail": "New York signed Player 9500014.",
                 },
             ],
         )
@@ -369,8 +419,50 @@ def test_flags_are_the_date_s_by_flag(seeded: sessionmaker[Session], client: Tes
     assert [(f["flag"], f["player"]["player_id"], f["tricode"]) for f in page["flags"]] == [
         ("minutes_cliff", FALLER, "BOS"),
         ("earning_trust", RISER, "BOS"),
+        ("yo_yo", FALLER, "BOS"),
     ]
     assert page["flags"][0]["detail"] == {"share_5": 0.1}
+
+
+def test_a_yo_yo_flag_carries_his_tier_on_each_team_game_date_the_oldest_first(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    flags = _page(client)["flags"]
+
+    (yo_yo,) = (flag for flag in flags if flag["flag"] == "yo_yo")
+    assert yo_yo["tiers"] == [
+        {"game_date": _day(g).isoformat(), "tier": tier} for g, tier in STRIP.items()
+    ]
+    assert [flag["tiers"] for flag in flags if flag["flag"] != "yo_yo"] == [None, None]
+
+
+def test_every_player_row_carries_his_impact_in_the_first_source_with_a_value(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    page = _page(client)
+
+    rows = [
+        *(event for team in page["rotation_events"] for event in team["events"]),
+        *page["minutes_risers"],
+        *page["minutes_fallers"],
+        *page["impact_risers"],
+        *page["impact_fallers"],
+        *page["flags"],
+        *page["transactions"],
+    ]
+    impacts = {row["player"]["player_id"]: row["impact"] for row in rows}
+    assert impacts == {
+        # His latest of each source on or before the date, DARKO before local BPM; EPM, cancelled,
+        # is never one.
+        RISER: {"source": "darko", "value": 3.0},
+        FALLER: {"source": "bpm_local", "value": -1.0},
+        STARTERS[0]: None,
+        NYK_FIVE[0]: {"source": "darko", "value": 0.8},
+        NEWLY_OUT: None,
+        STILL_OUT: None,
+    }
+    # Each player's rows agree.
+    assert all(row["impact"] == impacts[row["player"]["player_id"]] for row in rows)
 
 
 def test_injury_changes_are_new_outs_then_returns(
@@ -389,13 +481,18 @@ def test_injury_changes_are_new_outs_then_returns(
     assert report == datetime.combine(LAST, time(17), EASTERN)
 
 
-def test_transactions_are_the_date_s(seeded: sessionmaker[Session], client: TestClient) -> None:
+def test_transactions_are_the_date_s_and_the_morning_after_s(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
     transactions = _page(client)["transactions"]
 
     assert [
-        (t["player"]["player_id"], t["type"], t["from_tricode"], t["to_tricode"])
+        (t["player"]["player_id"], t["date"], t["type"], t["from_tricode"], t["to_tricode"])
         for t in transactions
-    ] == [(NEWLY_OUT, "sign", None, "BOS")]
+    ] == [
+        (NEWLY_OUT, LAST.isoformat(), "sign", None, "BOS"),
+        (STILL_OUT, MORNING.isoformat(), "waive", "BOS", None),
+    ]
 
 
 def test_a_date_with_no_games_has_empty_lists(
