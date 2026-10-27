@@ -36,7 +36,8 @@ that range, an injury return outranking a modest minutes change but not a cliff,
 - `transaction`: a transaction moving him to or from the team in the last
   `SignalRule.lookback_days`, the date included; the latest one's type.
 
-Ties keep the order above.
+Ties keep the order above. A categorical label dates its change against the event's game date,
+"on Oct 25" or "n days before", since the feed reads it the morning after or later.
 """
 
 import math
@@ -131,14 +132,15 @@ def _pts(fraction: float) -> str:
     return f"{abs(fraction) * 100:.1f}".removesuffix(".0")
 
 
-def _ago(days: int) -> str:
+def _ago(days: int, day: date) -> str:
+    """When a change `days` before the event's date `day` was, as its label reads it."""
     if days == 0:
-        return "today"
-    return "1 day ago" if days == 1 else f"{days} days ago"
+        return f"on {day:%b} {day.day}"
+    return "1 day before" if days == 1 else f"{days} days before"
 
 
-def _injury_label(change: InjuryChange) -> str:
-    when = _ago(change.days_ago)
+def _injury_label(change: InjuryChange, day: date) -> str:
+    when = _ago(change.days_ago, day)
     if change.after in INJURY_STATUSES and change.before not in INJURY_STATUSES:
         return f"listed {change.after} {when}"
     if change.before in INJURY_STATUSES and change.after not in INJURY_STATUSES:
@@ -162,8 +164,9 @@ def _label(name: str, value: float) -> str:
             return f"usage {way} {_pts(value)} pts vs prior 10 games"
 
 
-def signals(inputs: SignalInputs, rule: SignalRule) -> list[dict[str, Any]]:
-    """The top `rule.top` signals of spec §7.6 in `inputs`, the largest magnitude first."""
+def signals(inputs: SignalInputs, rule: SignalRule, day: date) -> list[dict[str, Any]]:
+    """The top `rule.top` signals of spec §7.6 in `inputs` for an event on `day`, the largest
+    magnitude first."""
     numeric = [
         ("minutes_share", inputs.share_delta, inputs.share_sd),
         ("minutes_volatility", inputs.volatility_delta, inputs.minutes_sd),
@@ -184,7 +187,7 @@ def signals(inputs: SignalInputs, rule: SignalRule) -> list[dict[str, Any]]:
                 {
                     "name": "injury",
                     "value": f"{change.before} → {change.after}",
-                    "label": _injury_label(change),
+                    "label": _injury_label(change, day),
                 },
             )
         )
@@ -197,7 +200,7 @@ def signals(inputs: SignalInputs, rule: SignalRule) -> list[dict[str, Any]]:
                 {
                     "name": "transaction",
                     "value": note.type,
-                    "label": f"{verb} {_ago(note.days_ago)}",
+                    "label": f"{verb} {_ago(note.days_ago, day)}",
                 },
             )
         )
@@ -237,7 +240,7 @@ def compute_events(db: sessionmaker[Session], day: date, rule: SignalRule) -> di
                 "prev_game_date": prev_date,
                 "from_tier": from_tier,
                 "to_tier": to_tier,
-                "signals": signals(inputs[(player_id, team_id)], rule),
+                "signals": signals(inputs[(player_id, team_id)], rule, day),
             }
             for player_id, team_id, to_tier, prev_date, from_tier in changed
         ]

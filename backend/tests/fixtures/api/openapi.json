@@ -526,6 +526,29 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "Impact": {
+        "description": "A feed row's player's latest impact value on or before its date, in the first of DARKO and\nlocal BPM he has one in (v2 spec \u00a77).",
+        "properties": {
+          "source": {
+            "enum": [
+              "darko",
+              "bpm_local"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "source",
+          "value"
+        ],
+        "title": "Impact",
+        "type": "object"
+      },
       "ImpactSeries": {
         "description": "One impact source's latest snapshot by each game date in the window.",
         "properties": {
@@ -957,6 +980,16 @@
             "title": "Delta",
             "type": "number"
           },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "player": {
             "$ref": "#/components/schemas/PlayerRef"
           },
@@ -1004,7 +1037,8 @@
           "tricode",
           "value",
           "delta",
-          "source"
+          "source",
+          "impact"
         ],
         "title": "Mover",
         "type": "object"
@@ -1295,6 +1329,7 @@
         "type": "object"
       },
       "RaisedFlag": {
+        "description": "A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the\nteam's last 20 final game dates this season through it, the oldest first, a date he has no row\non left out (v2 spec \u00a76.2); other flags', and every flag's elsewhere, are null.",
         "properties": {
           "detail": {
             "additionalProperties": true,
@@ -1309,8 +1344,32 @@
             "title": "Game Date",
             "type": "string"
           },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "player": {
             "$ref": "#/components/schemas/PlayerRef"
+          },
+          "tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TierPoint"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tiers"
           },
           "tricode": {
             "title": "Tricode",
@@ -1322,7 +1381,9 @@
           "tricode",
           "game_date",
           "flag",
-          "detail"
+          "detail",
+          "impact",
+          "tiers"
         ],
         "title": "RaisedFlag",
         "type": "object"
@@ -1373,6 +1434,16 @@
             "title": "Game Date",
             "type": "string"
           },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "player": {
             "$ref": "#/components/schemas/PlayerRef"
           },
@@ -1392,7 +1463,8 @@
           "game_date",
           "from_tier",
           "to_tier",
-          "signals"
+          "signals",
+          "impact"
         ],
         "title": "RotationEventSummary",
         "type": "object"
@@ -1900,6 +1972,25 @@
         "title": "TierBoardRow",
         "type": "object"
       },
+      "TierPoint": {
+        "description": "His tier on one of his team's game dates.",
+        "properties": {
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/Tier"
+          }
+        },
+        "required": [
+          "game_date",
+          "tier"
+        ],
+        "title": "TierPoint",
+        "type": "object"
+      },
       "TransactionSummary": {
         "properties": {
           "date": {
@@ -1921,6 +2012,16 @@
               }
             ],
             "title": "From Tricode"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "player": {
             "$ref": "#/components/schemas/PlayerRef"
@@ -1947,7 +2048,8 @@
           "type",
           "from_tricode",
           "to_tricode",
-          "detail"
+          "detail",
+          "impact"
         ],
         "title": "TransactionSummary",
         "type": "object"
