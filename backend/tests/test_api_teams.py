@@ -189,6 +189,24 @@ def _contract(player_id: int, guarantee_date: date) -> dict[str, Any]:
     }
 
 
+def _value(
+    day: date,
+    player_id: int,
+    source: str,
+    value: float,
+    o_value: float | None = None,
+    d_value: float | None = None,
+) -> dict[str, Any]:
+    return {
+        "date": day,
+        "player_id": player_id,
+        "source": source,
+        "value": value,
+        "o_value": o_value,
+        "d_value": d_value,
+    }
+
+
 def clear(db: sessionmaker[Session]) -> None:
     game_ids = [_game_id(g) for g in GAMES]
     with db.begin() as session:
@@ -204,8 +222,9 @@ def clear(db: sessionmaker[Session]) -> None:
 @pytest.fixture
 def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """BOS's 22 games against NYK with box scores and stints, the last with a garbage-time stint;
-    rosters, an injury report with an assignment, a contract snapshot and local BPM; the view
-    refreshed, rotation state written and every derive step recorded for the last date."""
+    rosters, an injury report with an assignment, a contract snapshot, local BPM, and Win Shares
+    and VORP for two starters; the view refreshed, rotation state written and every derive step
+    recorded for the last date."""
     clear(db)
     report = datetime.combine(LAST, time(17), EASTERN)
     with db.begin() as session:
@@ -247,7 +266,14 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 {"date": FIRST, "player_id": p, "source": "bpm_local", "value": 1.0}
                 for p in [*STARTERS, *BENCH]
             ]
-            + [{"date": FIRST, "player_id": STARTERS[0], "source": "darko", "value": 3.5}],
+            + [{"date": FIRST, "player_id": STARTERS[0], "source": "darko", "value": 3.5}]
+            # Season-to-date value snapshots: the latest on or before the tier date is the board's.
+            + [
+                _value(_day(20), STARTERS[1], "ws_local", 2.0, 1.2, 0.8),
+                _value(_day(21), STARTERS[1], "ws_local", 2.4, 1.5, 0.9),
+                _value(_day(21), STARTERS[1], "vorp_local", 0.6),
+                _value(_day(21), STARTERS[2], "ws_local", -0.3, 0.1, -0.4),
+            ],
         )
         now = datetime.now(EASTERN)
         session.execute(
@@ -345,6 +371,20 @@ def test_every_rostered_player_has_a_tier_and_three_sparklines(
     assert board[TWO_WAY]["impact"] == []
     tiers = [row["tier"] for row in page["tier_board"]]
     assert tiers == sorted(tiers, key=["injured", "starter", "core", "fringe", "out"].index)
+
+
+def test_the_tier_board_carries_season_win_shares_and_vorp_on_the_tier_date(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    page = client.get("/api/teams/BOS").json()
+
+    board = {row["player"]["player_id"]: row for row in page["tier_board"]}
+    assert board[STARTERS[1]]["ws"] == pytest.approx(2.4)
+    assert board[STARTERS[1]]["vorp"] == pytest.approx(0.6)
+    assert board[STARTERS[2]]["ws"] == pytest.approx(-0.3)
+    assert board[STARTERS[2]]["vorp"] is None
+    assert board[TWO_WAY]["ws"] is None
+    assert board[TWO_WAY]["vorp"] is None
 
 
 def test_closing_lineups_are_the_last_five_close_games_final_stints(

@@ -966,7 +966,8 @@ export interface components {
          * TierBoardRow
          * @description A player's rotation state on the tier board's date, and three sparklines over the team's
          *     last 20 game dates through it: his 10-game role window's minutes share and on/off net, and his
-         *     impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for).
+         *     impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for); and
+         *     his season production window's Win Shares and VORP on that date (v2 spec §8.7).
          */
         TierBoardRow: {
             availability: components["schemas"]["Availability"];
@@ -990,6 +991,10 @@ export interface components {
             /** Starter Rate 5 */
             starter_rate_5: number | null;
             tier: components["schemas"]["Tier"];
+            /** Vorp */
+            vorp: number | null;
+            /** Ws */
+            ws: number | null;
         };
         /**
          * TierPoint

@@ -2432,7 +2432,7 @@
         "type": "string"
       },
       "TierBoardRow": {
-        "description": "A player's rotation state on the tier board's date, and three sparklines over the team's\nlast 20 game dates through it: his 10-game role window's minutes share and on/off net, and his\nimpact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for).",
+        "description": "A player's rotation state on the tier board's date, and three sparklines over the team's\nlast 20 game dates through it: his 10-game role window's minutes share and on/off net, and his\nimpact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for); and\nhis season production window's Win Shares and VORP on that date (v2 spec \u00a78.7).",
         "properties": {
           "availability": {
             "$ref": "#/components/schemas/Availability"
@@ -2523,6 +2523,28 @@
           },
           "tier": {
             "$ref": "#/components/schemas/Tier"
+          },
+          "vorp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vorp"
+          },
+          "ws": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ws"
           }
         },
         "required": [
@@ -2537,7 +2559,9 @@
           "minutes_share",
           "on_off_net",
           "impact",
-          "impact_source"
+          "impact_source",
+          "ws",
+          "vorp"
         ],
         "title": "TierBoardRow",
         "type": "object"

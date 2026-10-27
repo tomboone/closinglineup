@@ -1,7 +1,7 @@
 import type { components } from "../api/types";
 import SparklineCell, { type SparklineRange } from "./charts/SparklineCell";
 import { TIER_COLOURS } from "./charts/theme";
-import { percent, signed } from "./format";
+import { decimal, percent, signed } from "./format";
 import { BADGE_LABELS, IMPACT_LABELS, TIER_LABELS } from "./labels";
 import PlayerLink from "./PlayerLink";
 
@@ -26,7 +26,7 @@ const AVAILABILITY_LABELS: Record<Schemas["Availability"], string> = {
   g_league: "",
 };
 
-const COLUMNS = 6;
+const COLUMNS = 8;
 
 /** Each sparkline column's y range over every row, so a column's lines read against one another. */
 type Ranges = {
@@ -36,9 +36,9 @@ type Ranges = {
 };
 
 /**
- * The team's players grouped by tier in precedence order, each with his badges and three
- * sparklines over the team's last 20 game dates: minutes share, on/off net and impact. A column's
- * sparklines share one y range, printed in its header.
+ * The team's players grouped by tier in precedence order, each with his badges, three sparklines
+ * over the team's last 20 game dates (minutes share, on/off net and impact) and his season Win
+ * Shares and VORP. A column's sparklines share one y range, printed in its header.
  */
 function TierBoard({ rows }: { rows: Row[] }) {
   const groups = TIER_ORDER.map((tier) => ({
@@ -64,6 +64,8 @@ function TierBoard({ rows }: { rows: Row[] }) {
           <th scope="col">{withRange("Min share", ranges.minutesShare, percentRange)}</th>
           <th scope="col">{withRange("On/off net", ranges.onOffNet, signedRange)}</th>
           <th scope="col">{withRange(impactHeading(rows), ranges.impact, signedRange)}</th>
+          <th scope="col">WS</th>
+          <th scope="col">VORP</th>
         </tr>
       </thead>
       {groups.map((group) => (
@@ -115,6 +117,8 @@ function TierBoardRow({ row, ranges }: { row: Row; ranges: Ranges }) {
         <Sparkline series={row.impact} baseline={0} range={ranges.impact} format={signed} />
         {row.impact_source && <span className="impact-source">{IMPACT_LABELS[row.impact_source]}</span>}
       </td>
+      <td className="number">{decimal(row.ws)}</td>
+      <td className="number">{decimal(row.vorp)}</td>
     </tr>
   );
 }

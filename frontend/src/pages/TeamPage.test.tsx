@@ -51,6 +51,8 @@ describe("TeamPage", () => {
       "Min share (10–12%)",
       "On/off net (−1 to +4)",
       "Impact (0 to +1.4)",
+      "WS",
+      "VORP",
     ]);
 
     type Line = { endLabel: { formatter: () => string } };
@@ -69,6 +71,21 @@ describe("TeamPage", () => {
     // Each line ends with its latest value in its column's format.
     const endLabels = columns.map((options) => (options[0].series as Line[])[0].endLabel.formatter());
     expect(endLabels).toEqual(["12.0%", "+4.0", "+1.3"]);
+  });
+
+  it("shows season Win Shares and VORP to one decimal, a dash where there is none", async () => {
+    mockApi({ "/api/teams/BOS": { body: TEAM_PAGE } });
+    renderApp("/teams/BOS");
+    const rotation = await screen.findByRole("region", { name: "Rotation" });
+
+    const values = (name: string) =>
+      within(within(rotation).getByRole("link", { name }).closest("tr")!)
+        .getAllByRole("cell")
+        .slice(-2)
+        .map((cell) => cell.textContent);
+    expect(values("Jayson Tatum")).toEqual(["4.3", "1.5"]);
+    expect(values("Payton Pritchard")).toEqual(["1.0", "-0.4"]);
+    expect(values("Jaylen Brown")).toEqual(["—", "—"]);
   });
 
   it("rounds a column of one value out to a range with a height", async () => {

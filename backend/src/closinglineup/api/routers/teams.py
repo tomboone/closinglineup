@@ -3,7 +3,8 @@
 The team page reads the team's final games of the date's season through the date, newest first:
 
 - the **tier board** is its `rotation_state` on the latest of them (`tier_date`), each player with
-  sparklines over the latest 20 from `player_window_stats`' 10-game windows. The view's on-court
+  sparklines over the latest 20 from `player_window_stats`' 10-game windows, and his Win Shares and
+  VORP from its season production window on `tier_date` (v2 spec §8.7). The view's on-court
   ratings are garbage-time filtered whatever `?garbage_time=` says (spec §6.4);
 - the **closing lineups** are the team's last stint of each of the latest 5 decided by 10 or fewer;
 - the **lineups** and **combos** are its 10 fives and 10 pairs with the most offensive possessions
@@ -295,6 +296,8 @@ class _BoardRow:
     on_off_net: list[Point]
     impact: list[Point]
     impact_source: str | None
+    ws: float | None
+    vorp: float | None
 
     def model(self, names: dict[int, str]) -> TierBoardRow:
         state = self.state
@@ -311,12 +314,14 @@ class _BoardRow:
             on_off_net=self.on_off_net,
             impact=self.impact,
             impact_source=cast(Any, self.impact_source),
+            ws=self.ws,
+            vorp=self.vorp,
         )
 
 
 def _tier_board(session: Session, team_id: int, games: Sequence[_TeamGame]) -> list[_BoardRow]:
     """The team's rotation state on its latest game date, by tier then 10-game minutes share, with
-    each player's sparklines over `games`."""
+    each player's sparklines over `games` and his season Win Shares and VORP on that date."""
     if not games:
         return []
     states = list(
@@ -327,6 +332,7 @@ def _tier_board(session: Session, team_id: int, games: Sequence[_TeamGame]) -> l
         )
     )
     dates = sorted(game.game_date for game in games)
+    players = [state.player_id for state in states]
     found = session.execute(
         text(
             "SELECT player_id, team_id, game_date, minutes_share, on_off_net, "
@@ -334,8 +340,19 @@ def _tier_board(session: Session, team_id: int, games: Sequence[_TeamGame]) -> l
             "FROM player_window_stats WHERE \"window\" = '10' AND game_date = ANY(:dates) "
             "AND player_id = ANY(:players) AND (team_id = :team OR team_id IS NULL)"
         ),
-        {"dates": dates, "players": [state.player_id for state in states], "team": team_id},
+        {"dates": dates, "players": players, "team": team_id},
     ).all()
+    season = {
+        row.player_id: row
+        for row in session.execute(
+            text(
+                "SELECT player_id, ws_local, vorp_local FROM player_window_stats "
+                "WHERE \"window\" = 'season' AND team_id IS NULL AND game_date = :day "
+                "AND player_id = ANY(:players)"
+            ),
+            {"day": games[0].game_date, "players": players},
+        )
+    }
     role: dict[int, dict[date, Any]] = defaultdict(dict)
     production: dict[int, dict[date, Any]] = defaultdict(dict)
     for row in found:
@@ -344,6 +361,7 @@ def _tier_board(session: Session, team_id: int, games: Sequence[_TeamGame]) -> l
     for state in states:
         played = role[state.player_id]
         impacts = production[state.player_id]
+        value = season.get(state.player_id)
         source = next(
             (
                 name
@@ -360,6 +378,8 @@ def _tier_board(session: Session, team_id: int, games: Sequence[_TeamGame]) -> l
                 on_off_net=_series(dates, played, "on_off_net"),
                 impact=[] if source is None else _series(dates, impacts, source),
                 impact_source=source,
+                ws=None if value is None else value.ws_local,
+                vorp=None if value is None else value.vorp_local,
             )
         )
     return sorted(
