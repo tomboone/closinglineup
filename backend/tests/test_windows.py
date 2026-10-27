@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import delete, text
+from sqlalchemy import delete, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.db.models import (
@@ -87,9 +87,15 @@ def _line(
     pts: int = 0,
     fgm: int = 0,
     fga: int = 0,
+    ftm: int = 0,
     fta: int = 0,
     oreb: int = 0,
     dreb: int = 0,
+    ast: int = 0,
+    stl: int = 0,
+    blk: int = 0,
+    tov: int = 0,
+    pf: int = 0,
 ) -> PlayerGame:
     return PlayerGame(
         game_id=game_id,
@@ -103,15 +109,15 @@ def _line(
         fga=fga,
         fg3m=0,
         fg3a=0,
-        ftm=0,
+        ftm=ftm,
         fta=fta,
         oreb=oreb,
         dreb=dreb,
-        ast=0,
-        stl=0,
-        blk=0,
-        tov=0,
-        pf=0,
+        ast=ast,
+        stl=stl,
+        blk=blk,
+        tov=tov,
+        pf=pf,
         plus_minus=0,
         source="stats",
     )
@@ -132,8 +138,9 @@ def _game(game_id: str, season: str, day: date, home: int, away: int) -> Game:
 
 
 def _sac_lines(g: int) -> list[PlayerGame]:
-    """SAC's and POR's box in game g. The fixture player scores g on 4 of 10 with 4 free throw
-    attempts; the traded player 8 on 3 of 6 with 2."""
+    """SAC's and POR's box in game g. The fixture player scores g on 4 of 10 and 3 of 4 free
+    throws, with 1 offensive and 4 defensive rebounds, 5 assists, 2 steals, a block, 3 turnovers
+    and 2 fouls; the traded player 8 on 3 of 6 with 2 free throw attempts."""
     game_id = _sac_game(g)
     total = _game_seconds(g)
     fixture = _fixture_minutes(g) * 60
@@ -146,7 +153,25 @@ def _sac_lines(g: int) -> list[PlayerGame]:
         lines.append(_line(game_id, FIXTURE, SAC, 0, dnp_reason="cd"))
     elif g != ABSENT:
         lines.append(
-            _line(game_id, FIXTURE, SAC, fixture, starter=g % 2 == 0, pts=g, fgm=4, fga=10, fta=4)
+            _line(
+                game_id,
+                FIXTURE,
+                SAC,
+                fixture,
+                starter=g % 2 == 0,
+                pts=g,
+                fgm=4,
+                fga=10,
+                ftm=3,
+                fta=4,
+                oreb=1,
+                dreb=4,
+                ast=5,
+                stl=2,
+                blk=1,
+                tov=3,
+                pf=2,
+            )
         )
     if g < 7:
         lines.append(_line(game_id, TRADED, SAC, traded, pts=8, fgm=3, fga=6, fta=2))
@@ -423,6 +448,50 @@ def test_the_fixture_players_production_windows(seeded: sessionmaker[Session]) -
     assert _rows(seeded, TRADED, None, "prior_season") == {}
 
 
+def test_the_fixture_players_game_score_is_the_formula_over_the_window_per_game_played(
+    seeded: sessionmaker[Session],
+) -> None:
+    rows = _rows(seeded, FIXTURE, None, "5")
+    season = _row(seeded, FIXTURE, None, "season", _day(20))
+    prior = _row(seeded, FIXTURE, None, "prior_season", _day(20))
+
+    # Game g's line: g + 0.4·4 - 0.7·10 - 0.4·(4 - 3) + 0.7·1 + 0.3·4 + 2 + 0.7·5 + 0.7·1 - 0.4·2
+    # - 3, which is g - 1.5. Games 16 to 20 average 16.5, games 11 to 15 11.5.
+    last = rows[_day(20)]
+    assert last["game_score"] == pytest.approx(16.5, abs=1e-6)
+    assert last["game_score_delta_prior"] == pytest.approx(16.5 - 11.5, abs=1e-6)
+    # The season: 18 games played, all but the coach's decision in 3 and the absence in 7.
+    season_score = (sum(SAC_GAMES) - DNP_CD - ABSENT) / 18 - 1.5
+    assert season["game_score"] == pytest.approx(season_score, abs=1e-6)
+    assert last["game_score_delta_season"] == pytest.approx(16.5 - season_score, abs=1e-6)
+    # Divided by games played, not the window's games: games 1 to 5 hold the coach's decision.
+    assert rows[_day(5)]["game_score"] == pytest.approx((1 + 2 + 4 + 5) / 4 - 1.5, abs=1e-6)
+    # The season before: 20 + 0.4·8 - 0.7·10 - 0.4·5.
+    assert prior["game_score"] == pytest.approx(14.2, abs=1e-6)
+    assert season["game_score_delta_prior"] == pytest.approx(season_score - 14.2, abs=1e-6)
+
+
+def test_game_score_is_null_over_a_window_he_played_none_of(
+    seeded: sessionmaker[Session],
+) -> None:
+    with seeded.begin() as session:
+        session.execute(
+            update(PlayerGame)
+            .where(
+                PlayerGame.player_id == FIXTURE,
+                PlayerGame.game_id.in_([_sac_game(g) for g in range(16, 21)]),
+            )
+            .values(seconds=0, dnp_reason="cd")
+        )
+
+    refresh_windows(seeded)
+
+    last = _row(seeded, FIXTURE, None, "5", _day(20))
+    assert last["games_in_window"] == 5
+    assert last["game_score"] is None
+    assert last["game_score_delta_prior"] is None
+
+
 def test_the_latest_impact_snapshot_of_each_source_is_carried_forward(
     seeded: sessionmaker[Session],
 ) -> None:
@@ -481,6 +550,6 @@ def test_a_second_game_on_a_teams_date_counts_once_and_the_refresh_holds(
 
 
 def test_views_sql_is_the_view_migration_s_copy() -> None:
-    copy = DB_DIR / "alembic" / "versions" / "869602e50229_player_window_stats.sql"
+    copy = DB_DIR / "alembic" / "versions" / "a6e7426b5559_player_window_stats_game_score.sql"
 
     assert (DB_DIR / "views.sql").read_text() == copy.read_text()
