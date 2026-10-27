@@ -2,6 +2,7 @@
   "components": {
     "schemas": {
       "Annotation": {
+        "description": "A change on one of the window's dates: an injury status, a transaction, a rotation event's\ntier (\"Fringe \u2192 Core\", \"Joined as Core\"), or whether he started or closed.",
         "properties": {
           "game_date": {
             "format": "date",
@@ -12,6 +13,7 @@
             "enum": [
               "injury",
               "transaction",
+              "tier",
               "starter",
               "closer"
             ],
@@ -644,6 +646,31 @@
         "title": "InjuryChange",
         "type": "object"
       },
+      "InjuryLine": {
+        "description": "A player's line on his team's newest injury report by the end of the date.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InjuryStatus"
+          }
+        },
+        "required": [
+          "status",
+          "reason"
+        ],
+        "title": "InjuryLine",
+        "type": "object"
+      },
       "InjurySource": {
         "enum": [
           "pdf",
@@ -1072,13 +1099,34 @@
         "type": "object"
       },
       "PlayerHeader": {
+        "description": "`tier`, `availability` and `badges` are his `rotation_state` on his latest team game date,\nnull and empty with none; `injury` his line on his team's newest report, null off it.",
         "properties": {
+          "availability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Availability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "badges": {
             "items": {
               "$ref": "#/components/schemas/Badge"
             },
             "title": "Badges",
             "type": "array"
+          },
+          "injury": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjuryLine"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "player": {
             "$ref": "#/components/schemas/PlayerRef"
@@ -1121,12 +1169,15 @@
           "position",
           "tricode",
           "tier",
-          "badges"
+          "availability",
+          "badges",
+          "injury"
         ],
         "title": "PlayerHeader",
         "type": "object"
       },
       "PlayerPage": {
+        "description": "`tiers` is his tier on each of his team's game dates in the window, the oldest first;\n`contract` his non-guaranteed contract with his team, as the team page's contract notes read\none, null with none.",
         "properties": {
           "annotations": {
             "items": {
@@ -1134,6 +1185,16 @@
             },
             "title": "Annotations",
             "type": "array"
+          },
+          "contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractNote"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "date": {
             "format": "date",
@@ -1180,6 +1241,13 @@
             "title": "Teammates",
             "type": "array"
           },
+          "tiers": {
+            "items": {
+              "$ref": "#/components/schemas/TierPoint"
+            },
+            "title": "Tiers",
+            "type": "array"
+          },
           "window": {
             "$ref": "#/components/schemas/Window"
           }
@@ -1190,12 +1258,14 @@
           "garbage_time",
           "header",
           "series",
+          "tiers",
           "annotations",
           "shot_profile",
           "production",
           "teammates",
           "matchups",
-          "flags"
+          "flags",
+          "contract"
         ],
         "title": "PlayerPage",
         "type": "object"

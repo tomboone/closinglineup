@@ -2,7 +2,7 @@ import type { components } from "../api/types";
 import SparklineCell, { type SparklineRange } from "./charts/SparklineCell";
 import { TIER_COLOURS } from "./charts/theme";
 import { decimal, percent, signed } from "./format";
-import { BADGE_LABELS, IMPACT_LABELS, TIER_LABELS } from "./labels";
+import { AVAILABILITY_LABELS, BADGE_LABELS, IMPACT_LABELS, TIER_LABELS } from "./labels";
 import PlayerLink from "./PlayerLink";
 
 type Schemas = components["schemas"];
@@ -12,19 +12,6 @@ type Point = Schemas["Point"];
 
 /** The tiers in the order they are evaluated, the first match winning (spec §7.5). */
 const TIER_ORDER: Tier[] = ["injured", "starter", "core", "fringe", "out"];
-
-// `active` is the usual case, and `g_league` already shows as a badge, so neither shows here.
-const AVAILABILITY_LABELS: Record<Schemas["Availability"], string> = {
-  active: "",
-  out: "Out",
-  doubtful: "Doubtful",
-  questionable: "Questionable",
-  probable: "Probable",
-  available: "Available",
-  inactive: "Inactive",
-  suspended: "Suspended",
-  g_league: "",
-};
 
 const COLUMNS = 8;
 

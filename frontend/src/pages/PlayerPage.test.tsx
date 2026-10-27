@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChartOption } from "../components/charts/echarts";
-import { ANNOTATION_COLOURS } from "../components/charts/theme";
+import { ANNOTATION_COLOURS, TIER_COLOURS } from "../components/charts/theme";
 import { mockApi, PLAYER_PAGE, renderApp } from "../test/app";
 import { allOptions } from "../test/echarts";
 
@@ -29,6 +29,84 @@ describe("PlayerPage", () => {
     expect(screen.getByLabelText("Last 10")).toBeChecked();
   });
 
+  it("shows his availability and his injury report line beside the tier", async () => {
+    mockApi({ [PATH]: { body: PLAYER_PAGE } });
+    renderApp("/players/1627759");
+    await screen.findByRole("heading", { level: 1, name: "Jaylen Brown" });
+
+    expect(screen.getByText("Questionable", { selector: ".availability" })).toBeInTheDocument();
+    expect(screen.getByText("Injury report: Questionable (Left knee soreness)")).toBeInTheDocument();
+    expect(screen.queryByText(/Non-guaranteed/)).not.toBeInTheDocument();
+  });
+
+  it("leaves out an active availability and an empty injury line", async () => {
+    const header = { ...PLAYER_PAGE.header, availability: "active" as const, injury: null };
+    mockApi({ [PATH]: { body: { ...PLAYER_PAGE, header } } });
+    renderApp("/players/1627759");
+    await screen.findByRole("heading", { level: 1, name: "Jaylen Brown" });
+
+    expect(document.querySelector(".availability")).toBeNull();
+    expect(screen.queryByText(/Injury report/)).not.toBeInTheDocument();
+  });
+
+  it("shows his non-guaranteed contract under the header", async () => {
+    const contract = {
+      player: PLAYER_PAGE.header.player,
+      salary: 2_000_000,
+      minimum_salary: true,
+      guaranteed: 500_000,
+      guarantee_date: "2026-04-10",
+      guaranteed_after: 2_000_000,
+      days_until_guarantee: 21,
+    };
+    mockApi({ [PATH]: { body: { ...PLAYER_PAGE, contract } } });
+    renderApp("/players/1627759");
+
+    expect(
+      await screen.findByText(
+        "Non-guaranteed minimum contract: $500,000 of $2,000,000 guaranteed, $2,000,000 from 2026-04-10 (in 21 days).",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves out a contract amount no source gives", async () => {
+    const contract = {
+      player: PLAYER_PAGE.header.player,
+      salary: null,
+      minimum_salary: true,
+      guaranteed: 0,
+      guarantee_date: "2026-03-20",
+      guaranteed_after: null,
+      days_until_guarantee: 0,
+    };
+    mockApi({ [PATH]: { body: { ...PLAYER_PAGE, contract } } });
+    renderApp("/players/1627759");
+
+    expect(
+      await screen.findByText("Non-guaranteed minimum contract: $0 guaranteed, rising 2026-03-20 (today)."),
+    ).toBeInTheDocument();
+  });
+
+  it("draws his tier on each game in the window above the charts", async () => {
+    mockApi({ [PATH]: { body: PLAYER_PAGE } });
+    renderApp("/players/1627759");
+
+    const region = await screen.findByRole("region", { name: "Tier" });
+    expect(region.compareDocumentPosition(screen.getByRole("region", { name: "Minutes & share" }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    const strip = allOptions().find((option) =>
+      (option.series as { type: string }[]).every((series) => series.type === "bar"),
+    );
+    expect(strip).toBeDefined();
+    const cells = (strip!.series as { data: ({ itemStyle: { color: string } } | null)[] }[])[0].data;
+    expect(cells.map((cell) => cell?.itemStyle.color ?? null)).toEqual([
+      TIER_COLOURS.core,
+      null,
+      TIER_COLOURS.starter,
+    ]);
+  });
+
   it("marks the injury and the transaction on every time series, at their dates", async () => {
     mockApi({ [PATH]: { body: PLAYER_PAGE } });
     renderApp("/players/1627759");
@@ -48,6 +126,11 @@ describe("PlayerPage", () => {
           xAxis: "2026-03-12",
           name: "Signed extension",
           lineStyle: expect.objectContaining({ color: ANNOTATION_COLOURS.transaction }),
+        }),
+        expect.objectContaining({
+          xAxis: "2026-03-12",
+          name: "Core → Starter",
+          lineStyle: expect.objectContaining({ color: ANNOTATION_COLOURS.tier }),
         }),
       ]);
     }

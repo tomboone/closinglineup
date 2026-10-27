@@ -241,7 +241,15 @@ export const PLAYER_PAGE: PlayerPage = {
   date: "2026-03-20",
   window: "10",
   garbage_time: "exclude",
-  header: { player: BROWN, tricode: "BOS", position: "G-F", tier: "starter", badges: [] },
+  header: {
+    player: BROWN,
+    tricode: "BOS",
+    position: "G-F",
+    tier: "starter",
+    availability: "questionable",
+    badges: [],
+    injury: { status: "Questionable", reason: "Left knee soreness" },
+  },
   series: {
     minutes: series([34.5, 12, 36]),
     minutes_share: series([0.144, 0.05, 0.15]),
@@ -254,9 +262,15 @@ export const PLAYER_PAGE: PlayerPage = {
       { source: "darko", points: series([1.4, 1.4, 1.5]) },
     ],
   },
+  tiers: [
+    { game_date: "2026-03-10", tier: "core" },
+    { game_date: "2026-03-11", tier: null },
+    { game_date: "2026-03-12", tier: "starter" },
+  ],
   annotations: [
     { game_date: "2026-03-11", kind: "injury", label: "Available → Questionable (knee)" },
     { game_date: "2026-03-12", kind: "transaction", label: "Signed extension" },
+    { game_date: "2026-03-12", kind: "tier", label: "Core → Starter" },
   ],
   shot_profile: [shotZone("rim", 0.3), shotZone("corner_3", 0.1)],
   production: PRODUCTION,
@@ -291,6 +305,7 @@ export const PLAYER_PAGE: PlayerPage = {
       tiers: null,
     },
   ],
+  contract: null,
 };
 
 const mover = (

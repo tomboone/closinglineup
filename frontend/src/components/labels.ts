@@ -19,6 +19,19 @@ export const BADGE_LABELS: Record<Schemas["Badge"], string> = {
   g_league: "G League",
 };
 
+// `active` is the usual case, and `g_league` already shows as a badge, so neither has a label.
+export const AVAILABILITY_LABELS: Record<Schemas["Availability"], string> = {
+  active: "",
+  out: "Out",
+  doubtful: "Doubtful",
+  questionable: "Questionable",
+  probable: "Probable",
+  available: "Available",
+  inactive: "Inactive",
+  suspended: "Suspended",
+  g_league: "",
+};
+
 // The API sends a transaction's type as a string; these are the types `sources/transactions.py`
 // writes (spec §4.4), any other reading as itself.
 export const TRANSACTION_LABELS: Record<string, string> = {

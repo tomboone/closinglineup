@@ -15,6 +15,7 @@ export const TIER_COLOURS: Record<Schemas["Tier"], string> = {
 export const ANNOTATION_COLOURS: Record<Schemas["Annotation"]["kind"], string> = {
   injury: "#cf222e",
   transaction: "#8250df",
+  tier: "#1b7c83",
   starter: "#1f6feb",
   closer: "#bc4c00",
 };

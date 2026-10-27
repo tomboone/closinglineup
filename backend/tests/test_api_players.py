@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.api.app import create_app
 from closinglineup.db.models import (
+    Contract,
     Game,
     ImpactSnapshot,
     InjuryStatus,
@@ -18,6 +19,7 @@ from closinglineup.db.models import (
     PlayerFlag,
     PlayerGame,
     RosterMembership,
+    RotationEvent,
     RotationState,
     Shot,
     Stint,
@@ -258,6 +260,8 @@ def clear(db: sessionmaker[Session]) -> None:
     with db.begin() as session:
         for model in (
             RotationState,
+            RotationEvent,
+            Contract,
             PlayerFlag,
             InjuryStatus,
             Transaction,
@@ -555,8 +559,128 @@ def test_the_header_is_his_latest_rotation_state(
         "position": "G",
         "tricode": "LAL",
         "tier": "starter",
+        "availability": "active",
         "badges": [],
+        # LAL's newest report, game 10's, lists him.
+        "injury": {"status": "Questionable", "reason": "Injury/Illness - Left Ankle"},
     }
+
+
+def test_the_header_has_no_injury_when_his_team_s_newest_report_omits_him(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    # LAL's newest report by game 9 is game 8's, which lists only its fifth man.
+    header = _page(client, date=_day(9).isoformat())["header"]
+
+    assert header["injury"] is None
+
+
+def _state(team_id: int, day: date, tier: str) -> dict[str, Any]:
+    return {
+        "player_id": PLAYER,
+        "team_id": team_id,
+        "game_date": day,
+        "tier": tier,
+        "minutes_share_10": None,
+        "starter_rate_5": None,
+        "played_rate_10": None,
+        "availability": "active",
+        "badges": [],
+        "is_short": False,
+        "inputs": {},
+    }
+
+
+def _event(team_id: int, day: date, from_tier: str | None, to_tier: str) -> dict[str, Any]:
+    return {
+        "player_id": PLAYER,
+        "team_id": team_id,
+        "game_date": day,
+        "prev_game_date": None if from_tier is None else day - timedelta(days=2),
+        "from_tier": from_tier,
+        "to_tier": to_tier,
+        "signals": [],
+    }
+
+
+@pytest.fixture
+def tiered(seeded: sessionmaker[Session]) -> sessionmaker[Session]:
+    """His tier on LAL's games 7 and 11 besides the computed starter at game 12: he joins as Core
+    at game 7 and moves to Starter at game 12."""
+    with seeded.begin() as session:
+        session.execute(
+            insert(RotationState), [_state(LAL, _day(7), "core"), _state(LAL, _day(11), "core")]
+        )
+        session.execute(
+            insert(RotationEvent),
+            [_event(LAL, _day(7), None, "core"), _event(LAL, _day(12), "core", "starter")],
+        )
+    return seeded
+
+
+def test_tiers_are_a_point_per_team_game_date_in_the_window(
+    tiered: sessionmaker[Session], client: TestClient
+) -> None:
+    tiers = _page(client, window="5")["tiers"]
+
+    assert tiers == [
+        {"game_date": _day(g).isoformat(), "tier": tier}
+        for g, tier in ((8, None), (9, None), (10, None), (11, "core"), (12, "starter"))
+    ]
+
+
+def test_his_rotation_events_are_tier_annotations(
+    tiered: sessionmaker[Session], client: TestClient
+) -> None:
+    notes = [(n["game_date"], n["kind"], n["label"]) for n in _page(client)["annotations"]]
+
+    assert (_day(7).isoformat(), "tier", "Joined as Core") in notes
+    assert (_day(12).isoformat(), "tier", "Core → Starter") in notes
+    # Game 7's arrival is before the 5-game window.
+    five = _page(client, window="5")["annotations"]
+    assert [n["label"] for n in five if n["kind"] == "tier"] == ["Core → Starter"]
+
+
+def _contract(guarantee_date: date) -> dict[str, Any]:
+    return {
+        "player_id": PLAYER,
+        "team_id": LAL,
+        "season": SEASON,
+        "salary": 2_000_000,
+        "minimum_salary": True,
+        "guaranteed": 500_000,
+        "guarantee_date": guarantee_date,
+        "guaranteed_after": 2_000_000,
+        "as_of_date": LAST - timedelta(days=3),
+        "source": "hoopsrumors",
+    }
+
+
+def test_the_contract_is_his_non_guaranteed_row_with_a_guarantee_date_to_come(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    assert _page(client)["contract"] is None
+    with seeded.begin() as session:
+        session.execute(insert(Contract), _contract(LAST + timedelta(days=10)))
+
+    assert _page(client)["contract"] == {
+        "player": {"player_id": PLAYER, "name": f"Player {PLAYER}"},
+        "salary": 2_000_000,
+        "minimum_salary": True,
+        "guaranteed": 500_000,
+        "guarantee_date": (LAST + timedelta(days=10)).isoformat(),
+        "guaranteed_after": 2_000_000,
+        "days_until_guarantee": 10,
+    }
+
+
+def test_a_contract_whose_guarantee_date_has_passed_is_no_note(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    with seeded.begin() as session:
+        session.execute(insert(Contract), _contract(LAST - timedelta(days=1)))
+
+    assert _page(client)["contract"] is None
 
 
 @pytest.mark.parametrize("window", ["5", "10", "20", "season"])
@@ -738,3 +862,34 @@ def test_an_unknown_player_is_404_with_a_json_body(
     assert response.status_code == 404
     assert response.headers["content-type"] == "application/json"
     assert response.json() == {"detail": f"No player {UNKNOWN}"}
+
+
+def test_after_a_trade_his_injury_line_and_contract_are_his_new_team_s(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    # The day of the trade, before his first LAL game: his latest game is MIA's.
+    with seeded.begin() as session:
+        session.execute(
+            insert(InjuryStatus),
+            [
+                _injury(PLAYER, MIA, _day(TRADED), "Out", "Rest"),
+                _injury(PLAYER, LAL, TRADE_DAY, "Doubtful", "Illness"),
+            ],
+        )
+        session.execute(
+            insert(Contract),
+            [
+                {**_contract(TRADE_DAY + timedelta(days=5)), "as_of_date": FIRST},
+                {
+                    **_contract(TRADE_DAY + timedelta(days=9)),
+                    "as_of_date": FIRST,
+                    "team_id": MIA,
+                },
+            ],
+        )
+
+    page = _page(client, date=TRADE_DAY.isoformat())
+
+    assert page["header"]["tricode"] == "MIA"
+    assert page["header"]["injury"] == {"status": "Doubtful", "reason": "Illness"}
+    assert page["contract"]["days_until_guarantee"] == 5
