@@ -11,8 +11,10 @@ type Point = components["schemas"]["Point"];
 /** A y range several cells share, so their lines read against one another. */
 export type SparklineRange = { min: number; max: number };
 
-// Room on the right for the end label, at its font size.
+// Room for the end label at its font size: on the right for its width, and above and below for half
+// its height, as it is centred on a point that can sit at the top or bottom of the range.
 const END_LABEL_ROOM = 40;
+const END_LABEL_HALF_HEIGHT = 7;
 
 /**
  * An axis-less line for a table cell, a game date per point, with an optional dashed baseline; its
@@ -49,6 +51,12 @@ function sparklineOption(
   // ECharts puts the end label on the last point with a value, so it reads that point's.
   const latest = series.flatMap((point) => point.value ?? []).at(-1);
   const labelled = endLabel && latest !== undefined;
+  // A value with none either side has no line to draw, so it is drawn as a dot.
+  const isolated = series.map((point, i) =>
+    point.value !== null && series[i - 1]?.value == null && series[i + 1]?.value == null
+      ? point.value
+      : null,
+  );
 
   const formatTooltip = (params: TooltipComponentFormatterCallbackParams) => {
     const item = Array.isArray(params) ? params[0] : params;
@@ -58,7 +66,12 @@ function sparklineOption(
 
   return {
     animation: false,
-    grid: { top: 2, right: labelled ? END_LABEL_ROOM : 2, bottom: 2, left: 2 },
+    grid: {
+      top: labelled ? END_LABEL_HALF_HEIGHT : 2,
+      right: labelled ? END_LABEL_ROOM : 2,
+      bottom: labelled ? END_LABEL_HALF_HEIGHT : 2,
+      left: 2,
+    },
     // On the page's body, as a cell is too small to hold it.
     tooltip: { trigger: "axis", formatter: formatTooltip, appendTo: "body" },
     xAxis: {
@@ -107,6 +120,19 @@ function sparklineOption(
           },
         }),
       },
+      ...(isolated.some((value) => value !== null)
+        ? [
+            {
+              type: "line" as const,
+              data: isolated,
+              symbol: "circle",
+              symbolSize: 4,
+              lineStyle: { width: 0 },
+              itemStyle: { color: SERIES_COLOURS[0] },
+              silent: true,
+            },
+          ]
+        : []),
     ],
   };
 }
