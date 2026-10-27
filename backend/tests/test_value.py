@@ -1,5 +1,7 @@
 import csv
+import math
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
@@ -8,14 +10,20 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.db.models import Game, ImpactSnapshot, PlayerGame, RosterMembership
 from closinglineup.derive import value
-from closinglineup.derive.bpm import compute
+from closinglineup.derive.bpm import PlayerLine, TeamBox, TeamLine, compute, season_lines
 from closinglineup.derive.value import (
+    LeagueContext,
     PlayerSeason,
+    TeamWinShares,
     available_seconds,
     compute_value,
+    league_context,
     player_seasons,
+    season_win_shares,
     vorp,
     vorp_rows,
+    win_shares,
+    ws_rows,
 )
 from closinglineup.impact import ImpactSnapshotRow
 from tests.test_bpm import FIXTURES, bref_season
@@ -24,6 +32,9 @@ from tests.test_bpm import FIXTURES, bref_season
 # https://www.basketball-reference.com/leagues/NBA_2026_advanced.html, one row per row of
 # `2025-26_players.csv` (`fixtures/bref/README.md`).
 PUBLISHED_VORP = FIXTURES / "2025-26_vorp.csv"
+# Every 2025-26 player's published OWS, DWS and WS, read on 2026-10-27 from the same page, one row
+# per row of `2025-26_players.csv` (`fixtures/bref/README.md`).
+PUBLISHED_WS = FIXTURES / "2025-26_ws.csv"
 
 
 def test_every_regulars_vorp_is_within_the_published_value() -> None:
@@ -75,6 +86,158 @@ def test_vorp_from_local_bpm_is_within_the_published_value_but_where_bpm_strays(
         if error > 0.3:
             outside.append(published[key]["player"])
     assert sorted(outside) == ["Cade Cunningham", "Jaren Jackson Jr."]
+
+
+def test_every_regulars_win_shares_are_within_the_published_value() -> None:
+    lines, teams, published = bref_season()
+    keys = list(published)
+    with PUBLISHED_WS.open() as handle:
+        rows = list(csv.DictReader(handle))
+    assert [f"{row['bref_id']}/{row['team']}" for row in rows] == keys
+
+    regulars = 0
+    for share in season_win_shares(lines, teams):
+        if share.minutes < 1000:
+            continue
+        regulars += 1
+        row = rows[share.player_id - 1]
+        name = published[keys[share.player_id - 1]]["player"]
+        # The spec's tolerance is ±0.5 of each; the published values are rounded to a tenth, and
+        # the formulas over the published totals land within 0.1 of all three.
+        assert share.ows == pytest.approx(float(row["ows"]), abs=0.1), name
+        assert share.dws == pytest.approx(float(row["dws"]), abs=0.1), name
+        assert share.ows + share.dws == pytest.approx(float(row["ws"]), abs=0.1), name
+    assert regulars == 263
+
+
+def test_league_win_shares_total_within_three_percent_of_league_wins() -> None:
+    lines, teams, _ = bref_season()
+
+    shares = season_win_shares(lines, teams)
+    total = sum(share.ows + share.dws for share in shares)
+
+    # Every player-team row has Win Shares; 82 games a team, 30 teams, a win a game.
+    assert len(shares) == 661
+    assert total == pytest.approx(82 * 30 / 2, rel=0.03)
+
+
+TEAM = 1
+MIRROR = 2
+# A team's season and its opponents', and a player on it; the league is the team and a mirror of
+# it, which played its opponents' box against its own.
+TEAM_BOX = TeamBox(
+    fgm=3300, fga=7000, fg3m=1000, ftm=1400, fta=1800, orb=850, drb=2700,
+    ast=2000, stl=650, blk=400, tov=1100, pf=1600, pts=9000,
+)  # fmt: skip
+OPP_BOX = TeamBox(
+    fgm=3200, fga=7100, fg3m=0, ftm=1300, fta=1700, orb=900, drb=2650,
+    ast=0, stl=0, blk=0, tov=1150, pf=0, pts=8800,
+)  # fmt: skip
+# Basketball Reference's estimate over the two boxes.
+POSSESSIONS = 7872.6393
+LINE = PlayerLine(
+    7, TEAM, 2400.0, 3.0, pts=1420, fgm=500, fga=1050, fg3m=120, ftm=300, fta=380,
+    orb=60, drb=300, ast=350, stl=80, blk=30, tov=160, pf=170,
+)  # fmt: skip
+
+
+def _team(team_id: int = TEAM, box: TeamBox = TEAM_BOX, opp: TeamBox = OPP_BOX) -> TeamLine:
+    # 19800 player-minutes: 3960 of the clock.
+    return TeamLine(team_id, 82, 3960.0, POSSESSIONS, box.pts, opp.pts, box, opp)
+
+
+def _league() -> LeagueContext:
+    league = league_context([_team(), _team(MIRROR, OPP_BOX, TEAM_BOX)])
+    assert league is not None
+    return league
+
+
+LEAGUE = _league()
+
+
+def test_win_shares_follow_the_published_method_by_hand() -> None:
+    """Worked by hand from the published formulas, apart from the code: a marginal 34.7317 points
+    a win; offense from qAST 0.5719, 637.736 scoring and 1211.5514 total possessions and
+    1411.8549 points produced; defense from a Stop% of 0.4903 and a rating of 112.7701."""
+    assert (LEAGUE.pts, LEAGUE.possessions, LEAGUE.team_games) == (17800, 2 * POSSESSIONS, 164)
+    assert LEAGUE.pace == pytest.approx(95.4259, abs=1e-4)
+
+    share = win_shares(LINE, _team(), LEAGUE)
+
+    assert share is not None
+    assert (share.player_id, share.team_id, share.minutes) == (7, TEAM, 2400.0)
+    assert share.ows == pytest.approx(4.3698, abs=1e-4)
+    assert share.dws == pytest.approx(2.5617, abs=1e-4)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        # No free throws: the free-throw terms drop out.
+        {"ftm": 0, "fta": 0, "pts": 1120},
+        # No shots: the field-goal parts drop out.
+        {"fgm": 0, "fga": 0, "fg3m": 0, "pts": 300},
+    ],
+)
+def test_a_players_zero_denominators_are_zero(changes: dict[str, int]) -> None:
+    whole = win_shares(LINE, _team(), LEAGUE)
+
+    share = win_shares(replace(LINE, **changes), _team(), LEAGUE)
+
+    # His points are gone with what they cost, so his offense is worse; his defense is untouched.
+    assert whole is not None and share is not None
+    assert math.isfinite(share.ows) and share.ows < whole.ows
+    assert share.dws == whole.dws
+
+
+def test_a_team_with_no_fouls_gives_no_foul_share() -> None:
+    fouled = win_shares(LINE, _team(), LEAGUE)
+    unfouled = win_shares(LINE, _team(box=TEAM_BOX._replace(pf=0)), LEAGUE)
+
+    assert fouled is not None and unfouled is not None
+    assert unfouled.ows == fouled.ows
+    # The foul share's stops are gone, so his defensive rating is worse.
+    assert unfouled.dws < fouled.dws
+
+
+@pytest.mark.parametrize(
+    "team",
+    [
+        TeamLine(TEAM, 1, 48.0, 0.0, 0, 0, TEAM_BOX, OPP_BOX),
+        _team(box=TEAM_BOX._replace(fga=0)),
+        _team(box=TEAM_BOX._replace(fta=0, ftm=0)),
+        # Free throws taken but nothing made: no scoring possessions.
+        _team(box=TEAM_BOX._replace(fgm=0, ftm=0)),
+        _team(opp=OPP_BOX._replace(fga=0, fgm=0)),
+        _team(opp=OPP_BOX._replace(fta=0, ftm=0)),
+    ],
+)
+def test_a_team_without_the_box_its_formulas_divide_by_gives_none(team: TeamLine) -> None:
+    assert win_shares(LINE, team, LEAGUE) is None
+
+
+def test_a_line_of_no_minutes_gives_none() -> None:
+    assert win_shares(replace(LINE, minutes=0.0), _team(), LEAGUE) is None
+
+
+def test_a_league_without_possessions_has_no_context_or_win_shares() -> None:
+    empty = TeamLine(TEAM, 0, 0.0, 0.0, 0, 0, OPP_BOX, OPP_BOX)
+
+    assert league_context([empty]) is None
+    assert season_win_shares([LINE], {TEAM: empty}) == []
+
+
+def test_ws_rows_sum_a_traded_players_teams_and_drop_a_player_under_a_minute() -> None:
+    day = date(2026, 10, 27)
+    shares = [
+        TeamWinShares(8, 2, 0.5, 0.01, 0.01),
+        TeamWinShares(7, 2, 600.04, 1.23456, -0.5),
+        TeamWinShares(7, 1, 1200.0, 2.0, 1.11111),
+    ]
+
+    assert ws_rows(day, shares) == [
+        ImpactSnapshotRow(day, 7, "ws_local", 3.846, 3.235, 0.611, 1800.0),
+    ]
 
 
 def test_vorp_is_bpm_over_replacement_times_the_share_of_the_season_played() -> None:
@@ -137,10 +300,13 @@ UNLISTED = 930003
 # A stale VORP and a Win Shares row on THROUGH, for a player with no BPM there.
 STALE = 930004
 PLAYERS = (TRADED, BENCH, UNLISTED, STALE)
-BOX_COLUMNS = (
-    *("pts", "fgm", "fga", "fg3m", "fg3a", "ftm", "fta"),
-    *("oreb", "dreb", "ast", "stl", "blk", "tov", "pf", "plus_minus"),
-)
+# Every line that played: 10 points on 4 of 9 (a three) and 1 of 2 free throws, 1 and 3
+# boards, 2 assists, a steal, a turnover and 2 fouls. VORP reads only the minutes; Win Shares
+# needs a box on both sides.
+BOX = {
+    **{"pts": 10, "fgm": 4, "fga": 9, "fg3m": 1, "fg3a": 3, "ftm": 1, "fta": 2},
+    **{"oreb": 1, "dreb": 3, "ast": 2, "stl": 1, "blk": 0, "tov": 1, "pf": 2, "plus_minus": 0},
+}
 
 
 def _clear(db: sessionmaker[Session]) -> None:
@@ -152,7 +318,7 @@ def _clear(db: sessionmaker[Session]) -> None:
 
 
 def _player_game(game_id: str, player_id: int, team_id: int, seconds: int) -> PlayerGame:
-    """A line of `seconds` and nothing else: VORP reads only the minutes."""
+    """A line of `seconds` and `BOX`."""
     return PlayerGame(
         game_id=game_id,
         player_id=player_id,
@@ -160,7 +326,7 @@ def _player_game(game_id: str, player_id: int, team_id: int, seconds: int) -> Pl
         is_starter=False,
         seconds=seconds,
         dnp_reason=None,
-        **dict.fromkeys(BOX_COLUMNS, 0),
+        **BOX,
         source="stats",
     )
 
@@ -282,7 +448,11 @@ def test_compute_value_writes_each_bpm_players_vorp_and_replaces_the_dates_rows(
     assert first["removed"] == 2
     assert again["changed"] == 0
     assert again["removed"] == 0
-    assert set(stored) == {("vorp_local", TRADED), ("vorp_local", BENCH), ("vorp_local", UNLISTED)}
+    assert set(stored) == {
+        (source, player_id)
+        for source in ("vorp_local", "ws_local")
+        for player_id in (TRADED, BENCH, UNLISTED)
+    }
     # (BPM + 2) * 5 * his minutes over his teams' * team games / 82, by hand.
     expected = {
         TRADED: (6.0 * 5 * 3600 / 44700 * 3 / 82, 60.0),
@@ -294,6 +464,26 @@ def test_compute_value_writes_each_bpm_players_vorp_and_replaces_the_dates_rows(
         assert stored_value == pytest.approx(vorp_value, abs=0.0005)
         assert rest == [None, None, minutes]
     assert _stored(seeded, THROUGH) == stored
+
+
+def test_compute_value_writes_every_player_with_a_minutes_win_shares(
+    seeded: sessionmaker[Session],
+) -> None:
+    result = compute_value(seeded, THROUGH)
+    stored = _stored(seeded, THROUGH)
+    with seeded() as session:
+        lines, teams = season_lines(session, "2026-27", THROUGH)
+
+    # The traded player's two lines, GSW's and DEN's, summed into one row of his 60 minutes.
+    expected = {row.player_id: row for row in ws_rows(THROUGH, season_win_shares(lines, teams))}
+    assert result["ws_players"] == len(expected) == len({line.player_id for line in lines})
+    for player_id, minutes in ((TRADED, 60.0), (BENCH, 12.0), (UNLISTED, 40.0)):
+        row = expected[player_id]
+        assert stored["ws_local", player_id] == (row.value, row.o_value, row.d_value, minutes)
+        assert row.o_value is not None and row.d_value is not None
+        assert row.value == pytest.approx(row.o_value + row.d_value, abs=0.0015)
+    # The stale row of a player with no line is gone.
+    assert ("ws_local", STALE) not in stored
 
 
 def test_the_sources_are_the_local_ones() -> None:
