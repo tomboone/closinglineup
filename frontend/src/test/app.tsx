@@ -82,6 +82,8 @@ const boardRow = (
   on_off_net: series([2, -1, 4]),
   impact: series([1.1, 1.2, 1.3]),
   impact_source: "epm",
+  ws: null,
+  vorp: null,
   ...extra,
 });
 
@@ -94,8 +96,8 @@ export const TEAM_PAGE: TeamPage = {
   garbage_time: "exclude",
   tier_board: [
     boardRow(DAVISON, "out", { badges: ["two_way", "g_league"], availability: "g_league" }),
-    boardRow(TATUM, "starter", { minutes_share_10: 0.15, starter_rate_5: 1 }),
-    boardRow(PRITCHARD, "core", { is_short: true, impact_source: "darko" }),
+    boardRow(TATUM, "starter", { minutes_share_10: 0.15, starter_rate_5: 1, ws: 4.25, vorp: 1.5 }),
+    boardRow(PRITCHARD, "core", { is_short: true, impact_source: "darko", ws: 1.04, vorp: -0.36 }),
     boardRow(BROWN, "starter", { minutes_share_10: 0.14, starter_rate_5: 1 }),
     boardRow(PORZINGIS, "injured", { availability: "out" }),
   ],

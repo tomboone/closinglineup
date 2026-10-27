@@ -125,7 +125,8 @@ class TeamsResponse(BaseModel):
 class TierBoardRow(BaseModel):
     """A player's rotation state on the tier board's date, and three sparklines over the team's
     last 20 game dates through it: his 10-game role window's minutes share and on/off net, and his
-    impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for)."""
+    impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for); and
+    his season production window's Win Shares and VORP on that date (v2 spec §8.7)."""
 
     player: PlayerRef
     tier: Tier
@@ -139,6 +140,8 @@ class TierBoardRow(BaseModel):
     on_off_net: list[Point]
     impact: list[Point]
     impact_source: Literal["epm", "darko", "bpm_local"] | None
+    ws: float | None
+    vorp: float | None
 
 
 class ClosingLineup(BaseModel):
