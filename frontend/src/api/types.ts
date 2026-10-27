@@ -89,6 +89,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/slate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Slate */
+        get: operations["slate_api_slate_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/teams": {
         parameters: {
             query?: never;
@@ -430,6 +447,8 @@ export interface components {
             /** Transactions */
             transactions: components["schemas"]["TransactionSummary"][];
         };
+        /** @enum {string} */
+        LineChange: "new" | "upgraded" | "downgraded" | "off";
         /**
          * LineupStats
          * @description A five or a pair over the season through the date, and over the team's last 10 games:
@@ -608,6 +627,22 @@ export interface components {
             value: number | null;
         };
         /**
+         * ProjectedStarter
+         * @description One of the first five of the team's players by `starter_rate_5` on its latest derived date
+         *     whose line on the report is not Out or Doubtful; `replacement` when one ranked above him was
+         *     removed (v2 spec §5.3).
+         */
+        ProjectedStarter: {
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Share 10 */
+            minutes_share_10: number | null;
+            player: components["schemas"]["PlayerRef"];
+            /** Replacement */
+            replacement: boolean;
+            /** Starter Rate 5 */
+            starter_rate_5: number | null;
+        };
+        /**
          * QuietSignal
          * @description A Starter or Core player with no rotation event on the date who sat by coach's decision in
          *     his team's game on it, or played under 60% of his 10-game minutes per game before it (v2 spec
@@ -714,6 +749,82 @@ export interface components {
             name: string;
             /** Value */
             value: number | string | null;
+        };
+        /** SlateGame */
+        SlateGame: {
+            away: components["schemas"]["SlateTeam"];
+            /** Game Id */
+            game_id: string;
+            home: components["schemas"]["SlateTeam"];
+            /** Tip Time */
+            tip_time: string | null;
+        };
+        /**
+         * SlateLine
+         * @description A player on the team's report for the game, or on G League assignment: his `status` and
+         *     `reason` on the report (null for a G League badge alone, and for an `off` line, which carries
+         *     its previous ones), his status on the previous report, the `change` between them (v2 spec
+         *     §5.2), and his tier and 10-game minutes share on the team's latest derived date on or before
+         *     last night.
+         */
+        SlateLine: {
+            change: components["schemas"]["LineChange"] | null;
+            /** G League */
+            g_league: boolean;
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Share 10 */
+            minutes_share_10: number | null;
+            player: components["schemas"]["PlayerRef"];
+            previous_status: components["schemas"]["InjuryStatus"] | null;
+            /** Reason */
+            reason: string | null;
+            status: components["schemas"]["InjuryStatus"] | null;
+            tier: components["schemas"]["Tier"] | null;
+        };
+        /**
+         * SlatePage
+         * @description The date's games, by tip-off; `last_night` is the latest derived date before it, null
+         *     before the first (v2 spec §3, §9).
+         */
+        SlatePage: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Games */
+            games: components["schemas"]["SlateGame"][];
+            /** Last Night */
+            last_night: string | null;
+        };
+        /**
+         * SlateReport
+         * @description The team's newest injury report for the game by the end of the date, `stale` when it is
+         *     ESPN's fallback; `submitted` false, the other fields null, when it has none (v2 spec §5.1).
+         */
+        SlateReport: {
+            /** Report Datetime */
+            report_datetime: string | null;
+            source: components["schemas"]["InjurySource"] | null;
+            /** Stale */
+            stale: boolean;
+            /** Submitted */
+            submitted: boolean;
+        };
+        /**
+         * SlateTeam
+         * @description One side of a slate game; `b2b` when it is the team's second night in a row.
+         */
+        SlateTeam: {
+            /** B2B */
+            b2b: boolean;
+            /** Lines */
+            lines: components["schemas"]["SlateLine"][];
+            /** Projected Starters */
+            projected_starters: components["schemas"]["ProjectedStarter"][];
+            report: components["schemas"]["SlateReport"];
+            /** Tricode */
+            tricode: string;
         };
         /**
          * SourceFreshness
@@ -1016,6 +1127,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    slate_api_slate_get: {
+        parameters: {
+            query: {
+                /** @description The morning, a calendar date in Eastern time. */
+                date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlatePage"];
                 };
             };
             /** @description Validation Error */

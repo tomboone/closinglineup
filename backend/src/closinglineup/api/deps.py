@@ -25,11 +25,14 @@ def get_session(request: Request) -> Iterator[Session]:
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
-def latest_derived_date(session: Session) -> dt.date | None:
+def latest_derived_date(session: Session, before: dt.date | None = None) -> dt.date | None:
     """The latest game date every derive step that writes has succeeded for, as `derive.run`
-    counts a date derived; None before the first."""
+    counts a date derived, strictly before `before` when given; None before the first."""
+    query = select(func.max(LoadLog.game_date))
+    if before is not None:
+        query = query.where(LoadLog.game_date < before)
     return session.scalar(
-        select(func.max(LoadLog.game_date)).where(
+        query.where(
             LoadLog.game_date.in_(
                 select(LoadLog.game_date)
                 .where(

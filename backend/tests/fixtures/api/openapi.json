@@ -813,6 +813,15 @@
         "title": "LeaguePage",
         "type": "object"
       },
+      "LineChange": {
+        "enum": [
+          "new",
+          "upgraded",
+          "downgraded",
+          "off"
+        ],
+        "type": "string"
+      },
       "LineupStats": {
         "description": "A five or a pair over the season through the date, and over the team's last 10 games:\nits offensive and defensive possessions and its net rating.",
         "properties": {
@@ -1347,6 +1356,59 @@
         "title": "Point",
         "type": "object"
       },
+      "ProjectedStarter": {
+        "description": "One of the first five of the team's players by `starter_rate_5` on its latest derived date\nwhose line on the report is not Out or Doubtful; `replacement` when one ranked above him was\nremoved (v2 spec \u00a75.3).",
+        "properties": {
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minutes_share_10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes Share 10"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "replacement": {
+            "title": "Replacement",
+            "type": "boolean"
+          },
+          "starter_rate_5": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starter Rate 5"
+          }
+        },
+        "required": [
+          "player",
+          "starter_rate_5",
+          "minutes_share_10",
+          "replacement",
+          "impact"
+        ],
+        "title": "ProjectedStarter",
+        "type": "object"
+      },
       "QuietSignal": {
         "description": "A Starter or Core player with no rotation event on the date who sat by coach's decision in\nhis team's game on it, or played under 60% of his 10-game minutes per game before it (v2 spec\n\u00a75.4).",
         "properties": {
@@ -1667,6 +1729,255 @@
           "label"
         ],
         "title": "Signal",
+        "type": "object"
+      },
+      "SlateGame": {
+        "properties": {
+          "away": {
+            "$ref": "#/components/schemas/SlateTeam"
+          },
+          "game_id": {
+            "title": "Game Id",
+            "type": "string"
+          },
+          "home": {
+            "$ref": "#/components/schemas/SlateTeam"
+          },
+          "tip_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tip Time"
+          }
+        },
+        "required": [
+          "game_id",
+          "tip_time",
+          "home",
+          "away"
+        ],
+        "title": "SlateGame",
+        "type": "object"
+      },
+      "SlateLine": {
+        "description": "A player on the team's report for the game, or on G League assignment: his `status` and\n`reason` on the report (null for a G League badge alone, and for an `off` line, which carries\nits previous ones), his status on the previous report, the `change` between them (v2 spec\n\u00a75.2), and his tier and 10-game minutes share on the team's latest derived date on or before\nlast night.",
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "g_league": {
+            "title": "G League",
+            "type": "boolean"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minutes_share_10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes Share 10"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "previous_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjuryStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjuryStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "player",
+          "status",
+          "reason",
+          "previous_status",
+          "change",
+          "tier",
+          "minutes_share_10",
+          "g_league",
+          "impact"
+        ],
+        "title": "SlateLine",
+        "type": "object"
+      },
+      "SlatePage": {
+        "description": "The date's games, by tip-off; `last_night` is the latest derived date before it, null\nbefore the first (v2 spec \u00a73, \u00a79).",
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "games": {
+            "items": {
+              "$ref": "#/components/schemas/SlateGame"
+            },
+            "title": "Games",
+            "type": "array"
+          },
+          "last_night": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Night"
+          }
+        },
+        "required": [
+          "date",
+          "last_night",
+          "games"
+        ],
+        "title": "SlatePage",
+        "type": "object"
+      },
+      "SlateReport": {
+        "description": "The team's newest injury report for the game by the end of the date, `stale` when it is\nESPN's fallback; `submitted` false, the other fields null, when it has none (v2 spec \u00a75.1).",
+        "properties": {
+          "report_datetime": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Datetime"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InjurySource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "report_datetime",
+          "source",
+          "stale",
+          "submitted"
+        ],
+        "title": "SlateReport",
+        "type": "object"
+      },
+      "SlateTeam": {
+        "description": "One side of a slate game; `b2b` when it is the team's second night in a row.",
+        "properties": {
+          "b2b": {
+            "title": "B2B",
+            "type": "boolean"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/SlateLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "projected_starters": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectedStarter"
+            },
+            "title": "Projected Starters",
+            "type": "array"
+          },
+          "report": {
+            "$ref": "#/components/schemas/SlateReport"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tricode",
+          "b2b",
+          "report",
+          "lines",
+          "projected_starters"
+        ],
+        "title": "SlateTeam",
         "type": "object"
       },
       "SourceFreshness": {
@@ -2408,6 +2719,48 @@
           }
         },
         "summary": "Player Page"
+      }
+    },
+    "/api/slate": {
+      "get": {
+        "operationId": "slate_api_slate_get",
+        "parameters": [
+          {
+            "description": "The morning, a calendar date in Eastern time.",
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "description": "The morning, a calendar date in Eastern time.",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlatePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slate"
       }
     },
     "/api/teams": {
