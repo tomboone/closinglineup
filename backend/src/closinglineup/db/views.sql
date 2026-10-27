@@ -13,8 +13,9 @@
 --   player's games with that team only. A role window restarts when he joins a team, or rejoins
 --   it after a gap in his roster spans; spans that run one into the next, as a new contract on the
 --   same team does, are one spell (CONTEXT.md, "Role window").
--- * Production rows (team_id NULL; every window) carry the §7.2 metrics and the latest impact
---   snapshots, over the player's games whatever his team (CONTEXT.md, "Production window").
+-- * Production rows (team_id NULL; every window) carry the §7.2 metrics, Game Score (v2 spec
+--   §8.1) and the latest impact snapshots, over the player's games whatever his team
+--   (CONTEXT.md, "Production window").
 --
 -- Windows count team games, not games played: a 5-game window at date d is his team's last five
 -- games through d, d included (spec §7). Every window but prior_season stays within d's season, so
@@ -484,6 +485,7 @@ prod_fact AS (
         g.season,
         g.game_date,
         g.k,
+        (coalesce(pg.seconds, 0) > 0)::int AS played,
         coalesce(pg.seconds, 0) AS seconds,
         coalesce(pg.pts, 0) AS pts,
         coalesce(pg.fgm, 0) AS fgm,
@@ -491,10 +493,14 @@ prod_fact AS (
         coalesce(pg.fg3m, 0) AS fg3m,
         coalesce(pg.fg3a, 0) AS fg3a,
         coalesce(pg.fta, 0) AS fta,
+        coalesce(pg.ftm, 0) AS ftm,
         coalesce(pg.oreb, 0) AS oreb,
         coalesce(pg.dreb, 0) AS dreb,
         coalesce(pg.ast, 0) AS ast,
+        coalesce(pg.stl, 0) AS stl,
+        coalesce(pg.blk, 0) AS blk,
         coalesce(pg.tov, 0) AS tov,
+        coalesce(pg.pf, 0) AS pf,
         CASE WHEN pg.seconds > 0 THEN tb.seconds ELSE 0 END AS team_seconds,
         CASE WHEN pg.seconds > 0 THEN tb.fgm ELSE 0 END AS team_fgm,
         CASE WHEN pg.seconds > 0 THEN tb.fga ELSE 0 END AS team_fga,
@@ -530,6 +536,7 @@ prod_cum AS (
         season,
         game_date,
         k,
+        sum(played) OVER season_to_date AS played,
         sum(seconds) OVER season_to_date AS seconds,
         sum(pts) OVER season_to_date AS pts,
         sum(fgm) OVER season_to_date AS fgm,
@@ -537,10 +544,14 @@ prod_cum AS (
         sum(fg3m) OVER season_to_date AS fg3m,
         sum(fg3a) OVER season_to_date AS fg3a,
         sum(fta) OVER season_to_date AS fta,
+        sum(ftm) OVER season_to_date AS ftm,
         sum(oreb) OVER season_to_date AS oreb,
         sum(dreb) OVER season_to_date AS dreb,
         sum(ast) OVER season_to_date AS ast,
+        sum(stl) OVER season_to_date AS stl,
+        sum(blk) OVER season_to_date AS blk,
         sum(tov) OVER season_to_date AS tov,
+        sum(pf) OVER season_to_date AS pf,
         sum(team_seconds) OVER season_to_date AS team_seconds,
         sum(team_fgm) OVER season_to_date AS team_fgm,
         sum(team_fga) OVER season_to_date AS team_fga,
@@ -574,6 +585,7 @@ prod_window AS (
         w.window_name,
         w.n,
         least(c.k, coalesce(w.n, c.k)) AS games,
+        (c.played - coalesce(lag(c.played, w.n) OVER back, 0))::float8 AS played,
         (c.seconds - coalesce(lag(c.seconds, w.n) OVER back, 0))::float8 AS seconds,
         (c.pts - coalesce(lag(c.pts, w.n) OVER back, 0))::float8 AS pts,
         (c.fgm - coalesce(lag(c.fgm, w.n) OVER back, 0))::float8 AS fgm,
@@ -581,10 +593,14 @@ prod_window AS (
         (c.fg3m - coalesce(lag(c.fg3m, w.n) OVER back, 0))::float8 AS fg3m,
         (c.fg3a - coalesce(lag(c.fg3a, w.n) OVER back, 0))::float8 AS fg3a,
         (c.fta - coalesce(lag(c.fta, w.n) OVER back, 0))::float8 AS fta,
+        (c.ftm - coalesce(lag(c.ftm, w.n) OVER back, 0))::float8 AS ftm,
         (c.oreb - coalesce(lag(c.oreb, w.n) OVER back, 0))::float8 AS oreb,
         (c.dreb - coalesce(lag(c.dreb, w.n) OVER back, 0))::float8 AS dreb,
         (c.ast - coalesce(lag(c.ast, w.n) OVER back, 0))::float8 AS ast,
+        (c.stl - coalesce(lag(c.stl, w.n) OVER back, 0))::float8 AS stl,
+        (c.blk - coalesce(lag(c.blk, w.n) OVER back, 0))::float8 AS blk,
         (c.tov - coalesce(lag(c.tov, w.n) OVER back, 0))::float8 AS tov,
+        (c.pf - coalesce(lag(c.pf, w.n) OVER back, 0))::float8 AS pf,
         (c.team_seconds - coalesce(lag(c.team_seconds, w.n) OVER back, 0))::float8 AS team_seconds,
         (c.team_fgm - coalesce(lag(c.team_fgm, w.n) OVER back, 0))::float8 AS team_fgm,
         (c.team_fga - coalesce(lag(c.team_fga, w.n) OVER back, 0))::float8 AS team_fga,
@@ -673,7 +689,13 @@ prod_metric AS (
         (oreb + dreb) * 2160.0 / nullif(seconds, 0) AS reb_per36,
         pts * 100.0 / nullif(on_poss, 0) AS pts_per100,
         ast * 100.0 / nullif(on_poss, 0) AS ast_per100,
-        (oreb + dreb) * 100.0 / nullif(on_poss, 0) AS reb_per100
+        (oreb + dreb) * 100.0 / nullif(on_poss, 0) AS reb_per100,
+        -- v2 §8.1 Hollinger's Game Score per game played. It is linear in the box line, so the
+        -- window's average is the formula over the window's sums.
+        (
+            pts + 0.4 * fgm - 0.7 * fga - 0.4 * (fta - ftm) + 0.7 * oreb + 0.3 * dreb + stl
+            + 0.7 * ast + 0.7 * blk - 0.4 * pf - tov
+        ) / nullif(played, 0) AS game_score
     FROM prod_window
 ),
 -- Each player's whole season: his season window at his last team game of it.
@@ -720,7 +742,8 @@ prod_all AS (
         t.reb_per36,
         t.pts_per100,
         t.ast_per100,
-        t.reb_per100
+        t.reb_per100,
+        t.game_score
     FROM prod_cum a
     JOIN prod_season_total t
         ON t.player_id = a.player_id
@@ -1004,6 +1027,14 @@ prod_row AS (
         END AS reb_per100_delta_prior,
         m.reb_per100 - max(m.reb_per100) FILTER (WHERE m.window_name = 'season') OVER anchor
             AS reb_per100_delta_season,
+        m.game_score,
+        m.game_score - CASE
+            WHEN m.window_name = 'season'
+                THEN max(m.game_score) FILTER (WHERE m.window_name = 'prior_season') OVER anchor
+            ELSE lag(m.game_score, m.n) OVER back
+        END AS game_score_delta_prior,
+        m.game_score - max(m.game_score) FILTER (WHERE m.window_name = 'season') OVER anchor
+            AS game_score_delta_season,
         i.epm,
         i.epm_o,
         i.epm_d,
@@ -1147,6 +1178,9 @@ SELECT
     p.reb_per100,
     p.reb_per100_delta_prior,
     p.reb_per100_delta_season,
+    p.game_score,
+    p.game_score_delta_prior,
+    p.game_score_delta_season,
     p.epm,
     p.epm_o,
     p.epm_d,
