@@ -30,6 +30,7 @@ type InjurySource = Literal["pdf", "espn"]
 type GarbageTime = Literal["include", "exclude"]
 type GameStatus = Literal["scheduled", "final", "postponed"]
 type Window = Literal["5", "10", "20", "season"]
+type DnpReason = Literal["cd", "injury", "inactive", "suspension", "g_league", "other"]
 type Flag = Literal[
     "minutes_cliff",
     "usage_up_efficiency_down",
@@ -310,9 +311,24 @@ class TransactionSummary(BaseModel):
     impact: Impact | None
 
 
+class QuietSignal(BaseModel):
+    """A Starter or Core player with no rotation event on the date who sat by coach's decision in
+    his team's game on it, or played under 60% of his 10-game minutes per game before it (v2 spec
+    §5.4)."""
+
+    player: PlayerRef
+    tricode: str
+    tier: Tier
+    seconds: int
+    minutes_per_game_10: float
+    dnp_reason: DnpReason | None
+    impact: Impact | None
+
+
 class LeaguePage(BaseModel):
     date: dt.date
     rotation_events: list[TeamRotationEvents]
+    quiet_signals: list[QuietSignal]
     minutes_risers: list[Mover]
     minutes_fallers: list[Mover]
     flags: list[RaisedFlag]

@@ -294,6 +294,7 @@ export const LEAGUE_PAGE: LeaguePage = {
       ],
     },
   ],
+  quiet_signals: [],
   minutes_risers: [mover(PRITCHARD, "BOS", 0.12, 0.041)],
   minutes_fallers: [mover(HOLIDAY, "BOS", 0.08, -0.05)],
   flags: [
@@ -345,6 +346,7 @@ export const LEAGUE_PAGE: LeaguePage = {
 export const EMPTY_LEAGUE_PAGE: LeaguePage = {
   date: "2026-03-21",
   rotation_events: [],
+  quiet_signals: [],
   minutes_risers: [],
   minutes_fallers: [],
   flags: [],

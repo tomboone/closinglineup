@@ -222,6 +222,8 @@ export interface components {
             salary: number | null;
         };
         /** @enum {string} */
+        DnpReason: "cd" | "injury" | "inactive" | "suspension" | "g_league" | "other";
+        /** @enum {string} */
         Flag: "minutes_cliff" | "usage_up_efficiency_down" | "bleeding" | "earning_trust" | "yo_yo" | "contract_pressure";
         /**
          * GameLineup
@@ -421,6 +423,8 @@ export interface components {
             minutes_fallers: components["schemas"]["Mover"][];
             /** Minutes Risers */
             minutes_risers: components["schemas"]["Mover"][];
+            /** Quiet Signals */
+            quiet_signals: components["schemas"]["QuietSignal"][];
             /** Rotation Events */
             rotation_events: components["schemas"]["TeamRotationEvents"][];
             /** Transactions */
@@ -602,6 +606,24 @@ export interface components {
             game_date: string;
             /** Value */
             value: number | null;
+        };
+        /**
+         * QuietSignal
+         * @description A Starter or Core player with no rotation event on the date who sat by coach's decision in
+         *     his team's game on it, or played under 60% of his 10-game minutes per game before it (v2 spec
+         *     §5.4).
+         */
+        QuietSignal: {
+            dnp_reason: components["schemas"]["DnpReason"] | null;
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Per Game 10 */
+            minutes_per_game_10: number;
+            player: components["schemas"]["PlayerRef"];
+            /** Seconds */
+            seconds: number;
+            tier: components["schemas"]["Tier"];
+            /** Tricode */
+            tricode: string;
         };
         /**
          * RaisedFlag

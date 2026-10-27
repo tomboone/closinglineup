@@ -250,6 +250,17 @@
         "title": "ContractNote",
         "type": "object"
       },
+      "DnpReason": {
+        "enum": [
+          "cd",
+          "injury",
+          "inactive",
+          "suspension",
+          "g_league",
+          "other"
+        ],
+        "type": "string"
+      },
       "Flag": {
         "enum": [
           "minutes_cliff",
@@ -765,6 +776,13 @@
             "title": "Minutes Risers",
             "type": "array"
           },
+          "quiet_signals": {
+            "items": {
+              "$ref": "#/components/schemas/QuietSignal"
+            },
+            "title": "Quiet Signals",
+            "type": "array"
+          },
           "rotation_events": {
             "items": {
               "$ref": "#/components/schemas/TeamRotationEvents"
@@ -783,6 +801,7 @@
         "required": [
           "date",
           "rotation_events",
+          "quiet_signals",
           "minutes_risers",
           "minutes_fallers",
           "flags",
@@ -1326,6 +1345,60 @@
           "value"
         ],
         "title": "Point",
+        "type": "object"
+      },
+      "QuietSignal": {
+        "description": "A Starter or Core player with no rotation event on the date who sat by coach's decision in\nhis team's game on it, or played under 60% of his 10-game minutes per game before it (v2 spec\n\u00a75.4).",
+        "properties": {
+          "dnp_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DnpReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minutes_per_game_10": {
+            "title": "Minutes Per Game 10",
+            "type": "number"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "seconds": {
+            "title": "Seconds",
+            "type": "integer"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player",
+          "tricode",
+          "tier",
+          "seconds",
+          "minutes_per_game_10",
+          "dnp_reason",
+          "impact"
+        ],
+        "title": "QuietSignal",
         "type": "object"
       },
       "RaisedFlag": {

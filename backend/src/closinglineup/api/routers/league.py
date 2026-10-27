@@ -3,6 +3,11 @@ a date no team played has empty lists:
 
 - the **rotation events** are the date's `rotation_event` rows, by team, then by the tier moved to
   and player, each with the signals `derive.events` ranked for it;
+- the **quiet signals** are the Starter and Core players, by the date's `rotation_state`, with no
+  rotation event on it, who sat by coach's decision in their team's game on it or played under
+  `QUIET_RATIO` of their minutes per game over the 10-game role window on the team's previous final
+  game date this season, so the date's game is not in the average; a DNP for any other reason is
+  neither: a DNP first, then the largest shortfall (v2 spec §5.4);
 - the **minutes movers** are `player_window_stats`' 10-game role rows on the date, the 15 whose
   minutes share rose most over the 10 games before and the 15 whose fell most, a row whose share
   did not move being neither;
@@ -46,6 +51,7 @@ from closinglineup.api.schemas import (
     InjuryChange,
     LeaguePage,
     Mover,
+    QuietSignal,
     RaisedFlag,
     RotationEventSummary,
     Signal,
@@ -68,7 +74,7 @@ from closinglineup.db.models import (
     RotationState,
     Transaction,
 )
-from closinglineup.derive.availability import NOT_INJURIES
+from closinglineup.derive.availability import COACHS_DECISION, NOT_INJURIES
 from closinglineup.derive.flags import FlagRule
 from closinglineup.injuries import PDF_SOURCE
 from closinglineup.season import season_bounds, season_label
@@ -78,6 +84,9 @@ from closinglineup.teams import by_nba_team_id
 router = APIRouter()
 
 TOP_MINUTES_MOVERS = 15
+# A Starter or Core player below this share of his 10-game minutes per game is a quiet signal.
+QUIET_RATIO = 0.6
+QUIET_TIERS = ("starter", "core")
 TOP_IMPACT_MOVERS = 10
 # The window the movers' deltas are over, in team games.
 MOVER_GAMES = 10
@@ -92,6 +101,7 @@ _FLAG_RANK = {flag: rank for rank, flag in enumerate(PLAYER_FLAGS)}
 @router.get("/api/league")
 def league(session: SessionDep, day: DateDep) -> LeaguePage:
     events = _events(session, day)
+    quiet = _quiet_signals(session, day)
     teams = _teams(session, day)
     minutes_risers, minutes_fallers = _minutes_movers(session, day)
     impact_risers, impact_fallers = _impact_movers(session, day, teams)
@@ -105,6 +115,7 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
     transactions = _transactions(session, day)
     players = {
         *(event.player_id for event in events),
+        *(signal.player_id for signal in quiet),
         *(mover.player_id for mover in (*minutes_risers, *minutes_fallers)),
         *(mover.player_id for mover in (*impact_risers, *impact_fallers)),
         *(flag.player_id for flag in flags),
@@ -131,6 +142,7 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
             TeamRotationEvents(tricode=tricode, events=by_team[tricode])
             for tricode in sorted(by_team)
         ],
+        quiet_signals=[signal.model(names, impacts) for signal in quiet],
         minutes_risers=[mover.model(names, impacts) for mover in minutes_risers],
         minutes_fallers=[mover.model(names, impacts) for mover in minutes_fallers],
         flags=[
@@ -193,6 +205,62 @@ def _teams(session: Session, day: date) -> dict[int, int]:
         ).all()
     )
     return teams
+
+
+# Quiet signals.
+
+
+class QuietRow(NamedTuple):
+    player_id: int
+    team_id: int
+    tier: str
+    seconds: int
+    minutes_per_game: float
+    dnp_reason: str | None
+
+    def rank(self) -> tuple[bool, float, int]:
+        """A DNP first, then the largest shortfall of his average, then by player."""
+        shortfall = self.minutes_per_game * 60 - self.seconds
+        return (self.dnp_reason is None, -shortfall, self.player_id)
+
+    def model(self, names: dict[int, str], impacts: dict[int, Impact]) -> QuietSignal:
+        return QuietSignal(
+            player=player_ref(self.player_id, names),
+            tricode=by_nba_team_id(self.team_id).tricode,
+            tier=cast(Tier, self.tier),
+            seconds=self.seconds,
+            minutes_per_game_10=self.minutes_per_game,
+            dnp_reason=cast(Any, self.dnp_reason),
+            impact=impacts.get(self.player_id),
+        )
+
+
+def _quiet_signals(session: Session, day: date) -> list[QuietRow]:
+    """The date's box lines of Starters and Core players with no rotation event on it, against
+    their 10-game role rows on their team's previous final game date this season: a DNP-CD, or a
+    game played under `QUIET_RATIO` of the row's minutes per game."""
+    found = session.execute(
+        text(
+            "SELECT pg.player_id, pg.team_id, rs.tier, pg.seconds, "
+            "v.minutes_per_game::float8, pg.dnp_reason "
+            "FROM player_game pg JOIN game g ON g.game_id = pg.game_id "
+            "JOIN rotation_state rs ON rs.player_id = pg.player_id "
+            "AND rs.team_id = pg.team_id AND rs.game_date = g.game_date "
+            "CROSS JOIN LATERAL (SELECT max(p.game_date) AS game_date FROM game p "
+            "WHERE pg.team_id IN (p.home_team_id, p.away_team_id) AND p.season = g.season "
+            "AND p.status = 'final' AND p.game_date < g.game_date) prev "
+            "JOIN player_window_stats v ON v.player_id = pg.player_id AND v.team_id = pg.team_id "
+            "AND v.\"window\" = '10' AND v.game_date = prev.game_date "
+            "WHERE g.game_date = :day AND rs.tier = ANY(:tiers) "
+            "AND v.minutes_per_game IS NOT NULL "
+            "AND NOT EXISTS (SELECT FROM rotation_event e "
+            "WHERE e.player_id = pg.player_id AND e.game_date = g.game_date) "
+            "AND (pg.dnp_reason = :cd OR (pg.dnp_reason IS NULL "
+            "AND pg.seconds < :ratio * v.minutes_per_game * 60))"
+        ),
+        {"day": day, "tiers": list(QUIET_TIERS), "cd": COACHS_DECISION, "ratio": QUIET_RATIO},
+    ).all()
+    return sorted((QuietRow(*row) for row in found), key=QuietRow.rank)
 
 
 # Movers.
