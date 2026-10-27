@@ -10,7 +10,7 @@ are; a value with nothing to compute it from is null.
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 type Tier = Literal["injured", "starter", "core", "fringe", "out"]
 type Badge = Literal["two_way", "ten_day", "exhibit_10", "g_league"]
@@ -461,6 +461,59 @@ class ShotZone(BaseModel):
     prior_fg_pct: float | None
 
 
+type ProductionMetric = Literal[
+    "ts_pct",
+    "efg_pct",
+    "usg_pct",
+    "ast_pct",
+    "tov_pct",
+    "oreb_pct",
+    "dreb_pct",
+    "ftr",
+    "fg3a_rate",
+    "pts_per36",
+    "reb_per36",
+    "ast_per36",
+    "game_score",
+    "ws",
+    "vorp",
+]
+# How a metric reads: a fraction as a percentage, a ratio to three decimals (FTr, 3PAr), a number
+# (per-36 rates, Win Shares, VORP), or a number per game played (Game Score).
+type ProductionFormat = Literal["percent", "rate", "number", "per_game"]
+
+
+class ProductionCell(BaseModel):
+    """A metric over one production window: its value, that less the season window's, the games in
+    the window and whether it is short. `o_value` and `d_value` are Win Shares' offensive and
+    defensive parts, null for every other metric."""
+
+    value: float | None
+    delta_season: float | None
+    games: int
+    is_short: bool
+    o_value: float | None
+    d_value: float | None
+
+
+class ProductionWindows(BaseModel):
+    """A metric's cell in each production window, null where he has no such window or the metric
+    is not kept for it."""
+
+    last_5: ProductionCell | None = Field(alias="5")
+    last_10: ProductionCell | None = Field(alias="10")
+    last_20: ProductionCell | None = Field(alias="20")
+    season: ProductionCell | None
+    prior_season: ProductionCell | None
+
+
+class ProductionRow(BaseModel):
+    metric: ProductionMetric
+    label: str
+    format: ProductionFormat
+    windows: ProductionWindows
+
+
 class Teammate(BaseModel):
     player: PlayerRef
     possessions: int
@@ -497,6 +550,7 @@ class PlayerPage(BaseModel):
     series: PlayerSeries
     annotations: list[Annotation]
     shot_profile: list[ShotZone]
+    production: list[ProductionRow]
     teammates: list[Teammate]
     matchups: Matchups
     flags: list[RaisedFlag]

@@ -1156,6 +1156,13 @@
           "matchups": {
             "$ref": "#/components/schemas/Matchups"
           },
+          "production": {
+            "items": {
+              "$ref": "#/components/schemas/ProductionRow"
+            },
+            "title": "Production",
+            "type": "array"
+          },
           "series": {
             "$ref": "#/components/schemas/PlayerSeries"
           },
@@ -1185,6 +1192,7 @@
           "series",
           "annotations",
           "shot_profile",
+          "production",
           "teammates",
           "matchups",
           "flags"
@@ -1354,6 +1362,191 @@
           "value"
         ],
         "title": "Point",
+        "type": "object"
+      },
+      "ProductionCell": {
+        "description": "A metric over one production window: its value, that less the season window's, the games in\nthe window and whether it is short. `o_value` and `d_value` are Win Shares' offensive and\ndefensive parts, null for every other metric.",
+        "properties": {
+          "d_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "D Value"
+          },
+          "delta_season": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Season"
+          },
+          "games": {
+            "title": "Games",
+            "type": "integer"
+          },
+          "is_short": {
+            "title": "Is Short",
+            "type": "boolean"
+          },
+          "o_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "O Value"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "delta_season",
+          "games",
+          "is_short",
+          "o_value",
+          "d_value"
+        ],
+        "title": "ProductionCell",
+        "type": "object"
+      },
+      "ProductionFormat": {
+        "enum": [
+          "percent",
+          "rate",
+          "number",
+          "per_game"
+        ],
+        "type": "string"
+      },
+      "ProductionMetric": {
+        "enum": [
+          "ts_pct",
+          "efg_pct",
+          "usg_pct",
+          "ast_pct",
+          "tov_pct",
+          "oreb_pct",
+          "dreb_pct",
+          "ftr",
+          "fg3a_rate",
+          "pts_per36",
+          "reb_per36",
+          "ast_per36",
+          "game_score",
+          "ws",
+          "vorp"
+        ],
+        "type": "string"
+      },
+      "ProductionRow": {
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/ProductionFormat"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "metric": {
+            "$ref": "#/components/schemas/ProductionMetric"
+          },
+          "windows": {
+            "$ref": "#/components/schemas/ProductionWindows"
+          }
+        },
+        "required": [
+          "metric",
+          "label",
+          "format",
+          "windows"
+        ],
+        "title": "ProductionRow",
+        "type": "object"
+      },
+      "ProductionWindows": {
+        "description": "A metric's cell in each production window, null where he has no such window or the metric\nis not kept for it.",
+        "properties": {
+          "10": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionCell"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "20": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionCell"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "5": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionCell"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prior_season": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionCell"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "season": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionCell"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "5",
+          "10",
+          "20",
+          "season",
+          "prior_season"
+        ],
+        "title": "ProductionWindows",
         "type": "object"
       },
       "ProjectedStarter": {

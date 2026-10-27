@@ -225,6 +225,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.production .delta {
+  margin-left: 4px;
+  font-size: 0.75em;
+  color: #57606a;
+}
+
 .flag-list {
   margin: 0;
   padding: 0;

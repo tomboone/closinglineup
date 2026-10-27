@@ -14,8 +14,8 @@
 --   it after a gap in his roster spans; spans that run one into the next, as a new contract on the
 --   same team does, are one spell (CONTEXT.md, "Role window").
 -- * Production rows (team_id NULL; every window) carry the §7.2 metrics, Game Score (v2 spec
---   §8.1) and the latest impact snapshots, over the player's games whatever his team
---   (CONTEXT.md, "Production window").
+--   §8.1), the latest impact snapshots and the latest value snapshots, Win Shares and VORP (v2
+--   spec §8.4), over the player's games whatever his team (CONTEXT.md, "Production window").
 --
 -- Windows count team games, not games played: a 5-game window at date d is his team's last five
 -- games through d, d included (spec §7). Every window but prior_season stays within d's season, so
@@ -30,7 +30,7 @@
 -- window computes on what it has too, and is absent, its deltas NULL, before the player's
 -- (n + 1)th team game. A production row's season window has the prior season as its prior window;
 -- a role row's season window, and prior_season, have none. The games and possession counts and
--- the impact snapshots carry no deltas.
+-- the impact and value snapshots carry no deltas.
 --
 -- Not here yet: §7.3's net rating of the player's three most-used 2-man combos, and on-court
 -- ratings with garbage time included, which the API's `garbage_time=include` will need.
@@ -807,6 +807,93 @@ impact_asof AS (
     WHERE is_date
     GROUP BY player_id, game_date
 ),
+-- v2 spec §8.4 the value snapshots, each dated in the season starting that year: a season runs
+-- August to July (`season.season_bounds`).
+value_snapshot AS (
+    SELECT
+        player_id,
+        source,
+        date,
+        extract(year FROM date)::int - (extract(month FROM date) < 8)::int AS start_year,
+        value,
+        o_value,
+        d_value
+    FROM impact_snapshot
+    WHERE source IN ('ws_local', 'vorp_local')
+),
+-- The latest value snapshot of each source at or before each production date, carried forward as
+-- the impact snapshots are but within the date's season: each is the season to date, so the last
+-- season's does not carry into this one.
+value_asof AS (
+    SELECT
+        player_id,
+        game_date,
+        max(value) FILTER (WHERE source = 'ws_local') AS ws_local,
+        max(o_value) FILTER (WHERE source = 'ws_local') AS ws_local_o,
+        max(d_value) FILTER (WHERE source = 'ws_local') AS ws_local_d,
+        max(value) FILTER (WHERE source = 'vorp_local') AS vorp_local
+    FROM (
+        SELECT
+            player_id,
+            source,
+            game_date,
+            is_date,
+            max(value) OVER latest AS value,
+            max(o_value) OVER latest AS o_value,
+            max(d_value) OVER latest AS d_value
+        FROM (
+            SELECT
+                *,
+                count(*) FILTER (WHERE NOT is_date) OVER (
+                    PARTITION BY player_id, source, start_year ORDER BY game_date, is_date
+                ) AS snapshot_no
+            FROM (
+                SELECT
+                    player_id,
+                    source,
+                    start_year,
+                    date AS game_date,
+                    false AS is_date,
+                    value,
+                    o_value,
+                    d_value
+                FROM value_snapshot
+                UNION ALL
+                SELECT
+                    g.player_id,
+                    s.source,
+                    left(g.season, 4)::int,
+                    g.game_date,
+                    true,
+                    NULL::float8,
+                    NULL::float8,
+                    NULL::float8
+                FROM prod_game g
+                CROSS JOIN (VALUES ('ws_local'), ('vorp_local')) s (source)
+            ) dated
+        ) numbered
+        WINDOW latest AS (PARTITION BY player_id, source, start_year, snapshot_no)
+    ) carried
+    WHERE is_date
+    GROUP BY player_id, game_date
+),
+-- Each player-season's final value snapshot of each source, which the season after's prior_season
+-- rows carry.
+value_final AS (
+    SELECT
+        player_id,
+        start_year,
+        max(value) FILTER (WHERE source = 'ws_local') AS ws_local,
+        max(o_value) FILTER (WHERE source = 'ws_local') AS ws_local_o,
+        max(d_value) FILTER (WHERE source = 'ws_local') AS ws_local_d,
+        max(value) FILTER (WHERE source = 'vorp_local') AS vorp_local
+    FROM (
+        SELECT DISTINCT ON (player_id, source, start_year) *
+        FROM value_snapshot
+        ORDER BY player_id, source, start_year, date DESC
+    ) final
+    GROUP BY player_id, start_year
+),
 -- The prior window's value is the window's own value n games back in the season; the season's is
 -- the prior season's whole, and the prior season's has none.
 prod_row AS (
@@ -1043,9 +1130,21 @@ prod_row AS (
         i.darko_d,
         i.bpm_local,
         i.bpm_local_o,
-        i.bpm_local_d
+        i.bpm_local_d,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local ELSE v.ws_local END AS ws_local,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_o ELSE v.ws_local_o END
+            AS ws_local_o,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_d ELSE v.ws_local_d END
+            AS ws_local_d,
+        CASE WHEN m.window_name = 'prior_season' THEN f.vorp_local ELSE v.vorp_local END
+            AS vorp_local
     FROM prod_all m
     LEFT JOIN impact_asof i ON i.player_id = m.player_id AND i.game_date = m.game_date
+    LEFT JOIN value_asof v ON v.player_id = m.player_id AND v.game_date = m.game_date
+    LEFT JOIN value_final f
+        ON f.player_id = m.player_id
+        AND f.start_year = left(m.season, 4)::int - 1
+        AND m.window_name = 'prior_season'
     WINDOW
         back AS (PARTITION BY m.player_id, m.season, m.window_name ORDER BY m.k),
         anchor AS (PARTITION BY m.player_id, m.season, m.k)
@@ -1189,7 +1288,11 @@ SELECT
     p.darko_d,
     p.bpm_local,
     p.bpm_local_o,
-    p.bpm_local_d
+    p.bpm_local_d,
+    p.ws_local,
+    p.ws_local_o,
+    p.ws_local_d,
+    p.vorp_local
 FROM role_row r
 FULL JOIN prod_row p ON p.team_id = r.team_id;
 

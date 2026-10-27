@@ -111,6 +111,39 @@ describe("PlayerPage", () => {
     expect(within(flags).getByText("5-game share 8.0% vs 20-game 14.0%")).toBeInTheDocument();
   });
 
+  it("tables every production metric over every window, marking the short one", async () => {
+    mockApi({ [PATH]: { body: PLAYER_PAGE } });
+    renderApp("/players/1627759");
+
+    const region = await screen.findByRole("region", { name: "Production" });
+    const table = within(region).getByRole("table");
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "Metric",
+      "Last 5",
+      "Last 10",
+      "Last 20",
+      "Season",
+      "Prior season",
+    ]);
+    expect(within(table).getAllByRole("rowheader").map((th) => th.textContent)).toEqual(
+      PLAYER_PAGE.production.map((row) => row.label),
+    );
+    // The 20-game window is short for each of the 13 metrics it has.
+    expect(within(table).getAllByText("short window")).toHaveLength(13);
+
+    const cells = (label: string) =>
+      within(within(table).getByRole("rowheader", { name: label }).closest("tr")!).getAllByRole("cell");
+    // A percentage with its difference in points; the season's difference left out.
+    expect(cells("TS%")[0]).toHaveTextContent("66.0%+6.0");
+    expect(cells("TS%")[3]).toHaveTextContent(/^60\.0%$/);
+    expect(cells("3PAr")[4]).toHaveTextContent(".360−.040");
+    // Win Shares has no 5, 10 or 20-game window, and its parts on hover.
+    const ws = cells("Win Shares");
+    expect(ws.slice(0, 3).map((td) => td.textContent)).toEqual(["—", "—", "—"]);
+    expect(ws[3]).toHaveTextContent("2.4");
+    expect(ws[3]).toHaveAttribute("title", "OWS 1.6 · DWS 0.8");
+  });
+
   it("says so when no impact metric has a value, still charting the rest", async () => {
     mockApi({ [PATH]: { body: { ...PLAYER_PAGE, series: { ...PLAYER_PAGE.series, impact: [] } } } });
     renderApp("/players/1627759");

@@ -555,6 +555,8 @@ export interface components {
             garbage_time: components["schemas"]["GarbageTime"];
             header: components["schemas"]["PlayerHeader"];
             matchups: components["schemas"]["Matchups"];
+            /** Production */
+            production: components["schemas"]["ProductionRow"][];
             series: components["schemas"]["PlayerSeries"];
             /** Shot Profile */
             shot_profile: components["schemas"]["ShotZone"][];
@@ -625,6 +627,50 @@ export interface components {
             game_date: string;
             /** Value */
             value: number | null;
+        };
+        /**
+         * ProductionCell
+         * @description A metric over one production window: its value, that less the season window's, the games in
+         *     the window and whether it is short. `o_value` and `d_value` are Win Shares' offensive and
+         *     defensive parts, null for every other metric.
+         */
+        ProductionCell: {
+            /** D Value */
+            d_value: number | null;
+            /** Delta Season */
+            delta_season: number | null;
+            /** Games */
+            games: number;
+            /** Is Short */
+            is_short: boolean;
+            /** O Value */
+            o_value: number | null;
+            /** Value */
+            value: number | null;
+        };
+        /** @enum {string} */
+        ProductionFormat: "percent" | "rate" | "number" | "per_game";
+        /** @enum {string} */
+        ProductionMetric: "ts_pct" | "efg_pct" | "usg_pct" | "ast_pct" | "tov_pct" | "oreb_pct" | "dreb_pct" | "ftr" | "fg3a_rate" | "pts_per36" | "reb_per36" | "ast_per36" | "game_score" | "ws" | "vorp";
+        /** ProductionRow */
+        ProductionRow: {
+            format: components["schemas"]["ProductionFormat"];
+            /** Label */
+            label: string;
+            metric: components["schemas"]["ProductionMetric"];
+            windows: components["schemas"]["ProductionWindows"];
+        };
+        /**
+         * ProductionWindows
+         * @description A metric's cell in each production window, null where he has no such window or the metric
+         *     is not kept for it.
+         */
+        ProductionWindows: {
+            5: components["schemas"]["ProductionCell"] | null;
+            10: components["schemas"]["ProductionCell"] | null;
+            20: components["schemas"]["ProductionCell"] | null;
+            prior_season: components["schemas"]["ProductionCell"] | null;
+            season: components["schemas"]["ProductionCell"] | null;
         };
         /**
          * ProjectedStarter

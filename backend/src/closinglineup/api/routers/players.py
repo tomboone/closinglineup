@@ -18,6 +18,8 @@ first. `?window=` keeps the latest 5, 10 or 20 of them, or all for `season`:
   `player_window_stats` reads one), against the previous game he played this season;
 - the **shot profile** is `player_window_stats`' production rows on the latest game for the window,
   the season and the prior season, or before his first game of the season the prior season's only;
+- the **production** table reads the same rows for every window at once, a row per metric (v2 spec
+  §8.6), Win Shares and VORP for the season and the prior season only;
 - the **teammates** are the 5 who shared the floor with him for the most offensive possessions in
   the window's stints, garbage time as for the series, with the net rating while they did;
 - the **matchups** are the 5 defenders who guarded him, and the 5 players he guarded, for the most
@@ -57,6 +59,11 @@ from closinglineup.api.schemas import (
     PlayerPage,
     PlayerSeries,
     Point,
+    ProductionCell,
+    ProductionFormat,
+    ProductionMetric,
+    ProductionRow,
+    ProductionWindows,
     RaisedFlag,
     ShotZone,
     Teammate,
@@ -66,6 +73,7 @@ from closinglineup.api.schemas import (
 from closinglineup.db.models import (
     IMPACT_RATINGS,
     SHOT_ZONES,
+    VALUE_METRICS,
     ImpactSnapshot,
     InjuryStatus,
     Matchup,
@@ -95,6 +103,10 @@ CLOSE_MARGIN = 10
 REGULATION_SECONDS = 5 * 2880
 OVERTIME_SECONDS = 5 * 300
 OFF_REPORT = "Off the injury report"
+PRODUCTION_WINDOWS = ("5", "10", "20", "season", "prior_season")
+# Win Shares and VORP are snapshotted as season-to-date totals, so they have no 5, 10 or 20-game
+# window.
+SEASON_WINDOWS = ("season", "prior_season")
 _KIND_RANK = {"injury": 0, "transaction": 1, "starter": 2, "closer": 3}
 
 
@@ -171,6 +183,7 @@ def player_page(
             key=lambda note: (note.game_date, _KIND_RANK[note.kind]),
         ),
         shot_profile=_shot_profile(session, player_id, latest, window, day),
+        production=_production_table(session, player_id, latest, day),
         teammates=[
             Teammate(
                 player=player_ref(mate, names),
@@ -587,28 +600,16 @@ def _roles(
 def _shot_profile(
     session: Session, player_id: int, latest: date | None, window: Window, day: date
 ) -> list[ShotZone]:
-    """Each zone over the window, the season and the prior season, from his production rows on
-    `latest`; before his first game of `day`'s season, the prior season's from his last game of it.
+    """Each zone over the window, the season and the prior season, from his production rows.
     Null where he has no row or no charted attempts."""
-    rows: dict[str, Any] = {}
-    if latest is not None:
-        rows = _production(session, player_id, latest, [window, "season", "prior_season"])
-    else:
-        start, _ = season_bounds(season_label(day))
-        before = session.scalar(
-            text(
-                "SELECT max(game_date) FROM player_window_stats "
-                "WHERE player_id = :player AND team_id IS NULL AND game_date < :start"
-            ),
-            {"player": player_id, "start": start},
-        )
-        if before is not None and season_label(before) == season_label(start - timedelta(days=1)):
-            prior = _production(session, player_id, before, ["season"]).get("season")
-            rows = {} if prior is None else {"prior_season": prior}
+    columns = [f"{zone}_{part}" for zone in SHOT_ZONES for part in ("freq", "fg_pct")]
+    rows = _production_rows(
+        session, player_id, latest, day, [window, "season", "prior_season"], columns
+    )
 
     def value(name: str, column: str) -> float | None:
         row = rows.get(name)
-        return None if row is None else getattr(row, column)
+        return None if row is None else row[column]
 
     return [
         ShotZone(
@@ -624,18 +625,157 @@ def _shot_profile(
     ]
 
 
-def _production(session: Session, player_id: int, day: date, windows: list[str]) -> dict[str, Any]:
-    """His production rows' shot-profile columns on `day`, by window."""
-    columns = ", ".join(f"{zone}_freq, {zone}_fg_pct" for zone in SHOT_ZONES)
+def _production_rows(
+    session: Session,
+    player_id: int,
+    latest: date | None,
+    day: date,
+    windows: list[str],
+    columns: list[str],
+) -> dict[str, dict[str, Any]]:
+    """His production rows' `columns` in `windows` on `latest`, by window; before his first game of
+    `day`'s season, the prior season's alone, his season window at his last game of it."""
+    if latest is not None:
+        return _production(session, player_id, latest, windows, columns)
+    start, _ = season_bounds(season_label(day))
+    before = session.scalar(
+        text(
+            "SELECT max(game_date) FROM player_window_stats "
+            "WHERE player_id = :player AND team_id IS NULL AND game_date < :start"
+        ),
+        {"player": player_id, "start": start},
+    )
+    if before is None or season_label(before) != season_label(start - timedelta(days=1)):
+        return {}
+    prior = _production(session, player_id, before, ["season"], columns).get("season")
+    return {} if prior is None else {"prior_season": prior}
+
+
+def _production(
+    session: Session, player_id: int, day: date, windows: list[str], columns: list[str]
+) -> dict[str, dict[str, Any]]:
+    """His production rows' `columns` on `day`, by window."""
     found = session.execute(
         text(
-            f'SELECT "window", {columns} FROM player_window_stats '
+            f'SELECT "window", {", ".join(columns)} FROM player_window_stats '
             "WHERE player_id = :player AND team_id IS NULL AND game_date = :day "
             'AND "window" = ANY(:windows)'
         ),
         {"player": player_id, "day": day, "windows": windows},
+    ).mappings()
+    return {row["window"]: dict(row) for row in found}
+
+
+# Production table.
+
+
+class _Metric(NamedTuple):
+    metric: ProductionMetric
+    label: str
+    format: ProductionFormat
+    column: str
+    windows: tuple[str, ...] = PRODUCTION_WINDOWS
+
+
+# v2 spec §8.6's order.
+PRODUCTION_METRICS = (
+    _Metric("ts_pct", "TS%", "percent", "ts_pct"),
+    _Metric("efg_pct", "eFG%", "percent", "efg_pct"),
+    _Metric("usg_pct", "USG%", "percent", "usg_pct"),
+    _Metric("ast_pct", "AST%", "percent", "ast_pct"),
+    _Metric("tov_pct", "TOV%", "percent", "tov_pct"),
+    _Metric("oreb_pct", "OREB%", "percent", "oreb_pct"),
+    _Metric("dreb_pct", "DREB%", "percent", "dreb_pct"),
+    _Metric("ftr", "FTr", "rate", "ftr"),
+    _Metric("fg3a_rate", "3PAr", "rate", "fg3a_rate"),
+    _Metric("pts_per36", "PTS/36", "number", "pts_per36"),
+    _Metric("reb_per36", "REB/36", "number", "reb_per36"),
+    _Metric("ast_per36", "AST/36", "number", "ast_per36"),
+    _Metric("game_score", "Game Score", "per_game", "game_score"),
+    _Metric("ws", "Win Shares", "number", "ws_local", SEASON_WINDOWS),
+    _Metric("vorp", "VORP", "number", "vorp_local", SEASON_WINDOWS),
+)
+
+
+def _production_table(
+    session: Session, player_id: int, latest: date | None, day: date
+) -> list[ProductionRow]:
+    """Each metric over his production windows, from the rows the shot profile reads. Win Shares
+    and VORP carry no delta: the season's is to date and the prior season's whole, so their
+    difference measures how far into the season he is, not a change in him. Before his first game
+    of `day`'s season the prior season has no season to compare with, and its Win Shares and VORP
+    are that season's final snapshots, as the view's prior_season rows read them."""
+    columns = [
+        "games_in_window",
+        "is_short",
+        "ws_local_o",
+        "ws_local_d",
+        *(metric.column for metric in PRODUCTION_METRICS),
+        *(
+            f"{metric.column}_delta_season"
+            for metric in PRODUCTION_METRICS
+            if metric.windows == PRODUCTION_WINDOWS
+        ),
+    ]
+    rows = _production_rows(session, player_id, latest, day, list(PRODUCTION_WINDOWS), columns)
+    prior = rows.get("prior_season")
+    if latest is None and prior is not None:
+        prior.update({column: None for column in columns if column.endswith("_delta_season")})
+        prior.update(_final_values(session, player_id, day))
+    return [
+        ProductionRow(
+            metric=metric.metric,
+            label=metric.label,
+            format=metric.format,
+            windows=ProductionWindows.model_validate(
+                {
+                    window: _cell(metric, rows.get(window)) if window in metric.windows else None
+                    for window in PRODUCTION_WINDOWS
+                }
+            ),
+        )
+        for metric in PRODUCTION_METRICS
+    ]
+
+
+def _cell(metric: _Metric, row: dict[str, Any] | None) -> ProductionCell | None:
+    if row is None:
+        return None
+    ws = metric.metric == "ws"
+    return ProductionCell(
+        value=row[metric.column],
+        delta_season=row.get(f"{metric.column}_delta_season"),
+        games=row["games_in_window"],
+        is_short=row["is_short"],
+        o_value=row["ws_local_o"] if ws else None,
+        d_value=row["ws_local_d"] if ws else None,
+    )
+
+
+def _final_values(session: Session, player_id: int, day: date) -> dict[str, float | None]:
+    """His Win Shares, with its parts, and VORP at the end of the season before `day`'s: each
+    source's latest snapshot dated in it."""
+    start, _ = season_bounds(season_label(day))
+    prior_start, _ = season_bounds(season_label(start - timedelta(days=1)))
+    found = session.execute(
+        select(
+            ImpactSnapshot.source,
+            ImpactSnapshot.value,
+            ImpactSnapshot.o_value,
+            ImpactSnapshot.d_value,
+        )
+        .where(
+            ImpactSnapshot.player_id == player_id,
+            ImpactSnapshot.source.in_(VALUE_METRICS),
+            ImpactSnapshot.date >= prior_start,
+            ImpactSnapshot.date < start,
+        )
+        .order_by(ImpactSnapshot.date)
     ).all()
-    return {row.window: row for row in found}
+    latest = {source: (value, o_value, d_value) for source, value, o_value, d_value in found}
+    ws, ws_o, ws_d = latest.get("ws_local", (None, None, None))
+    vorp, _, _ = latest.get("vorp_local", (None, None, None))
+    return {"ws_local": ws, "ws_local_o": ws_o, "ws_local_d": ws_d, "vorp_local": vorp}
 
 
 # Teammates and matchups.
