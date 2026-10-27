@@ -519,3 +519,49 @@ body {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+.players-controls {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.players-controls input[type="number"] {
+  width: 4em;
+}
+
+.players-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.players-table th,
+.players-table td {
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.players-table .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A header is a button that sorts by its column; the sorted one's arrow says which way. */
+.players-table th button {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.players-table th[aria-sort="descending"] button::after {
+  content: " ▼";
+}
+
+.players-table th[aria-sort="ascending"] button::after {
+  content: " ▲";
+}

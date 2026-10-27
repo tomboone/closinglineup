@@ -73,6 +73,16 @@ describe("Layout", () => {
     expect(router.state.location.search).toBe("?date=2026-03-01");
   });
 
+  it("links to the league table beside the team switcher, keeping the date", async () => {
+    mockApi({ "/api/teams/BOS": TEAM_PAGE });
+    renderApp("/teams/BOS?date=2026-03-01");
+
+    expect(await screen.findByRole("link", { name: "Players" })).toHaveAttribute(
+      "href",
+      "/players?date=2026-03-01",
+    );
+  });
+
   it("shows no stale banner when every source is fresh", async () => {
     mockApi(FEED);
     renderApp("/?date=2026-03-21");

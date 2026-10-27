@@ -30,6 +30,7 @@ type InjurySource = Literal["pdf", "espn"]
 type GarbageTime = Literal["include", "exclude"]
 type GameStatus = Literal["scheduled", "final", "postponed"]
 type Window = Literal["5", "10", "20", "season"]
+type LeagueWindow = Literal["5", "10", "20", "season", "prior_season"]
 type DnpReason = Literal["cd", "injury", "inactive", "suspension", "g_league", "other"]
 type Flag = Literal[
     "minutes_cliff",
@@ -441,6 +442,40 @@ class SlatePage(BaseModel):
     date: dt.date
     last_night: dt.date | None
     games: list[SlateGame]
+
+
+# `/api/players`
+
+
+class LeagueTableRow(BaseModel):
+    """A player's latest production row in the window: his games whatever the team. `tricode` and
+    `tier` are his latest `rotation_state` on or before the date in its season, null with none;
+    `games` counts his teams' games in the window and `games_played` those he played; `impact` is
+    the row's first of DARKO and local BPM he has; `vorp` is null but for the season and the prior
+    season."""
+
+    player: PlayerRef
+    tricode: str | None
+    tier: Tier | None
+    games: int
+    games_played: int
+    minutes_per_game: float | None
+    impact: Impact | None
+    ws: float | None
+    ws_48: float | None
+    vorp: float | None
+    ts_pct: float | None
+    usg_pct: float | None
+    game_score: float | None
+
+
+class LeagueTable(BaseModel):
+    """Every player with a production row in the window, unsorted and unfiltered: the page sorts
+    and filters them."""
+
+    date: dt.date
+    window: LeagueWindow
+    rows: list[LeagueTableRow]
 
 
 # `/api/players/{id}`

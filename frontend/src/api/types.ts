@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** League Table */
+        get: operations["league_table_api_players_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players/{player_id}": {
         parameters: {
             query?: never;
@@ -504,6 +521,56 @@ export interface components {
             /** Transactions */
             transactions: components["schemas"]["TransactionSummary"][];
         };
+        /**
+         * LeagueTable
+         * @description Every player with a production row in the window, unsorted and unfiltered: the page sorts
+         *     and filters them.
+         */
+        LeagueTable: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Rows */
+            rows: components["schemas"]["LeagueTableRow"][];
+            window: components["schemas"]["LeagueWindow"];
+        };
+        /**
+         * LeagueTableRow
+         * @description A player's latest production row in the window: his games whatever the team. `tricode` and
+         *     `tier` are his latest `rotation_state` on or before the date in its season, null with none;
+         *     `games` counts his teams' games in the window and `games_played` those he played; `impact` is
+         *     the row's first of DARKO and local BPM he has; `vorp` is null but for the season and the prior
+         *     season.
+         */
+        LeagueTableRow: {
+            /** Game Score */
+            game_score: number | null;
+            /** Games */
+            games: number;
+            /** Games Played */
+            games_played: number;
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Per Game */
+            minutes_per_game: number | null;
+            player: components["schemas"]["PlayerRef"];
+            tier: components["schemas"]["Tier"] | null;
+            /** Tricode */
+            tricode: string | null;
+            /** Ts Pct */
+            ts_pct: number | null;
+            /** Usg Pct */
+            usg_pct: number | null;
+            /** Vorp */
+            vorp: number | null;
+            /** Ws */
+            ws: number | null;
+            /** Ws 48 */
+            ws_48: number | null;
+        };
+        /** @enum {string} */
+        LeagueWindow: "5" | "10" | "20" | "season" | "prior_season";
         /** @enum {string} */
         LineChange: "new" | "upgraded" | "downgraded" | "off";
         /**
@@ -1222,6 +1289,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MetaResponse"];
+                };
+            };
+        };
+    };
+    league_table_api_players_get: {
+        parameters: {
+            query?: {
+                window?: "5" | "10" | "20" | "season" | "prior_season";
+                /** @description A game date; the latest derived one if omitted. */
+                date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeagueTable"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

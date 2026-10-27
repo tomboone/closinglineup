@@ -15,8 +15,9 @@
 --   same team does, are one spell (CONTEXT.md, "Role window").
 -- * Production rows (team_id NULL; every window) carry the §7.2 metrics, Game Score (v2 spec
 --   §8.1), the latest impact snapshots and the latest value snapshots, Win Shares and VORP (v2
---   spec §8.4), and Win Shares and WS/48 over the window (NEU-2003), over the player's games
---   whatever his team (CONTEXT.md, "Production window").
+--   spec §8.4), Win Shares and WS/48 over the window (NEU-2003), and games played and minutes
+--   per game (NEU-2006), over the player's games whatever his team (CONTEXT.md, "Production
+--   window").
 --
 -- Windows count team games, not games played: a 5-game window at date d is his team's last five
 -- games through d, d included (spec §7). Every window but prior_season stays within d's season, so
@@ -31,7 +32,8 @@
 -- window computes on what it has too, and is absent, its deltas NULL, before the player's
 -- (n + 1)th team game. A production row's season window has the prior season as its prior window;
 -- a role row's season window, and prior_season, have none. The games and possession counts and
--- the impact and value snapshots, and Win Shares over the window, carry no deltas.
+-- the impact and value snapshots, Win Shares over the window, and a production row's minutes per
+-- game, carry no deltas.
 --
 -- Not here yet: §7.3's net rating of the player's three most-used 2-man combos, and on-court
 -- ratings with garbage time included, which the API's `garbage_time=include` will need.
@@ -643,6 +645,9 @@ prod_metric AS (
         games,
         -- Carried for WS/48 (v2 spec §8.4), not an output column.
         seconds,
+        -- §7.1 games played and minutes per game played, over his games whatever the team.
+        played::int AS games_played,
+        seconds / 60.0 / nullif(played, 0) AS minutes_per_game,
         -- §7.2 true shooting: points over twice the true shot attempts, a free throw attempt
         -- 0.44 of one.
         pts / nullif(2 * (fga + 0.44 * fta), 0) AS ts_pct,
@@ -722,6 +727,8 @@ prod_all AS (
         NULL,
         t.games,
         t.seconds,
+        t.games_played,
+        t.minutes_per_game,
         t.ts_pct,
         t.efg_pct,
         t.usg_pct,
@@ -950,6 +957,8 @@ prod_row AS (
         m.window_name,
         m.games AS games_in_window,
         m.games < coalesce(m.n, 0) AS is_short,
+        m.games_played,
+        m.minutes_per_game,
         m.ts_pct,
         m.ts_pct - CASE
             WHEN m.window_name = 'season'
@@ -1209,9 +1218,9 @@ SELECT
     coalesce(r.window_name, p.window_name) AS "window",
     coalesce(r.games_in_window, p.games_in_window) AS games_in_window,
     coalesce(r.is_short, p.is_short) AS is_short,
-    r.games_played,
+    coalesce(r.games_played, p.games_played) AS games_played,
     r.games_started,
-    r.minutes_per_game,
+    coalesce(r.minutes_per_game, p.minutes_per_game) AS minutes_per_game,
     r.minutes_per_game_delta_prior,
     r.minutes_per_game_delta_season,
     r.minutes_share,
