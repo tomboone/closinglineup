@@ -14,7 +14,7 @@ from closinglineup.derive.bpm import PlayerLine, TeamBox, TeamLine, compute, sea
 from closinglineup.derive.value import (
     LeagueContext,
     PlayerSeason,
-    StintWinShares,
+    TeamWinShares,
     available_seconds,
     compute_value,
     league_context,
@@ -96,26 +96,28 @@ def test_every_regulars_win_shares_are_within_the_published_value() -> None:
     assert [f"{row['bref_id']}/{row['team']}" for row in rows] == keys
 
     regulars = 0
-    for stint in season_win_shares(lines, teams):
-        if stint.minutes < 1000:
+    for share in season_win_shares(lines, teams):
+        if share.minutes < 1000:
             continue
         regulars += 1
-        row = rows[stint.player_id - 1]
-        name = published[keys[stint.player_id - 1]]["player"]
+        row = rows[share.player_id - 1]
+        name = published[keys[share.player_id - 1]]["player"]
         # The spec's tolerance is ±0.5 of each; the published values are rounded to a tenth, and
         # the formulas over the published totals land within 0.1 of all three.
-        assert stint.ows == pytest.approx(float(row["ows"]), abs=0.1), name
-        assert stint.dws == pytest.approx(float(row["dws"]), abs=0.1), name
-        assert stint.ows + stint.dws == pytest.approx(float(row["ws"]), abs=0.1), name
+        assert share.ows == pytest.approx(float(row["ows"]), abs=0.1), name
+        assert share.dws == pytest.approx(float(row["dws"]), abs=0.1), name
+        assert share.ows + share.dws == pytest.approx(float(row["ws"]), abs=0.1), name
     assert regulars == 263
 
 
 def test_league_win_shares_total_within_three_percent_of_league_wins() -> None:
     lines, teams, _ = bref_season()
 
-    total = sum(stint.ows + stint.dws for stint in season_win_shares(lines, teams))
+    shares = season_win_shares(lines, teams)
+    total = sum(share.ows + share.dws for share in shares)
 
-    # 82 games a team, 30 teams, a win a game.
+    # Every player-team row has Win Shares; 82 games a team, 30 teams, a win a game.
+    assert len(shares) == 661
     assert total == pytest.approx(82 * 30 / 2, rel=0.03)
 
 
@@ -160,12 +162,12 @@ def test_win_shares_follow_the_published_method_by_hand() -> None:
     assert (LEAGUE.pts, LEAGUE.possessions, LEAGUE.team_games) == (17800, 2 * POSSESSIONS, 164)
     assert LEAGUE.pace == pytest.approx(95.4259, abs=1e-4)
 
-    stint = win_shares(LINE, _team(), LEAGUE)
+    share = win_shares(LINE, _team(), LEAGUE)
 
-    assert stint is not None
-    assert (stint.player_id, stint.team_id, stint.minutes) == (7, TEAM, 2400.0)
-    assert stint.ows == pytest.approx(4.3698, abs=1e-4)
-    assert stint.dws == pytest.approx(2.5617, abs=1e-4)
+    assert share is not None
+    assert (share.player_id, share.team_id, share.minutes) == (7, TEAM, 2400.0)
+    assert share.ows == pytest.approx(4.3698, abs=1e-4)
+    assert share.dws == pytest.approx(2.5617, abs=1e-4)
 
 
 @pytest.mark.parametrize(
@@ -180,12 +182,12 @@ def test_win_shares_follow_the_published_method_by_hand() -> None:
 def test_a_players_zero_denominators_are_zero(changes: dict[str, int]) -> None:
     whole = win_shares(LINE, _team(), LEAGUE)
 
-    stint = win_shares(replace(LINE, **changes), _team(), LEAGUE)
+    share = win_shares(replace(LINE, **changes), _team(), LEAGUE)
 
     # His points are gone with what they cost, so his offense is worse; his defense is untouched.
-    assert whole is not None and stint is not None
-    assert math.isfinite(stint.ows) and stint.ows < whole.ows
-    assert stint.dws == whole.dws
+    assert whole is not None and share is not None
+    assert math.isfinite(share.ows) and share.ows < whole.ows
+    assert share.dws == whole.dws
 
 
 def test_a_team_with_no_fouls_gives_no_foul_share() -> None:
@@ -204,34 +206,36 @@ def test_a_team_with_no_fouls_gives_no_foul_share() -> None:
         TeamLine(TEAM, 1, 48.0, 0.0, 0, 0, TEAM_BOX, OPP_BOX),
         _team(box=TEAM_BOX._replace(fga=0)),
         _team(box=TEAM_BOX._replace(fta=0, ftm=0)),
+        # Free throws taken but nothing made: no scoring possessions.
+        _team(box=TEAM_BOX._replace(fgm=0, ftm=0)),
         _team(opp=OPP_BOX._replace(fga=0, fgm=0)),
         _team(opp=OPP_BOX._replace(fta=0, ftm=0)),
     ],
 )
-def test_a_team_without_the_box_its_formulas_divide_by_gives_no_stint(team: TeamLine) -> None:
+def test_a_team_without_the_box_its_formulas_divide_by_gives_none(team: TeamLine) -> None:
     assert win_shares(LINE, team, LEAGUE) is None
 
 
-def test_a_stint_of_no_minutes_is_none() -> None:
+def test_a_line_of_no_minutes_gives_none() -> None:
     assert win_shares(replace(LINE, minutes=0.0), _team(), LEAGUE) is None
 
 
-def test_a_league_without_possessions_has_no_context_or_stints() -> None:
+def test_a_league_without_possessions_has_no_context_or_win_shares() -> None:
     empty = TeamLine(TEAM, 0, 0.0, 0.0, 0, 0, OPP_BOX, OPP_BOX)
 
     assert league_context([empty]) is None
     assert season_win_shares([LINE], {TEAM: empty}) == []
 
 
-def test_ws_rows_sum_a_traded_players_stints_and_drop_a_player_under_a_minute() -> None:
+def test_ws_rows_sum_a_traded_players_teams_and_drop_a_player_under_a_minute() -> None:
     day = date(2026, 10, 27)
-    stints = [
-        StintWinShares(8, 2, 0.5, 0.01, 0.01),
-        StintWinShares(7, 2, 600.04, 1.23456, -0.5),
-        StintWinShares(7, 1, 1200.0, 2.0, 1.11111),
+    shares = [
+        TeamWinShares(8, 2, 0.5, 0.01, 0.01),
+        TeamWinShares(7, 2, 600.04, 1.23456, -0.5),
+        TeamWinShares(7, 1, 1200.0, 2.0, 1.11111),
     ]
 
-    assert ws_rows(day, stints) == [
+    assert ws_rows(day, shares) == [
         ImpactSnapshotRow(day, 7, "ws_local", 3.846, 3.235, 0.611, 1800.0),
     ]
 
@@ -470,7 +474,7 @@ def test_compute_value_writes_every_player_with_a_minutes_win_shares(
     with seeded() as session:
         lines, teams = season_lines(session, "2026-27", THROUGH)
 
-    # The traded player's two stints, GSW's and DEN's, summed into one row of his 60 minutes.
+    # The traded player's two lines, GSW's and DEN's, summed into one row of his 60 minutes.
     expected = {row.player_id: row for row in ws_rows(THROUGH, season_win_shares(lines, teams))}
     assert result["ws_players"] == len(expected) == len({line.player_id for line in lines})
     for player_id, minutes in ((TRADED, 60.0), (BENCH, 12.0), (UNLISTED, 40.0)):

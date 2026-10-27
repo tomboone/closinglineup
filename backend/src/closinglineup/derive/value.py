@@ -1,6 +1,7 @@
 """The value metrics, VORP and Win Shares, computed here and written to `impact_snapshot` beside
-the impact ratings as `source='vorp_local'` and `source='ws_local'` (v2 spec §8.2 to 8.4). They are
-value metrics, not ratings: `IMPACT_PREFERENCE` and the player page's impact chart leave them out.
+the impact metrics as `source='vorp_local'` and `source='ws_local'` (v2 spec §8.2 to 8.4). They are
+value metrics, not impact metrics: `IMPACT_PREFERENCE` and the player page's impact chart leave
+them out.
 
 VORP: Basketball Reference's, "About Box Plus/Minus (BPM)",
 https://www.basketball-reference.com/about/bpm2.html: the points per 100 team possessions a player
@@ -20,15 +21,16 @@ whatever the roster spans say, so every player with a BPM has a share.
 
 Win Shares: Basketball Reference's, "Calculating Win Shares",
 https://www.basketball-reference.com/about/ws.html, with the individual offensive and defensive
-ratings it takes from Dean Oliver, *Basketball on Paper* (2004). Computed per player-team stint
-over the season's regular-season games final through the date, each stint from the player's totals
-on that team and the team's in the games it played (`derive.bpm.season_lines`), as the published
-per-team row is; a player's row is the sum of his stints, as the published season row (`TOT`) is.
+ratings it takes from Dean Oliver, *Basketball on Paper* (2004). Computed per player-team line
+over the season's regular-season games final through the date, each from the player's totals on
+that team and the team's in the games it played (`derive.bpm.season_lines`), as the published
+per-team row is; a player's row is the sum of his teams', as the published season row (`TOT`) is.
 
-A stint's totals are `MP, FGM, FGA, FG3M, FTM, FTA, ORB, DRB, AST, STL, BLK, TOV, PF, PTS`; its
-team's carry a `Tm_` prefix and its opponents' in those games an `Opp_` prefix, each its players'
-sums (`TeamLine.box`, `TeamLine.opp_box`). `Tm_MP` is the five players' minutes together, five
-times the game clock (`TeamLine.minutes`), and `Opp_MP` equals it, the same games' clocks.
+A player-team line's totals are `MP, FGM, FGA, FG3M, FTM, FTA, ORB, DRB, AST, STL, BLK, TOV, PF,
+PTS`; its team's carry a `Tm_` prefix and its opponents' in those games an `Opp_` prefix, each its
+players' sums (`TeamLine.box`, `TeamLine.opp_box`), points too rather than the schedule's score.
+`Tm_MP` is the five players' minutes together, five times the game clock (`TeamLine.minutes`),
+and `Opp_MP` equals it, the same games' clocks.
 `Tm_Poss` is the team's possessions, Basketball Reference's two-sided estimate over each game's box
 totals (`derive.bpm.possessions`), not counted from `stint`, so the result is comparable with the
 published one. `Lg_PTS`, `Lg_Poss` and `Lg_G`, the team-games, are the sums over every team with
@@ -90,8 +92,8 @@ Defensive Win Shares, from Oliver's individual defensive rating over the team's 
 A ratio whose denominator is zero is zero: no free throws make the free-throw terms zero, no field
 goal attempts the `(PTS - FTM) / (2 * FGA)` factor, no team fouls the foul share. A team with no
 possessions, scoring possessions, field goal or free throw attempts, or opponents' field goal or
-free throw attempts (one with no real box yet) gives its players no stint, and a stint of no
-minutes is none.
+free throw attempts (one with no real box yet) gives its players no Win Shares, and nor does
+a line of no minutes.
 
 Where this departs from the published values: `Tm_TOV` and `Opp_TOV` are the players' sums, since
 turnovers charged to a team are not in `player_game` (as in `derive.bpm`); they enter only
@@ -292,7 +294,7 @@ class LeagueContext:
 
 
 @dataclass(frozen=True, slots=True)
-class StintWinShares:
+class TeamWinShares:
     """A player's offensive and defensive Win Shares on one team."""
 
     player_id: int
@@ -308,7 +310,7 @@ def _div(numerator: float, denominator: float) -> float:
 
 
 def _rated(team: TeamLine) -> bool:
-    """Whether the team's box carries everything a stint's formulas divide by."""
+    """Whether the team's box carries everything a line's formulas divide by."""
     box, opp = team.box, team.opp_box
     return team.possessions > 0 and team.minutes > 0 and min(box.fga, box.fta, opp.fga, opp.fta) > 0
 
@@ -331,9 +333,9 @@ def league_context(teams: Iterable[TeamLine]) -> LeagueContext | None:
     )
 
 
-def win_shares(line: PlayerLine, team: TeamLine, league: LeagueContext) -> StintWinShares | None:
+def win_shares(line: PlayerLine, team: TeamLine, league: LeagueContext) -> TeamWinShares | None:
     """The player's Win Shares on `team`, by the formulas in the module docstring; None for a
-    stint of no minutes or a team without the box they divide by."""
+    line of no minutes or a team without the box they divide by."""
     if line.minutes <= 0 or not _rated(team):
         return None
     tm, opp = team.box, team.opp_box
@@ -400,7 +402,7 @@ def win_shares(line: PlayerLine, team: TeamLine, league: LeagueContext) -> Stint
         (mp / tm_mp) * tm_poss * (REPLACEMENT_DEFENSE * league.points_per_possession - drtg / 100)
     )
 
-    return StintWinShares(
+    return TeamWinShares(
         line.player_id,
         team.team_id,
         mp,
@@ -411,33 +413,33 @@ def win_shares(line: PlayerLine, team: TeamLine, league: LeagueContext) -> Stint
 
 def season_win_shares(
     lines: Iterable[PlayerLine], teams: Mapping[int, TeamLine]
-) -> list[StintWinShares]:
-    """Every stint's Win Shares over the lines of `teams`, the league's context theirs; a line of
-    a team not in `teams` has none."""
+) -> list[TeamWinShares]:
+    """Every player-team line's Win Shares over the lines of `teams`, the league's context
+    theirs; a line of a team not in `teams` has none."""
     league = league_context(teams.values())
     if league is None:
         return []
     return [
-        stint
+        share
         for line in lines
         if line.team_id in teams
-        and (stint := win_shares(line, teams[line.team_id], league)) is not None
+        and (share := win_shares(line, teams[line.team_id], league)) is not None
     ]
 
 
-def ws_rows(day: date, stints: Iterable[StintWinShares]) -> list[ImpactSnapshotRow]:
-    """`day`'s `ws_local` rows: one per player with `MIN_MINUTES` or more over his stints, their
+def ws_rows(day: date, shares: Iterable[TeamWinShares]) -> list[ImpactSnapshotRow]:
+    """`day`'s `ws_local` rows: one per player with `MIN_MINUTES` or more over his teams, their
     Win Shares summed and his minutes the basis, rounded so a re-run writes nothing."""
-    by_player: dict[int, list[StintWinShares]] = defaultdict(list)
-    for stint in stints:
-        by_player[stint.player_id].append(stint)
+    by_player: dict[int, list[TeamWinShares]] = defaultdict(list)
+    for share in shares:
+        by_player[share.player_id].append(share)
     rows: list[ImpactSnapshotRow] = []
     for player_id, played in sorted(by_player.items()):
-        minutes = sum(stint.minutes for stint in played)
+        minutes = sum(share.minutes for share in played)
         if minutes < MIN_MINUTES:
             continue
-        ows = sum(stint.ows for stint in played)
-        dws = sum(stint.dws for stint in played)
+        ows = sum(share.ows for share in played)
+        dws = sum(share.dws for share in played)
         rows.append(
             ImpactSnapshotRow(
                 day,
