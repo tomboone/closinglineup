@@ -164,9 +164,11 @@ body {
   color: #cf222e;
 }
 
+/* The default 120 px of line plus the end label's 40 px (`END_LABEL_ROOM` in SparklineCell). */
 .team-page .chart-sparkline {
   display: inline-block;
   vertical-align: middle;
+  width: 160px;
 }
 
 .player-header .tier {

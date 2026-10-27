@@ -138,9 +138,9 @@ describe("/dev/charts", () => {
     for (const chart of ["SparklineCell", "AnnotatedTimeSeries", "StintTimeline", "ShotProfile"]) {
       expect(screen.getByRole("heading", { name: chart })).toBeInTheDocument();
     }
-    // Three sparklines and one of each other chart. The charts set their options in an effect, which
+    // Four sparklines and one of each other chart. The charts set their options in an effect, which
     // can land after the lazily loaded page's headings do.
-    await waitFor(() => expect(allOptions()).toHaveLength(6));
+    await waitFor(() => expect(allOptions()).toHaveLength(7));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

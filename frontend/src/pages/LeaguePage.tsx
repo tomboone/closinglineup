@@ -485,7 +485,16 @@ function MoverTable({
             <td className={`number ${mover.delta > 0 ? "trend-up" : "trend-down"}`}>
               {minutes ? `${signed(mover.delta * 100)} pts` : signed(mover.delta)}
             </td>
-            <td>{mover.value !== null && <MoverSparkline value={mover.value} delta={mover.delta} range={range} />}</td>
+            <td>
+              {mover.value !== null && (
+                <MoverSparkline
+                  value={mover.value}
+                  delta={mover.delta}
+                  range={range}
+                  format={minutes ? percent : signed}
+                />
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -508,10 +517,12 @@ function MoverSparkline({
   value,
   delta,
   range,
+  format,
 }: {
   value: number;
   delta: number;
   range: SparklineRange | undefined;
+  format: (value: number) => string;
 }) {
   return (
     <SparklineCell
@@ -520,6 +531,7 @@ function MoverSparkline({
         { game_date: "last 10", value },
       ]}
       range={range}
+      format={format}
     />
   );
 }
