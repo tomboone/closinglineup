@@ -2,6 +2,7 @@ import type { RouteObject } from "react-router";
 import GamePage from "./pages/GamePage";
 import LeaguePage from "./pages/LeaguePage";
 import PlayerPage from "./pages/PlayerPage";
+import PlayersPage from "./pages/PlayersPage";
 import TeamPage from "./pages/TeamPage";
 import Layout from "./shell/Layout";
 
@@ -12,6 +13,7 @@ export const routes: RouteObject[] = [
     children: [
       { path: "/", element: <LeaguePage /> },
       { path: "/teams/:tricode", element: <TeamPage /> },
+      { path: "/players", element: <PlayersPage /> },
       { path: "/players/:id", element: <PlayerPage /> },
       { path: "/games/:gameId", element: <GamePage /> },
     ],

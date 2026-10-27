@@ -9,6 +9,7 @@ export type MetaResponse = Schemas["MetaResponse"];
 export type TeamsResponse = Schemas["TeamsResponse"];
 export type TeamPage = Schemas["TeamPage"];
 export type PlayerPage = Schemas["PlayerPage"];
+export type LeagueTable = Schemas["LeagueTable"];
 export type LeaguePage = Schemas["LeaguePage"];
 export type GamePage = Schemas["GamePage"];
 export type SlatePage = Schemas["SlatePage"];
@@ -17,6 +18,7 @@ type Query<Op extends keyof operations> = NonNullable<operations[Op]["parameters
 
 export type TeamQuery = Query<"team_page_api_teams__tricode__get">;
 export type PlayerQuery = Query<"player_page_api_players__player_id__get">;
+export type LeagueTableQuery = Query<"league_table_api_players_get">;
 export type LeagueQuery = Query<"league_api_league_get">;
 export type GameQuery = Query<"game_page_api_games__game_id__get">;
 export type SlateQuery = Query<"slate_api_slate_get">;
@@ -75,6 +77,10 @@ export function getTeam(tricode: string, query: TeamQuery = {}) {
 
 export function getPlayer(playerId: number, query: PlayerQuery = {}) {
   return get<PlayerPage>(apiUrl(`/api/players/${playerId}`, query));
+}
+
+export function getLeagueTable(query: LeagueTableQuery = {}) {
+  return get<LeagueTable>(apiUrl("/api/players", query));
 }
 
 export function getLeague(query: LeagueQuery = {}) {

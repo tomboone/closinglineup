@@ -658,6 +658,25 @@ def test_a_traded_players_role_windows_restart_and_his_production_windows_contin
     assert first_for_uta["ts_pct"] == pytest.approx((4 * 8 + 12) / (2 * (4 * 6 + 8 + 0.44 * 12)))
 
 
+def test_a_traded_players_production_games_and_minutes_span_both_teams(
+    seeded: sessionmaker[Session],
+) -> None:
+    ten = _row(seeded, TRADED, None, "10", _day(12))
+    season = _row(seeded, TRADED, None, "season", _day(12))
+
+    # SAC's games 3 to 6 at 20 minutes and UTA's six at 30.
+    assert ten["games_played"] == 10
+    assert ten["minutes_per_game"] == pytest.approx((4 * 20 + 6 * 30) / 10)
+    assert season["games_played"] == 12
+    assert season["minutes_per_game"] == pytest.approx((6 * 20 + 6 * 30) / 12)
+    # The fixture player's season: 18 of SAC's 20 games, 20 + g minutes in each he played.
+    fixture = _row(seeded, FIXTURE, None, "season", _day(20))
+    assert fixture["games_played"] == 18
+    assert fixture["minutes_per_game"] == pytest.approx(
+        sum(_fixture_minutes(g) for g in SAC_GAMES) / 18
+    )
+
+
 def test_refresh_windows_is_idempotent(seeded: sessionmaker[Session]) -> None:
     before = _rows(seeded, FIXTURE, SAC, "20")
 
@@ -684,6 +703,6 @@ def test_a_second_game_on_a_teams_date_counts_once_and_the_refresh_holds(
 
 def test_views_sql_is_the_view_migration_s_copy() -> None:
     versions = DB_DIR / "alembic" / "versions"
-    copy = versions / "d2a9f3b8e614_player_window_stats_windowed_win_shares.sql"
+    copy = versions / "f3c8a1d6b902_player_window_stats_production_minutes.sql"
 
     assert (DB_DIR / "views.sql").read_text() == copy.read_text()

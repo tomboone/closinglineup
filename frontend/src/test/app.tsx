@@ -5,6 +5,7 @@ import { vi } from "vitest";
 import type {
   GamePage,
   LeaguePage,
+  LeagueTable,
   MetaResponse,
   PlayerPage,
   SlatePage,
@@ -64,6 +65,8 @@ const HOLIDAY = player(201950, "Jrue Holiday");
 const PORZINGIS = player(204001, "Kristaps Porzingis");
 const PRITCHARD = player(1630202, "Payton Pritchard");
 const DAVISON = player(1630486, "JD Davison");
+const EMBIID = player(203954, "Joel Embiid");
+const MAXEY = player(1630178, "Tyrese Maxey");
 
 const boardRow = (
   ref: { player_id: number; name: string },
@@ -306,6 +309,45 @@ export const PLAYER_PAGE: PlayerPage = {
     },
   ],
   contract: null,
+};
+
+type LeagueTableRow = LeagueTable["rows"][number];
+
+const tableRow = (
+  ref: { player_id: number; name: string },
+  tricode: string | null,
+  extra: Partial<LeagueTableRow> = {},
+): LeagueTableRow => ({
+  player: ref,
+  tricode,
+  tier: "core",
+  games: 20,
+  games_played: 20,
+  minutes_per_game: 30,
+  impact: { source: "darko", value: 1.0 },
+  ws: 2.0,
+  ws_48: 0.15,
+  vorp: 0.5,
+  ts_pct: 0.58,
+  usg_pct: 0.22,
+  game_score: 12.0,
+  ...extra,
+});
+
+/**
+ * The league table over the season to 2026-03-20, in no order as the API sends it: four players
+ * who qualify by default, a 20-minute one among them, and one under 15 minutes a game.
+ */
+export const LEAGUE_TABLE: LeagueTable = {
+  date: "2026-03-20",
+  window: "season",
+  rows: [
+    tableRow(MAXEY, "PHI", { minutes_per_game: 36, ws_48: 0.15, ts_pct: 0.58 }),
+    tableRow(PRITCHARD, "BOS", { minutes_per_game: 20, ws_48: 0.1, ts_pct: 0.64, impact: null }),
+    tableRow(EMBIID, "PHI", { games_played: 18, minutes_per_game: 33, ws_48: 0.25, ts_pct: 0.62 }),
+    tableRow(DAVISON, "BOS", { minutes_per_game: 8, ws_48: 0.3, ts_pct: 0.7, tier: "out" }),
+    tableRow(TATUM, "BOS", { tier: "starter", minutes_per_game: 36, ws_48: 0.2, ts_pct: 0.6 }),
+  ],
 };
 
 const mover = (

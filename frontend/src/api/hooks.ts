@@ -3,6 +3,7 @@ import {
   ApiError,
   getGame,
   getLeague,
+  getLeagueTable,
   getMeta,
   getPlayer,
   getSlate,
@@ -10,6 +11,7 @@ import {
   getTeams,
   type GameQuery,
   type LeagueQuery,
+  type LeagueTableQuery,
   type PlayerQuery,
   type SlateQuery,
   type TeamQuery,
@@ -49,6 +51,10 @@ export function usePlayer(playerId: number, query: PlayerQuery) {
     queryKey: ["player", playerId, query],
     queryFn: () => getPlayer(playerId, query),
   });
+}
+
+export function useLeagueTable(query: LeagueTableQuery) {
+  return useQuery({ queryKey: ["league-table", query], queryFn: () => getLeagueTable(query) });
 }
 
 /** `enabled` false holds the query until what it needs is known (the feed's last night). */

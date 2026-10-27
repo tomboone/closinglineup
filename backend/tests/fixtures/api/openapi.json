@@ -954,6 +954,184 @@
         "title": "LeaguePage",
         "type": "object"
       },
+      "LeagueTable": {
+        "description": "Every player with a production row in the window, unsorted and unfiltered: the page sorts\nand filters them.",
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/LeagueTableRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "window": {
+            "$ref": "#/components/schemas/LeagueWindow"
+          }
+        },
+        "required": [
+          "date",
+          "window",
+          "rows"
+        ],
+        "title": "LeagueTable",
+        "type": "object"
+      },
+      "LeagueTableRow": {
+        "description": "A player's latest production row in the window: his games whatever the team. `tricode` and\n`tier` are his latest `rotation_state` on or before the date in its season, null with none;\n`games` counts his teams' games in the window and `games_played` those he played; `impact` is\nthe row's first of DARKO and local BPM he has; `vorp` is null but for the season and the prior\nseason.",
+        "properties": {
+          "game_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Game Score"
+          },
+          "games": {
+            "title": "Games",
+            "type": "integer"
+          },
+          "games_played": {
+            "title": "Games Played",
+            "type": "integer"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Impact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minutes_per_game": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes Per Game"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tricode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tricode"
+          },
+          "ts_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts Pct"
+          },
+          "usg_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usg Pct"
+          },
+          "vorp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vorp"
+          },
+          "ws": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ws"
+          },
+          "ws_48": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ws 48"
+          }
+        },
+        "required": [
+          "player",
+          "tricode",
+          "tier",
+          "games",
+          "games_played",
+          "minutes_per_game",
+          "impact",
+          "ws",
+          "ws_48",
+          "vorp",
+          "ts_pct",
+          "usg_pct",
+          "game_score"
+        ],
+        "title": "LeagueTableRow",
+        "type": "object"
+      },
+      "LeagueWindow": {
+        "enum": [
+          "5",
+          "10",
+          "20",
+          "season",
+          "prior_season"
+        ],
+        "type": "string"
+      },
       "LineChange": {
         "enum": [
           "new",
@@ -3033,6 +3211,72 @@
           }
         },
         "summary": "Meta"
+      }
+    },
+    "/api/players": {
+      "get": {
+        "operationId": "league_table_api_players_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "season",
+              "enum": [
+                "5",
+                "10",
+                "20",
+                "season",
+                "prior_season"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A game date; the latest derived one if omitted.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A game date; the latest derived one if omitted.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeagueTable"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "League Table"
       }
     },
     "/api/players/{player_id}": {

@@ -4,9 +4,9 @@ import { easternToday, useShellParams } from "./params";
 import StaleBanner from "./StaleBanner";
 
 /**
- * The app shell: a header with the team switcher and the global controls, above every page. The
- * date picker reaches today: on the feed its date is a morning, today when unset; elsewhere it is a
- * game date, the latest derived when unset (v2 spec §3).
+ * The app shell: a header with the team switcher, the league table's link and the global controls,
+ * above every page. The date picker reaches today: on the feed its date is a morning, today when
+ * unset; elsewhere it is a game date, the latest derived when unset (v2 spec §3).
  */
 function Layout() {
   const meta = useMeta();
@@ -23,6 +23,7 @@ function Layout() {
           closinglineup
         </Link>
         <TeamSwitcher />
+        <Link to={{ pathname: "/players", search }}>Players</Link>
         <label>
           Date{" "}
           <input

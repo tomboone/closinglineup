@@ -1,4 +1,4 @@
-"""`GET /api/players/{id}`: a player's page (spec §8).
+"""`GET /api/players/{id}`: a player's page (spec §8); and `GET /api/players`, the league table.
 
 The page reads the player's team games: the final games of the date's season through the date that
 a team of his played while he was on its roster, as `player_window_stats` keys its role rows, oldest
@@ -30,6 +30,13 @@ first. `?window=` keeps the latest 5, 10 or 20 of them, or all for `season`:
 - the **flags** are those raised on him this season through the date, newest first;
 - the **contract** is his with the team whose roster he is on, as its page's contract notes read
   one.
+
+The league table (NEU-2006) is every player's latest production row in the window on or before the
+date, read in one query: the view has a production row only on his teams' game dates, so reading
+the date's alone would drop every team idle that night. `prior_season` reads the season window at
+each player's last game of the prior season, so a player who has not played this season is listed
+too, with that season's final value snapshots, as the view's prior_season rows carry them. Its
+tier and team are his latest `rotation_state` in the date's season, the header's rule.
 """
 
 from bisect import bisect_right
@@ -42,10 +49,12 @@ from typing import Any, NamedTuple, cast
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import and_, exists, func, or_, select, text, tuple_
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
 from closinglineup.api.deps import DateDep, SessionDep
 from closinglineup.api.routers.teams import (
+    FEED_IMPACT_PREFERENCE,
     StintRow,
     Totals,
     contract_note,
@@ -61,8 +70,12 @@ from closinglineup.api.schemas import (
     Badge,
     Flag,
     GarbageTime,
+    Impact,
     ImpactSeries,
     InjuryLine,
+    LeagueTable,
+    LeagueTableRow,
+    LeagueWindow,
     MatchupRow,
     Matchups,
     PlayerHeader,
@@ -976,3 +989,112 @@ def _flags(session: Session, player_id: int, day: date) -> list[PlayerFlag]:
             .order_by(PlayerFlag.game_date.desc(), PlayerFlag.flag)
         )
     )
+
+
+# League table.
+
+
+@router.get("/api/players")
+def league_table(session: SessionDep, day: DateDep, window: LeagueWindow = "season") -> LeagueTable:
+    season_start, _ = season_bounds(season_label(day))
+    if window == "prior_season":
+        start, end = season_bounds(season_label(season_start - timedelta(days=1)))
+        stored = "season"
+    else:
+        start, end, stored = season_start, day, window
+    found = session.execute(
+        text(
+            "SELECT DISTINCT ON (player_id) player_id, games_in_window, games_played, "
+            "minutes_per_game, darko, bpm_local, ws_window, ws_48, vorp_local, ts_pct, usg_pct, "
+            "game_score FROM player_window_stats "
+            'WHERE team_id IS NULL AND "window" = :window AND game_date BETWEEN :start AND :end '
+            "ORDER BY player_id, game_date DESC"
+        ),
+        {"window": stored, "start": start, "end": end},
+    ).mappings()
+    rows = [dict(row) for row in found]
+    if window == "prior_season":
+        _with_final_values(session, rows, start, end)
+    player_ids = {row["player_id"] for row in rows}
+    names = player_names(session, player_ids)
+    states = _latest_states(session, player_ids, season_start, day)
+    table: list[LeagueTableRow] = []
+    for row in rows:
+        state = states.get(row["player_id"])
+        table.append(
+            LeagueTableRow(
+                player=player_ref(row["player_id"], names),
+                tricode=None if state is None else by_nba_team_id(state.team_id).tricode,
+                tier=None if state is None else cast(Tier, state.tier),
+                games=row["games_in_window"],
+                games_played=row["games_played"],
+                minutes_per_game=row["minutes_per_game"],
+                impact=next(
+                    (
+                        Impact(source=cast(Any, source), value=row[source])
+                        for source in FEED_IMPACT_PREFERENCE
+                        if row[source] is not None
+                    ),
+                    None,
+                ),
+                ws=row["ws_window"],
+                ws_48=row["ws_48"],
+                vorp=row["vorp_local"] if window in SEASON_WINDOWS else None,
+                ts_pct=row["ts_pct"],
+                usg_pct=row["usg_pct"],
+                game_score=row["game_score"],
+            )
+        )
+    return LeagueTable(date=day, window=window, rows=table)
+
+
+def _with_final_values(
+    session: Session, rows: list[dict[str, Any]], start: date, end: date
+) -> None:
+    """Sets each row's Win Shares, WS/48 and VORP to the season's final snapshots, as the view's
+    prior_season rows read them: a snapshot after his last game, written while he was waived or
+    hurt, still counts the season's league context."""
+    final = {
+        (player_id, source): value
+        for player_id, source, value in session.execute(
+            select(ImpactSnapshot.player_id, ImpactSnapshot.source, ImpactSnapshot.value)
+            .ext(distinct_on(ImpactSnapshot.player_id, ImpactSnapshot.source))
+            .where(
+                ImpactSnapshot.player_id.in_({row["player_id"] for row in rows}),
+                ImpactSnapshot.source.in_(("ws_local", "vorp_local")),
+                ImpactSnapshot.date >= start,
+                ImpactSnapshot.date <= end,
+            )
+            .order_by(ImpactSnapshot.player_id, ImpactSnapshot.source, ImpactSnapshot.date.desc())
+        )
+    }
+    for row in rows:
+        ws = final.get((row["player_id"], "ws_local"))
+        minutes = (row["minutes_per_game"] or 0) * row["games_played"]
+        row["ws_window"] = ws
+        row["ws_48"] = None if ws is None or minutes == 0 else ws * 48 / minutes
+        row["vorp_local"] = final.get((row["player_id"], "vorp_local"))
+
+
+class _State(NamedTuple):
+    team_id: int
+    tier: str
+
+
+def _latest_states(
+    session: Session, player_ids: set[int], start: date, day: date
+) -> dict[int, _State]:
+    """Each player's latest `rotation_state` from `start` through `day`, by player."""
+    if not player_ids:
+        return {}
+    found = session.execute(
+        select(RotationState.player_id, RotationState.team_id, RotationState.tier)
+        .ext(distinct_on(RotationState.player_id))
+        .where(
+            RotationState.player_id.in_(player_ids),
+            RotationState.game_date >= start,
+            RotationState.game_date <= day,
+        )
+        .order_by(RotationState.player_id, RotationState.game_date.desc())
+    )
+    return {player_id: _State(team_id, tier) for player_id, team_id, tier in found}
