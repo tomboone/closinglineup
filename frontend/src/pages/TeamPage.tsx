@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import type { TeamPage as TeamPageData } from "../api/client";
 import { useTeam } from "../api/hooks";
@@ -5,11 +6,23 @@ import AvailabilityBoard from "../components/AvailabilityBoard";
 import { money } from "../components/format";
 import LineupTable from "../components/LineupTable";
 import PlayerLink, { PlayerList } from "../components/PlayerLink";
+import TabList from "../components/TabList";
+import { tabIds } from "../components/tabIds";
 import TierBoard from "../components/TierBoard";
-import { useShellParams } from "../shell/params";
+import { TEAM_TABS, type TeamTab, useShellParams } from "../shell/params";
 import QueryStatus from "./QueryStatus";
 
-/** The daily-driver view of one team: its rotation, lineups, availability and contracts. */
+const TAB_LABELS: Record<TeamTab, string> = {
+  rotation: "Rotation",
+  availability: "Availability",
+  lineups: "Lineups",
+  contracts: "Contracts",
+};
+
+/**
+ * The daily-driver view of one team: its rotation, availability, lineups and contracts, a tab each
+ * in one full-width column (NEU-2001).
+ */
 function TeamPage() {
   const tricode = useParams().tricode ?? "";
   const { date, garbageTime } = useShellParams();
@@ -26,6 +39,9 @@ function TeamPage() {
 function TeamPageBody({ page }: { page: TeamPageData }) {
   const { roster } = page;
   const garbage = page.garbage_time === "include" ? "included" : "excluded";
+  const { teamTab, setTeamTab } = useShellParams();
+  const ids = useId();
+  const { tab: tabId, panel: panelId } = tabIds(ids);
 
   return (
     <>
@@ -36,33 +52,51 @@ function TeamPageBody({ page }: { page: TeamPageData }) {
         Roster: {roster.standard} of {roster.standard_limit} standard, {roster.two_way} of{" "}
         {roster.two_way_limit} two-way.
       </p>
-      <div className="team-page">
-        <section className="team-tiers" aria-labelledby="team-tiers">
-          <h2 id="team-tiers">Rotation</h2>
-          <p className="note">
-            Minutes share and on/off net are 10-game windows over the last 20 games, garbage time
-            always excluded.
-          </p>
-          <TierBoard rows={page.tier_board} />
-        </section>
-        <section aria-labelledby="team-availability">
-          <h2 id="team-availability">Availability</h2>
-          <AvailabilityBoard board={page.availability} />
-        </section>
-        <section aria-labelledby="team-closing">
-          <h2 id="team-closing">Closing lineups</h2>
-          <ClosingLineups lineups={page.closing_lineups} />
-        </section>
-        <section aria-labelledby="team-lineups">
-          <h2 id="team-lineups">Top lineups</h2>
-          <p className="note">By possessions this season, garbage time {garbage}.</p>
-          <LineupTable caption="5-man lineups" rows={page.lineups} />
-          <LineupTable caption="2-man combos" rows={page.combos} />
-        </section>
-        <section aria-labelledby="team-contracts">
-          <h2 id="team-contracts">Contract notes</h2>
-          <ContractNotes contracts={page.contracts} />
-        </section>
+      <TabList
+        label="Team"
+        prefix={ids}
+        tabs={TEAM_TABS}
+        labels={TAB_LABELS}
+        selected={teamTab}
+        onSelect={setTeamTab}
+      />
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(teamTab)} className="team-page">
+        {teamTab === "rotation" && (
+          <section aria-labelledby="team-tiers">
+            <h2 id="team-tiers">Rotation</h2>
+            <p className="note">
+              Minutes share and on/off net are 10-game windows over the last 20 games, garbage time
+              always excluded.
+            </p>
+            <TierBoard rows={page.tier_board} />
+          </section>
+        )}
+        {teamTab === "availability" && (
+          <section aria-labelledby="team-availability">
+            <h2 id="team-availability">Availability</h2>
+            <AvailabilityBoard board={page.availability} />
+          </section>
+        )}
+        {teamTab === "lineups" && (
+          <>
+            <section aria-labelledby="team-closing">
+              <h2 id="team-closing">Closing lineups</h2>
+              <ClosingLineups lineups={page.closing_lineups} />
+            </section>
+            <section aria-labelledby="team-lineups">
+              <h2 id="team-lineups">Top lineups</h2>
+              <p className="note">By possessions this season, garbage time {garbage}.</p>
+              <LineupTable caption="5-man lineups" rows={page.lineups} />
+              <LineupTable caption="2-man combos" rows={page.combos} />
+            </section>
+          </>
+        )}
+        {teamTab === "contracts" && (
+          <section aria-labelledby="team-contracts">
+            <h2 id="team-contracts">Contract notes</h2>
+            <ContractNotes contracts={page.contracts} />
+          </section>
+        )}
       </div>
     </>
   );
