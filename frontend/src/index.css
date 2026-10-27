@@ -349,6 +349,69 @@ body {
   font-weight: 600;
 }
 
+.slate-game {
+  grid-column: 1 / -1;
+}
+
+.slate-game h2 {
+  margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.slate-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.marker-b2b,
+.marker-replacement {
+  border: 1px solid #8c959f;
+  color: #57606a;
+  font-style: normal;
+}
+
+.change {
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 0.75em;
+  font-weight: 600;
+  color: #fff;
+}
+
+.change-new {
+  background: #cf222e;
+}
+
+.change-upgraded {
+  background: #2da44e;
+}
+
+.change-downgraded {
+  background: #bf8700;
+}
+
+.change-off {
+  background: #8c959f;
+}
+
+.line-off td {
+  color: #8c959f;
+}
+
+.status-change {
+  display: block;
+  font-size: 0.8em;
+  color: #57606a;
+}
+
+.projected-starters {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .rotation-events,
 .league-list {
   margin: 0;

@@ -1,5 +1,5 @@
 import { useId } from "react";
-import type { LeaguePage as LeaguePageData, SlatePage } from "../api/client";
+import type { LeaguePage as LeaguePageData } from "../api/client";
 import { useLeague, useSlate, useTeams } from "../api/hooks";
 import type { components } from "../api/types";
 import SparklineCell, { type SparklineRange } from "../components/charts/SparklineCell";
@@ -11,6 +11,7 @@ import PlayerLink from "../components/PlayerLink";
 import TeamLink from "../components/TeamLink";
 import { dayBefore, easternToday, type Tab, TABS, useShellParams } from "../shell/params";
 import QueryStatus from "./QueryStatus";
+import TodayTab from "./TodayTab";
 
 type Schemas = components["schemas"];
 type Mover = Schemas["Mover"];
@@ -76,7 +77,7 @@ function LeaguePage() {
             </div>
             <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)} className="league-page">
               {tab === "today" ? (
-                <TodayPanel slate={page} />
+                <TodayTab slate={page} teams={teams} />
               ) : page.last_night === null ? (
                 <p>No last night yet: no game date before {morning} has been derived.</p>
               ) : (
@@ -207,18 +208,6 @@ function withMoves(
       ...ofMorning.transactions.filter((transaction) => transaction.date === morning),
     ],
   };
-}
-
-/** Today's slate; its games, reports and projected starters come with the Today tab's own ticket. */
-function TodayPanel({ slate }: { slate: SlatePage }) {
-  const games = slate.games.length;
-  return (
-    <p>
-      {games === 0
-        ? `No games on ${slate.date}.`
-        : `${games} ${games === 1 ? "game" : "games"} on ${slate.date}.`}
-    </p>
-  );
 }
 
 /** One of the tabs that read last night, its page already filtered to the selected teams. */

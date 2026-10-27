@@ -34,9 +34,11 @@ describe("LeaguePage", () => {
     expect(await screen.findByText("Last night: 2026-03-20")).toBeInTheDocument();
     expect(screen.getByText("Today: 2026-03-21")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel", { name: "Today" })).toHaveTextContent(
-      "1 game on 2026-03-21.",
-    );
+    expect(
+      within(screen.getByRole("tabpanel", { name: "Today" })).getByRole("region", {
+        name: "LAL @ BOS",
+      }),
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/slate?date=2026-03-21");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/league?date=2026-03-20"));
   });
