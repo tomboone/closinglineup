@@ -21,6 +21,14 @@ A contract or assignment fact shown beside a tier: two-way, 10-day, Exhibit 10, 
 A change of rotation tier between two consecutive team game dates, or a player's arrival on a team (no tier on its previous game date, so no before tier), with the before and after tiers and the top contributing signals.
 _Avoid_: transition (fine in prose, but the entity is an event)
 
+**Quiet signal**:
+A Starter or Core player who, last night, played under 60% of his 10-game average minutes or sat by coach's decision, before any rotation event. A leading indicator the tiers lag; not an event and not a flag.
+_Avoid_: warning, pre-flag
+
+**Projected starters**:
+A team's five players with the highest starter rate over its last five games, less anyone Out or Doubtful on the newest report for the game, each gap filled by the next by starter rate. A rule applied to the report, not a prediction.
+_Avoid_: lineup (reserved for five on the floor together), depth chart
+
 **Closer**:
 A player on the floor in the final five minutes of a game whose margin was within ten points at that moment.
 
@@ -31,6 +39,17 @@ The five players on the floor at the final buzzer of a game decided by ten point
 A player's minutes divided by his team's total available player-minutes over the games the team played in the window (240 per regulation game, plus overtime).
 
 ### Time
+
+**Morning**:
+The calendar date, in Eastern time, the league feed is opened on. A morning has two dates: last night, the latest game date derived before it, and today, its slate. Every feed tab names which of the two it reads.
+_Avoid_: feed date (ambiguous between the two)
+
+**Last night**:
+The latest derived game date on or before the morning. Rotation events, movers and flags are last night's: they come of games already played.
+
+**Slate**:
+The games scheduled on a date, with each team's newest injury report lines for them. Today's slate is what the morning is about; nothing on it is derived.
+_Avoid_: schedule (the season's list of games), card
 
 **Game date**:
 The Eastern-time calendar date a game is scheduled on. Every snapshot, window and rotation state is keyed by game date, never by wall-clock date.
@@ -76,8 +95,12 @@ _Avoid_: health, injury (an injury is the reason, availability is the state)
 A roster move on a date: sign, waive, trade, two-way conversion, G League assign or recall, option decision. NBA.com's player-movement feed carries only the first four.
 
 **Impact snapshot**:
-One public (EPM, DARKO) or locally computed (BPM) impact metric value for a player on a date, with its offensive and defensive split and its minutes basis.
+One metric value for a player on a date, with its offensive and defensive split and its minutes basis: a public (EPM, DARKO) or locally computed (BPM) impact metric, or a locally computed value metric (Win Shares, VORP). Only impact metrics are shown as a player's impact; value metrics ride the same table because they share its key and split.
 _Avoid_: rating (reserved for on-court ORtg/DRtg/NetRtg)
+
+**Value metric**:
+A player's accumulated contribution over a season to date, in wins (Win Shares, split into offensive and defensive) or in points over a replacement player (VORP), computed here from public formulas and summed across his teams as the published season total is. Not a rate: it grows with games played, so it is only ever a season or prior-season figure.
+_Avoid_: impact (a rate per 100 possessions), advanced stat
 
 **Non-guaranteed contract**:
 A player's contract for a season whose salary is not yet fully guaranteed: non-guaranteed, partially guaranteed, Exhibit 9 or Exhibit 10. It carries the guaranteed amount now, the date the guarantee next rises (January 7 by default) and the amount it rises to. A player with no non-guaranteed contract in the week's snapshot is taken as fully guaranteed; two-way status is a badge from roster membership, not a contract fact (ADR-0004).
