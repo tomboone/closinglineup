@@ -1,6 +1,8 @@
 """`GET /api/league`: the league morning page (spec §8, §14), everything read off the date alone, so
 a date no team played has empty lists:
 
+- the **games** are the date's final games, by tip-off, each side with its two highest Game Scores
+  (`derive.value.game_score`) among the players who played, ties by player (v2 spec §15.3);
 - the **rotation events** are the date's `rotation_event` rows, by team, then by the tier moved to
   and player, each with the signals `derive.events` ranked for it;
 - the **quiet signals** are the Starter and Core players, by the date's `rotation_state`, with no
@@ -47,8 +49,11 @@ from closinglineup.api.routers.teams import (
 )
 from closinglineup.api.schemas import (
     Flag,
+    GameScoreLine,
     Impact,
     InjuryChange,
+    LastNightGame,
+    LastNightTeam,
     LeaguePage,
     Mover,
     QuietSignal,
@@ -76,6 +81,7 @@ from closinglineup.db.models import (
 )
 from closinglineup.derive.availability import COACHS_DECISION, NOT_INJURIES
 from closinglineup.derive.flags import FlagRule
+from closinglineup.derive.value import game_score
 from closinglineup.injuries import PDF_SOURCE
 from closinglineup.season import season_bounds, season_label
 from closinglineup.sources.injury_pdf import EASTERN
@@ -88,6 +94,8 @@ TOP_MINUTES_MOVERS = 15
 QUIET_RATIO = 0.6
 QUIET_TIERS = ("starter", "core")
 TOP_IMPACT_MOVERS = 10
+# Each side's highest Game Scores shown under a final game.
+TOP_GAME_SCORES = 2
 # The window the movers' deltas are over, in team games.
 MOVER_GAMES = 10
 # A yo-yo's tier strip spans the games its rule counts over.
@@ -100,6 +108,7 @@ _FLAG_RANK = {flag: rank for rank, flag in enumerate(PLAYER_FLAGS)}
 
 @router.get("/api/league")
 def league(session: SessionDep, day: DateDep) -> LeaguePage:
+    games = _games(session, day)
     events = _events(session, day)
     quiet = _quiet_signals(session, day)
     teams = _teams(session, day)
@@ -122,7 +131,10 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
         *(change.player_id for change in injuries),
         *(note.player_id for note in transactions),
     }
-    names = player_names(session, players)
+    names = player_names(
+        session,
+        players | {line.player_id for game in games for line in (*game.home, *game.away)},
+    )
     impacts = player_impacts(session, players, day)
     by_team: dict[str, list[RotationEventSummary]] = defaultdict(list)
     for event in events:
@@ -138,6 +150,7 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
         )
     return LeaguePage(
         date=day,
+        games=[game.model(names) for game in games],
         rotation_events=[
             TeamRotationEvents(tricode=tricode, events=by_team[tricode])
             for tricode in sorted(by_team)
@@ -177,6 +190,77 @@ def league(session: SessionDep, day: DateDep) -> LeaguePage:
 
 def _tricode(team_id: int | None) -> str | None:
     return None if team_id is None else by_nba_team_id(team_id).tricode
+
+
+# Last night's games.
+
+
+class _FinalGame(NamedTuple):
+    game: Game
+    # Each side's top Game Score lines, the highest first.
+    home: list[PlayerGame]
+    away: list[PlayerGame]
+
+    def model(self, names: dict[int, str]) -> LastNightGame:
+        game = self.game
+        margin = None
+        if game.home_score is not None and game.away_score is not None:
+            margin = game.home_score - game.away_score
+        return LastNightGame(
+            game_id=game.game_id,
+            home=_side(game.home_team_id, game.home_score, self.home, names),
+            away=_side(game.away_team_id, game.away_score, self.away, names),
+            margin=margin,
+        )
+
+
+def _side(
+    team_id: int, score: int | None, lines: list[PlayerGame], names: dict[int, str]
+) -> LastNightTeam:
+    return LastNightTeam(
+        tricode=by_nba_team_id(team_id).tricode,
+        score=score,
+        top=[
+            GameScoreLine(
+                player=player_ref(line.player_id, names),
+                game_score=game_score(line),
+                pts=line.pts,
+                reb=line.oreb + line.dreb,
+                ast=line.ast,
+                seconds=line.seconds,
+            )
+            for line in lines
+        ],
+    )
+
+
+def _games(session: Session, day: date) -> list[_FinalGame]:
+    """The date's final games by tip-off, then ID, each side's `TOP_GAME_SCORES` highest Game
+    Scores among the players who played, ties by player."""
+    games = session.scalars(
+        select(Game)
+        .where(Game.game_date == day, Game.status == "final")
+        .order_by(Game.tip_time.asc().nulls_last(), Game.game_id)
+    ).all()
+    lines: dict[tuple[str, int], list[PlayerGame]] = defaultdict(list)
+    for line in session.scalars(
+        select(PlayerGame).where(
+            PlayerGame.game_id.in_([game.game_id for game in games]),
+            PlayerGame.dnp_reason.is_(None),
+        )
+    ):
+        lines[line.game_id, line.team_id].append(line)
+
+    def top(game: Game, team_id: int) -> list[PlayerGame]:
+        ranked = sorted(
+            lines[game.game_id, team_id], key=lambda line: (-game_score(line), line.player_id)
+        )
+        return ranked[:TOP_GAME_SCORES]
+
+    return [
+        _FinalGame(game, top(game, game.home_team_id), top(game, game.away_team_id))
+        for game in games
+    ]
 
 
 def _events(session: Session, day: date) -> list[RotationEvent]:

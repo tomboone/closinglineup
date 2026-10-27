@@ -325,12 +325,54 @@ const mover = (
 
 const signal = (name: string, label: string, value: number | string) => ({ name, label, value });
 
+const topLine = (
+  ref: { player_id: number; name: string | null },
+  game_score: number,
+  pts: number,
+): LeaguePage["games"][number]["home"]["top"][number] => ({
+  player: ref,
+  game_score,
+  pts,
+  reb: 6,
+  ast: 4,
+  seconds: 2040,
+});
+
 /**
- * The morning of 2026-03-20: two teams' tier transitions, a mover each way of both kinds, a flag of
- * two kinds, an injury change and a transaction.
+ * The morning of 2026-03-20: two final games, two teams' tier transitions, a mover each way of
+ * both kinds, a flag of two kinds, an injury change and a transaction.
  */
 export const LEAGUE_PAGE: LeaguePage = {
   date: "2026-03-20",
+  games: [
+    {
+      game_id: "0022500990",
+      home: {
+        tricode: "BOS",
+        score: 112,
+        top: [topLine(TATUM, 24.3, 31), topLine(BROWN, 15.15, 22)],
+      },
+      away: {
+        tricode: "LAL",
+        score: 104,
+        top: [
+          topLine(player(2544, "LeBron James"), 19.8, 27),
+          topLine(player(1629029, "Luka Dončić"), 12.4, 25),
+        ],
+      },
+      margin: 8,
+    },
+    {
+      game_id: "0022500991",
+      home: {
+        tricode: "DEN",
+        score: 120,
+        top: [topLine(player(203999, "Nikola Jokić"), 30.2, 28)],
+      },
+      away: { tricode: "PHX", score: 99, top: [] },
+      margin: 21,
+    },
+  ],
   rotation_events: [
     {
       tricode: "BOS",
@@ -430,6 +472,7 @@ export const LEAGUE_PAGE: LeaguePage = {
 /** A date no team played: every list empty (spec §8). */
 export const EMPTY_LEAGUE_PAGE: LeaguePage = {
   date: "2026-03-21",
+  games: [],
   rotation_events: [],
   quiet_signals: [],
   minutes_risers: [],

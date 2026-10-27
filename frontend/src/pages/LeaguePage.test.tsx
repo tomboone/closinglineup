@@ -132,6 +132,31 @@ describe("LeaguePage", () => {
     expect(fetchMock).toHaveBeenCalledTimes(fetches);
   });
 
+  it("lists last night's final games, each linking to its game page, with its top Game Scores", async () => {
+    morning();
+    renderApp(`${MORNING}&tab=last_night`);
+    const scores = await screen.findByRole("region", { name: "Final scores" });
+
+    const rows = within(scores).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(LEAGUE_PAGE.games.length);
+    const [first] = rows;
+    expect(within(first!).getByRole("link", { name: "LAL 104 @ BOS 112" })).toHaveAttribute(
+      "href",
+      "/games/0022500990?date=2026-03-21&tab=last_night",
+    );
+    expect(first).toHaveTextContent("BOS by 8");
+    const [away, home] = within(first!).getAllByRole("list");
+    expect(within(home!).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Jayson Tatum 24.3 31 pts, 6 reb, 4 ast, 34 min",
+      "Jaylen Brown 15.2 22 pts, 6 reb, 4 ast, 34 min",
+    ]);
+    expect(within(away!).getByRole("link", { name: "LeBron James" })).toBeInTheDocument();
+    expect(within(rows[1]!).getByRole("link", { name: "PHX 99 @ DEN 120" })).toHaveAttribute(
+      "href",
+      "/games/0022500991?date=2026-03-21&tab=last_night",
+    );
+  });
+
   it("renders every rotation event under its team, from → to, with its three signals", async () => {
     morning();
     renderApp(`${MORNING}&tab=rotation`);
@@ -164,6 +189,10 @@ describe("LeaguePage", () => {
     renderApp("/?date=2026-03-22&tab=rotation");
 
     expect(await screen.findByRole("region", { name: "Rotation changes" })).toHaveTextContent(
+      "No games on 2026-03-21.",
+    );
+    openTab("Last night");
+    expect(screen.getByRole("region", { name: "Final scores" })).toHaveTextContent(
       "No games on 2026-03-21.",
     );
     openTab("Movers");
@@ -501,6 +530,21 @@ describe("LeaguePage", () => {
       openTab("Moves");
       const moves = within(screen.getByRole("region", { name: "Transactions" }));
       expect(moves.getAllByRole("listitem")).toHaveLength(2);
+
+      // A game by either of its teams: LAL's, not PHX @ DEN.
+      openTab("Last night");
+      const scores = within(screen.getByRole("region", { name: "Final scores" }));
+      expect(scores.getAllByRole("row")).toHaveLength(2);
+      expect(scores.getByRole("link", { name: "LAL 104 @ BOS 112" })).toBeInTheDocument();
+    });
+
+    it("says no selected team played last night when the filter hides every game", async () => {
+      morning();
+      renderApp(`${MORNING}&tab=last_night&team=PHI`);
+
+      expect(await screen.findByRole("region", { name: "Final scores" })).toHaveTextContent(
+        "No games for the selected teams.",
+      );
     });
 
     it("puts the checked teams in ?team=, keeping the other parameters", async () => {

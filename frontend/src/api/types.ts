@@ -296,6 +296,23 @@ export interface components {
             /** Seconds */
             seconds: number;
         };
+        /**
+         * GameScoreLine
+         * @description A player's line in a game, ranked by its Game Score (v2 spec §8.1).
+         */
+        GameScoreLine: {
+            /** Ast */
+            ast: number;
+            /** Game Score */
+            game_score: number;
+            player: components["schemas"]["PlayerRef"];
+            /** Pts */
+            pts: number;
+            /** Reb */
+            reb: number;
+            /** Seconds */
+            seconds: number;
+        };
         /** @enum {string} */
         GameStatus: "scheduled" | "final" | "postponed";
         /**
@@ -434,6 +451,31 @@ export interface components {
              */
             status: "running" | "succeeded" | "failed";
         };
+        /**
+         * LastNightGame
+         * @description A final game on the date (v2 spec §15.3); `margin` is the home score less the away, null
+         *     while a score is missing.
+         */
+        LastNightGame: {
+            away: components["schemas"]["LastNightTeam"];
+            /** Game Id */
+            game_id: string;
+            home: components["schemas"]["LastNightTeam"];
+            /** Margin */
+            margin: number | null;
+        };
+        /**
+         * LastNightTeam
+         * @description One side of a final game: its score and its two highest Game Scores, the highest first.
+         */
+        LastNightTeam: {
+            /** Score */
+            score: number | null;
+            /** Top */
+            top: components["schemas"]["GameScoreLine"][];
+            /** Tricode */
+            tricode: string;
+        };
         /** LeaguePage */
         LeaguePage: {
             /**
@@ -443,6 +485,8 @@ export interface components {
             date: string;
             /** Flags */
             flags: components["schemas"]["RaisedFlag"][];
+            /** Games */
+            games: components["schemas"]["LastNightGame"][];
             /** Impact Fallers */
             impact_fallers: components["schemas"]["Mover"][];
             /** Impact Risers */

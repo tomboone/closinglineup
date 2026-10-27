@@ -2,7 +2,7 @@ import { useSearchParams } from "react-router";
 import type { GarbageTime } from "../api/client";
 
 /** The feed's tabs, in the order the tab list shows them (v2 spec §4). */
-export const TABS = ["today", "rotation", "movers", "flags", "moves"] as const;
+export const TABS = ["today", "last_night", "rotation", "movers", "flags", "moves"] as const;
 export type Tab = (typeof TABS)[number];
 
 /** The team page's tabs, in the order its tab list shows them (NEU-2001). */

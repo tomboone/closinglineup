@@ -328,8 +328,38 @@ class QuietSignal(BaseModel):
     impact: Impact | None
 
 
+class GameScoreLine(BaseModel):
+    """A player's line in a game, ranked by its Game Score (v2 spec §8.1)."""
+
+    player: PlayerRef
+    game_score: float
+    pts: int
+    reb: int
+    ast: int
+    seconds: int
+
+
+class LastNightTeam(BaseModel):
+    """One side of a final game: its score and its two highest Game Scores, the highest first."""
+
+    tricode: str
+    score: int | None
+    top: list[GameScoreLine]
+
+
+class LastNightGame(BaseModel):
+    """A final game on the date (v2 spec §15.3); `margin` is the home score less the away, null
+    while a score is missing."""
+
+    game_id: str
+    home: LastNightTeam
+    away: LastNightTeam
+    margin: int | None
+
+
 class LeaguePage(BaseModel):
     date: dt.date
+    games: list[LastNightGame]
     rotation_events: list[TeamRotationEvents]
     quiet_signals: list[QuietSignal]
     minutes_risers: list[Mover]
