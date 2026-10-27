@@ -297,15 +297,15 @@ def test_derive_flags_each_date_in_the_range_and_re_runs_unchanged(
         "derive 2016-11-02 garbage_time: succeeded, games 1, stints 18, flagged 8, changed 18",
     ]
     # The windows are refreshed once, after the range's garbage-time flags, and recorded for each
-    # date; rotation state, events, player flags and BPM follow them, date by date, and the last
-    # date's sample is reconciled.
+    # date; rotation state, events, player flags, BPM and VORP follow them, date by date, and the
+    # last date's sample is reconciled.
     assert [line.split(":")[0] for line in lines[2:]] == [
         "derive 2016-11-01 windows",
         "derive 2016-11-02 windows",
         *(
             f"derive 2016-11-0{d} {step}"
             for d in (1, 2)
-            for step in ("tiers", "events", "flags", "bpm")
+            for step in ("tiers", "events", "flags", "bpm", "value")
         ),
         "derive 2016-11-02 reconcile",
     ]

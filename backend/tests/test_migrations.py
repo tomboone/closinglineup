@@ -3,9 +3,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
 BACKEND = Path(__file__).parents[1]
 
@@ -157,3 +159,36 @@ def test_the_tip_time_migration_adds_and_drops_its_column(database_url: str) -> 
         assert "tip_time" not in _columns(database_url, "game")
     finally:
         alembic("upgrade", "head", database_url=database_url)
+
+
+# NEU-1996: the value metrics beside the impact ratings.
+IMPACT_VALUE_SOURCES = "b4d8e2f1c907"
+VORP_ROW = (
+    "INSERT INTO impact_snapshot (date, player_id, source, value) "
+    "VALUES ('2026-10-20', 990001, 'vorp_local', 1.5)"
+)
+
+
+def test_the_value_sources_migration_admits_and_then_drops_vorp_and_ws(database_url: str) -> None:
+    assert alembic("upgrade", "head", database_url=database_url).returncode == 0
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(VORP_ROW))
+
+        downgrade = alembic("downgrade", f"{IMPACT_VALUE_SOURCES}-1", database_url=database_url)
+        try:
+            assert downgrade.returncode == 0, downgrade.stderr
+            with engine.connect() as connection:
+                left = connection.scalar(
+                    text("SELECT count(*) FROM impact_snapshot WHERE player_id = 990001")
+                )
+                assert left == 0
+                with pytest.raises(IntegrityError):
+                    connection.execute(text(VORP_ROW))
+        finally:
+            alembic("upgrade", "head", database_url=database_url)
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM impact_snapshot WHERE player_id = 990001"))
+        engine.dispose()

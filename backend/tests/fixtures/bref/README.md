@@ -1,9 +1,9 @@
 # Basketball Reference fixtures
 
 The 2025-26 regular season as Basketball Reference publishes it, trimmed to what `derive/bpm.py`
-reads and the published BPM it is checked against (`tests/test_bpm.py`). Not recorded by
-`scripts/record_fixtures.py`, which records NBA.com only; the tables were read out of the pages
-with a throwaway parser on 2026-10-23 and written as CSV.
+reads and the published BPM and VORP it is checked against (`tests/test_bpm.py`,
+`tests/test_value.py`). Not recorded by `scripts/record_fixtures.py`, which records NBA.com only;
+the tables were read out of the pages with a throwaway parser on 2026-10-23 and written as CSV.
 
 - `2025-26_players.csv`: one row per player per team (a traded player's `2TM` total is left
   out), from the Totals page's box-score columns and the Advanced page's `OBPM`, `DBPM` and
@@ -15,6 +15,10 @@ with a throwaway parser on 2026-10-23 and written as CSV.
   Advanced Stats tables: https://www.basketball-reference.com/leagues/NBA_2026.html. `mp` is the
   five players' minutes together (five times the game clock). `tov` is the team's, team turnovers
   included, so it exceeds its players' sum; every other total is its players' sum exactly.
+- `2025-26_vorp.csv`: the published VORP for each row of `2025-26_players.csv`, in its order,
+  from the same Advanced page's `VORP` column (its regular-season table, not the playoffs'), read
+  out with a throwaway parser on 2026-10-27 and joined on Basketball Reference ID and team; every
+  row's `mp` and `bpm` on the page matched the players file's. Checked by `tests/test_value.py`.
 - `2016-17_cavaliers_sheet.csv`: the worked example in the BPM 2.0 calculator sheet linked from
   https://www.basketball-reference.com/about/bpm2.html (its `CLE 2017` tab, exported as CSV on
   2026-10-23): each Cavalier's totals and listed position on the five-point scale, then the

@@ -1,5 +1,6 @@
 """The `impact_snapshot` table's row, which each impact-metric overlay writes (spec §4.5, §6.3):
-DARKO's DPM, EPM, and the BPM `derive` computes, each a `source` of its own."""
+DARKO's DPM, EPM, and the BPM `derive` computes, each a `source` of its own; and the value metrics
+`derive.value` computes, VORP and Win Shares (v2 spec §8.4)."""
 
 from dataclasses import asdict, dataclass
 from datetime import date
@@ -15,7 +16,7 @@ TABLE = "impact_snapshot"
 NATURAL_KEY = ("date", "player_id", "source")
 VALUES = ("value", "o_value", "d_value", "minutes_basis")
 
-type ImpactSource = Literal["epm", "darko", "bpm_local"]
+type ImpactSource = Literal["epm", "darko", "bpm_local", "ws_local", "vorp_local"]
 
 
 @dataclass(frozen=True, slots=True)
