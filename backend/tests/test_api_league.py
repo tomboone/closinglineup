@@ -5,11 +5,11 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, insert
+from sqlalchemy import delete, insert, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.api.app import create_app
-from closinglineup.api.routers.league import MoverRow, top_movers
+from closinglineup.api.routers.league import MoverRow, QuietRow, top_movers
 from closinglineup.db.models import (
     Game,
     ImpactSnapshot,
@@ -502,3 +502,76 @@ def test_a_date_with_no_games_has_empty_lists(
 
     assert page["date"] == OFF_DAY.isoformat()
     assert all(page[key] == [] for key in page if key != "date")
+
+
+# On BOS's last game, against averages of 48 minutes over games 2-11: a Starter who sat by coach's
+# decision, a Core player at 40% and one at 70% of his minutes, a Core player at 40% with a
+# rotation event on the date, a Fringe NYK player at 40%, and a Core NYK player out injured.
+DNP_CD, LOW, ENOUGH, MOVED = STARTERS
+FRINGE, INJURED = NYK_FIVE[1:3]
+QUIET_LINES = {
+    DNP_CD: (0, "cd"),
+    LOW: (1152, None),
+    ENOUGH: (2016, None),
+    MOVED: (1152, None),
+    FRINGE: (1152, None),
+    INJURED: (0, "injury"),
+}
+
+
+@pytest.fixture
+def quiet(seeded: sessionmaker[Session]) -> sessionmaker[Session]:
+    """`seeded`, with the last game's lines and tiers of `QUIET_LINES`' players, MOVED's event and
+    LOW's impact on the date; the view refreshed. `seeded` clears it all."""
+    tiers = {
+        DNP_CD: "starter",
+        LOW: "core",
+        ENOUGH: "core",
+        MOVED: "core",
+        FRINGE: "fringe",
+        INJURED: "core",
+    }
+    with seeded.begin() as session:
+        for player_id, (seconds, dnp_reason) in QUIET_LINES.items():
+            session.execute(
+                update(PlayerGame)
+                .where(PlayerGame.game_id == _game_id(GAMES[-1]))
+                .where(PlayerGame.player_id == player_id)
+                .values(seconds=seconds, dnp_reason=dnp_reason)
+            )
+        session.execute(
+            insert(RotationState),
+            [_state(p, NYK if p in NYK_FIVE else BOS, LAST, tier) for p, tier in tiers.items()],
+        )
+        session.execute(insert(RotationEvent), [_event(MOVED, BOS, LAST, "starter", "core")])
+        session.execute(insert(ImpactSnapshot), [_impact(LOW, LAST, "darko", 2.5)])
+    refresh_windows(seeded)
+    return seeded
+
+
+def test_quiet_signals_are_starters_and_core_well_short_of_their_minutes_a_dnp_first(
+    quiet: sessionmaker[Session], client: TestClient
+) -> None:
+    signals = _page(client)["quiet_signals"]
+
+    assert [
+        (s["player"]["player_id"], s["tricode"], s["tier"], s["seconds"], s["dnp_reason"])
+        for s in signals
+    ] == [(DNP_CD, "BOS", "starter", 0, "cd"), (LOW, "BOS", "core", 1152, None)]
+    # The average is over the games before the date's.
+    assert [s["minutes_per_game_10"] for s in signals] == [48.0, 48.0]
+    assert [s["impact"] for s in signals] == [None, {"source": "darko", "value": 2.5}]
+
+
+def test_quiet_signals_put_a_dnp_before_a_larger_shortfall() -> None:
+    dnp = QuietRow(1, BOS, "core", 0, 10.0, "cd")
+    short = QuietRow(2, BOS, "starter", 60, 40.0, None)
+    shorter = QuietRow(3, BOS, "starter", 600, 40.0, None)
+
+    assert sorted([shorter, short, dnp], key=QuietRow.rank) == [dnp, short, shorter]
+
+
+def test_a_date_with_no_games_has_no_quiet_signals(
+    quiet: sessionmaker[Session], client: TestClient
+) -> None:
+    assert _page(client, OFF_DAY)["quiet_signals"] == []
