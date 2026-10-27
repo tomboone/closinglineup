@@ -27,4 +27,10 @@ export const TEAM_COLOURS = ["#0969da", "#cf6a00"];
 
 export const AXIS_COLOUR = "#8c959f";
 
+/** Text drawn on a chart, in the page's ink rather than a series colour. */
+export const LABEL_COLOUR = "#1a1a1a";
+
 export const GARBAGE_TIME_FILL = "rgba(140, 149, 159, 0.18)";
+
+/** A mover's direction, the poles of a diverging pair: rising cool, falling warm. */
+export const MOVER_COLOURS = { rising: "#0969da", falling: "#cf222e" };

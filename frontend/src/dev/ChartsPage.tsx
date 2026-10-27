@@ -1,5 +1,6 @@
 import type { components } from "../api/types";
 import AnnotatedTimeSeries from "../components/charts/AnnotatedTimeSeries";
+import MoverChart from "../components/charts/MoverChart";
 import ShotProfile from "../components/charts/ShotProfile";
 import SparklineCell from "../components/charts/SparklineCell";
 import StintTimeline from "../components/charts/StintTimeline";
@@ -82,6 +83,22 @@ const ROWS: StintRow[] = TIMELINE_PLAYERS.map(([team, label], i) => {
   return { team, label, stints };
 });
 
+/** `n` made-up movers one way, the largest move first, each with a latest share near 15%. */
+function movers(n: number, sign: 1 | -1): Schemas["Mover"][] {
+  return Array.from({ length: n }, (_, i) => {
+    const [tricode, name] = TIMELINE_PLAYERS[i % TIMELINE_PLAYERS.length];
+    const delta = sign * (0.07 - i * 0.004);
+    return {
+      player: { player_id: 1000 + i * 2 + (sign > 0 ? 0 : 1), name },
+      tricode,
+      value: 0.15 + delta / 2,
+      delta,
+      source: null,
+      impact: null,
+    };
+  });
+}
+
 const SHOT_WINDOWS = [
   { label: "Last 10", shift: 0.03 },
   { label: "Season", shift: 0 },
@@ -130,6 +147,15 @@ function ChartsPage() {
         ]}
         annotations={ANNOTATIONS}
         yFormat={percent}
+      />
+
+      <h2>MoverChart</h2>
+      <MoverChart
+        risers={movers(15, 1)}
+        fallers={movers(12, -1)}
+        format={percent}
+        unitLabel="Minutes share, pts"
+        scale={100}
       />
 
       <h2>StintTimeline</h2>
