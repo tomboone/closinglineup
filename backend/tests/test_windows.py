@@ -33,6 +33,7 @@ UTA_GAMES = range(7, 13)
 OVERTIME = 5
 PRIOR_GAME = "0022500990"
 PRIOR_DAY = date(2026, 3, 1)
+PRIOR_SEASON_END = date(2026, 4, 12)
 
 # The fixture player, on SAC all season and for one game of the last: he plays 20 + g minutes in
 # game g, starting the even ones, but sits game 3 by coach's decision and is missing from game 7's
@@ -243,14 +244,14 @@ def _membership(player_id: int, team_id: int, start: date, end: date | None) -> 
     )
 
 
-def _snapshot(day: date, source: str, value: float, o_value: float) -> ImpactSnapshot:
+def _snapshot(day: date, source: str, value: float, o_value: float | None) -> ImpactSnapshot:
     return ImpactSnapshot(
         date=day,
         player_id=FIXTURE,
         source=source,
         value=value,
         o_value=o_value,
-        d_value=value - o_value,
+        d_value=None if o_value is None else value - o_value,
         minutes_basis=None,
     )
 
@@ -277,7 +278,8 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """The games, stints, shots, roster spans and impact snapshots above, and the view refreshed
     over them. The fixture player also played SAC's one game of 2025-26, scoring 20 on 10 shots
     and 5 free throw attempts in 30 minutes; and has a BPM on SAC's games 18 and 20 and an EPM
-    on its first."""
+    on its first, Win Shares on its game 18 and VORP on its 19, and Win Shares twice and VORP
+    once in 2025-26."""
     _clear(db)
     with db.begin() as session:
         session.add_all(_game(_sac_game(g), SEASON, _day(g), SAC, POR) for g in SAC_GAMES)
@@ -323,6 +325,11 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 _snapshot(_day(1), "epm", 1.0, 0.5),
                 _snapshot(_day(18), "bpm_local", 2.5, 1.5),
                 _snapshot(_day(20), "bpm_local", 3.0, 2.0),
+                _snapshot(_day(18), "ws_local", 1.2, 0.8),
+                _snapshot(_day(19), "vorp_local", 0.4, None),
+                _snapshot(PRIOR_DAY, "ws_local", 0.5, 0.3),
+                _snapshot(PRIOR_SEASON_END, "ws_local", 0.9, 0.6),
+                _snapshot(PRIOR_SEASON_END, "vorp_local", 0.2, None),
             ]
         )
     refresh_windows(db)
@@ -504,6 +511,24 @@ def test_the_latest_impact_snapshot_of_each_source_is_carried_forward(
     assert rows[_day(20)]["darko"] is None
 
 
+def test_the_value_snapshots_carry_forward_within_the_season_and_prior_reads_its_final(
+    seeded: sessionmaker[Session],
+) -> None:
+    rows = _rows(seeded, FIXTURE, None, "season")
+    prior = _row(seeded, FIXTURE, None, "prior_season", _day(20))
+
+    # 2025-26's snapshots do not carry into 2026-27, whose first comes on game 18.
+    assert (rows[_day(17)]["ws_local"], rows[_day(17)]["vorp_local"]) == (None, None)
+    assert (rows[_day(18)]["ws_local"], rows[_day(18)]["vorp_local"]) == (1.2, None)
+    assert rows[_day(20)]["ws_local"] == 1.2
+    assert rows[_day(20)]["ws_local_o"] == 0.8
+    assert rows[_day(20)]["ws_local_d"] == pytest.approx(0.4)
+    assert rows[_day(20)]["vorp_local"] == 0.4
+    assert _row(seeded, FIXTURE, None, "5", _day(20))["ws_local"] == 1.2
+    assert (prior["ws_local"], prior["ws_local_o"], prior["vorp_local"]) == (0.9, 0.6, 0.2)
+    assert prior["ws_local_d"] == pytest.approx(0.3)
+
+
 def test_a_traded_players_role_windows_restart_and_his_production_windows_continue(
     seeded: sessionmaker[Session],
 ) -> None:
@@ -550,6 +575,6 @@ def test_a_second_game_on_a_teams_date_counts_once_and_the_refresh_holds(
 
 
 def test_views_sql_is_the_view_migration_s_copy() -> None:
-    copy = DB_DIR / "alembic" / "versions" / "a6e7426b5559_player_window_stats_game_score.sql"
+    copy = DB_DIR / "alembic" / "versions" / "c7e19a4d2b30_player_window_stats_value_snapshots.sql"
 
     assert (DB_DIR / "views.sql").read_text() == copy.read_text()

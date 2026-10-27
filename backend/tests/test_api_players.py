@@ -33,6 +33,7 @@ SEASON = "2032-33"
 PRIOR_SEASON = "2031-32"
 FIRST = date(2032, 11, 1)
 PRIOR_DAY = date(2031, 11, 1)
+PRIOR_END = date(2032, 4, 12)
 GAMES = range(1, 13)
 LAL = 1610612747
 MIA = 1610612748
@@ -239,6 +240,19 @@ def _flag(team_id: int, day: date, flag: str) -> dict[str, Any]:
     return {"player_id": PLAYER, "team_id": team_id, "game_date": day, "flag": flag, "detail": {}}
 
 
+def _value(
+    day: date, source: str, value: float, o_value: float | None = None, d_value: float | None = None
+) -> dict[str, Any]:
+    return {
+        "date": day,
+        "player_id": PLAYER,
+        "source": source,
+        "value": value,
+        "o_value": o_value,
+        "d_value": d_value,
+    }
+
+
 def clear(db: sessionmaker[Session]) -> None:
     game_ids = [PRIOR_GAME, *(_game_id(g) for g in GAMES)]
     with db.begin() as session:
@@ -265,8 +279,8 @@ def clear(db: sessionmaker[Session]) -> None:
 @pytest.fixture
 def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """LAL's 12 games against MIA with box scores, stints, his shot chart and matchups, and one in
-    the prior season; his trade, an injury report listing him, impact snapshots and flags; the view
-    refreshed and rotation state written for the last date."""
+    the prior season; his trade, an injury report listing him, impact and value snapshots and
+    flags; the view refreshed and rotation state written for the last date."""
     clear(db)
     roster_from = PRIOR_DAY - timedelta(days=30)
     with db.begin() as session:
@@ -346,6 +360,11 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 {"date": FIRST, "player_id": PLAYER, "source": "bpm_local", "value": 1.0},
                 {"date": INJURY_DAY, "player_id": PLAYER, "source": "bpm_local", "value": 2.0},
                 {"date": _day(11), "player_id": PLAYER, "source": "darko", "value": 3.0},
+                _value(_day(11), "ws_local", 1.5, 1.0, 0.5),
+                _value(_day(12), "vorp_local", 0.3),
+                _value(PRIOR_DAY, "ws_local", 0.2, 0.1, 0.1),
+                _value(PRIOR_END, "ws_local", 4.0, 2.5, 1.5),
+                _value(PRIOR_END, "vorp_local", 1.1),
             ],
         )
         session.execute(
@@ -566,6 +585,88 @@ def test_before_his_first_game_the_shot_profile_is_the_prior_season_s(
     assert profile["rim"]["season_freq"] is None
     assert profile["rim"]["prior_freq"] == pytest.approx(0.5)
     assert profile["above_break_3"]["prior_fg_pct"] == pytest.approx(0.0)
+
+
+PRODUCTION = [
+    ("ts_pct", "TS%", "percent"),
+    ("efg_pct", "eFG%", "percent"),
+    ("usg_pct", "USG%", "percent"),
+    ("ast_pct", "AST%", "percent"),
+    ("tov_pct", "TOV%", "percent"),
+    ("oreb_pct", "OREB%", "percent"),
+    ("dreb_pct", "DREB%", "percent"),
+    ("ftr", "FTr", "rate"),
+    ("fg3a_rate", "3PAr", "rate"),
+    ("pts_per36", "PTS/36", "number"),
+    ("reb_per36", "REB/36", "number"),
+    ("ast_per36", "AST/36", "number"),
+    ("game_score", "Game Score", "per_game"),
+    ("ws", "Win Shares", "number"),
+    ("vorp", "VORP", "number"),
+]
+
+
+def _production(page: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {row["metric"]: row["windows"] for row in page["production"]}
+
+
+def test_production_has_every_metric_in_order_with_its_format(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    page = _page(client)
+
+    assert [(row["metric"], row["label"], row["format"]) for row in page["production"]] == (
+        PRODUCTION
+    )
+    for windows in _production(page).values():
+        assert list(windows) == ["5", "10", "20", "season", "prior_season"]
+
+
+def test_production_windows_count_his_games_and_mark_a_short_one(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    pts = _production(_page(client))["pts_per36"]
+
+    # 12 team games: the 20-game window is short, the 10-game one is not.
+    assert (pts["10"]["games"], pts["10"]["is_short"]) == (10, False)
+    assert (pts["20"]["games"], pts["20"]["is_short"]) == (12, True)
+    assert (pts["season"]["games"], pts["season"]["is_short"]) == (12, False)
+    assert pts["prior_season"]["games"] == 1
+    assert pts["5"]["value"] == pytest.approx(0.0)
+    assert pts["5"]["delta_season"] == pytest.approx(0.0)
+    assert pts["5"]["o_value"] is None
+
+
+def test_win_shares_and_vorp_are_the_season_s_and_the_prior_season_s_only(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    production = _production(_page(client))
+    ws, vorp = production["ws"], production["vorp"]
+
+    for windows in (ws, vorp):
+        assert (windows["5"], windows["10"], windows["20"]) == (None, None, None)
+        assert windows["season"]["delta_season"] is None
+        assert windows["prior_season"]["delta_season"] is None
+    season, prior = ws["season"], ws["prior_season"]
+    assert (season["value"], season["o_value"], season["d_value"]) == (1.5, 1.0, 0.5)
+    # The prior season's final snapshot, not its first.
+    assert (prior["value"], prior["o_value"], prior["d_value"]) == (4.0, 2.5, 1.5)
+    assert (vorp["season"]["value"], vorp["prior_season"]["value"]) == (0.3, 1.1)
+    assert vorp["season"]["o_value"] is None
+
+
+def test_before_his_first_game_production_is_the_prior_season_s(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    production = _production(_page(client, date=(FIRST - timedelta(days=1)).isoformat()))
+
+    for windows in production.values():
+        assert [windows[name] for name in ("5", "10", "20", "season")] == [None] * 4
+    pts = production["pts_per36"]["prior_season"]
+    assert (pts["games"], pts["is_short"], pts["delta_season"]) == (1, False, None)
+    ws = production["ws"]["prior_season"]
+    assert (ws["value"], ws["o_value"], ws["d_value"]) == (4.0, 2.5, 1.5)
+    assert production["vorp"]["prior_season"]["value"] == 1.1
 
 
 def test_teammates_are_those_on_the_floor_with_him_most(

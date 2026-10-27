@@ -165,6 +165,71 @@ const shotZone = (
   prior_fg_pct: null,
 });
 
+type ProductionRow = PlayerPage["production"][number];
+type ProductionCell = NonNullable<ProductionRow["windows"]["season"]>;
+
+const cell = (value: number, games: number, delta: number | null, isShort = false): ProductionCell => ({
+  value,
+  delta_season: delta,
+  games,
+  is_short: isShort,
+  o_value: null,
+  d_value: null,
+});
+
+/** A metric over 12 games of the season: the 20-game window short, the prior season whole. */
+const production = (
+  metric: ProductionRow["metric"],
+  label: string,
+  format: ProductionRow["format"],
+  value: number,
+): ProductionRow => ({
+  metric,
+  label,
+  format,
+  windows: {
+    "5": cell(value * 1.1, 5, value * 0.1),
+    "10": cell(value, 10, 0),
+    "20": cell(value, 12, 0, true),
+    season: cell(value, 12, 0),
+    prior_season: cell(value * 0.9, 70, -value * 0.1),
+  },
+});
+
+const PRODUCTION: ProductionRow[] = [
+  production("ts_pct", "TS%", "percent", 0.6),
+  production("efg_pct", "eFG%", "percent", 0.55),
+  production("usg_pct", "USG%", "percent", 0.28),
+  production("ast_pct", "AST%", "percent", 0.18),
+  production("tov_pct", "TOV%", "percent", 0.11),
+  production("oreb_pct", "OREB%", "percent", 0.04),
+  production("dreb_pct", "DREB%", "percent", 0.14),
+  production("ftr", "FTr", "rate", 0.3),
+  production("fg3a_rate", "3PAr", "rate", 0.4),
+  production("pts_per36", "PTS/36", "number", 25),
+  production("reb_per36", "REB/36", "number", 6),
+  production("ast_per36", "AST/36", "number", 4),
+  production("game_score", "Game Score", "per_game", 16),
+  {
+    metric: "ws",
+    label: "Win Shares",
+    format: "number",
+    windows: {
+      "5": null,
+      "10": null,
+      "20": null,
+      season: { ...cell(2.4, 12, null), o_value: 1.6, d_value: 0.8 },
+      prior_season: { ...cell(7.1, 70, null), o_value: 4.5, d_value: 2.6 },
+    },
+  },
+  {
+    metric: "vorp",
+    label: "VORP",
+    format: "number",
+    windows: { "5": null, "10": null, "20": null, season: cell(0.9, 12, null), prior_season: cell(2.8, 70, null) },
+  },
+];
+
 /**
  * Jaylen Brown's page over his last 10 games, three of them here, with an injury and a transaction
  * annotation on two of their dates.
@@ -191,6 +256,7 @@ export const PLAYER_PAGE: PlayerPage = {
     { game_date: "2026-03-12", kind: "transaction", label: "Signed extension" },
   ],
   shot_profile: [shotZone("rim", 0.3), shotZone("corner_3", 0.1)],
+  production: PRODUCTION,
   teammates: [
     { player: TATUM, possessions: 412, net_rating: 9.1 },
     { player: WHITE, possessions: 380, net_rating: -2.4 },

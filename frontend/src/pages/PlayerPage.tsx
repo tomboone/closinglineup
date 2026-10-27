@@ -11,6 +11,7 @@ import { TIER_COLOURS } from "../components/charts/theme";
 import FlagList from "../components/FlagList";
 import { percent, signed } from "../components/format";
 import PlayerLink from "../components/PlayerLink";
+import ProductionTable from "../components/ProductionTable";
 import { BADGE_LABELS, IMPACT_LABELS, TIER_LABELS } from "../components/labels";
 import { useShellParams } from "../shell/params";
 import QueryStatus from "./QueryStatus";
@@ -186,6 +187,14 @@ function PlayerPageBody({ page }: { page: PlayerPageData }) {
       <section aria-labelledby="player-shots">
         <h2 id="player-shots">Shot profile</h2>
         <Shots zones={page.shot_profile} window={page.window} />
+      </section>
+      <section aria-labelledby="player-production">
+        <h2 id="player-production">Production</h2>
+        <p className="note">
+          Every window at once, each with its difference from the season in small type, a percentage&apos;s in
+          points.
+        </p>
+        <ProductionTable rows={page.production} />
       </section>
       <section aria-labelledby="player-teammates">
         <h2 id="player-teammates">Teammates</h2>
