@@ -101,7 +101,9 @@ def test_derive_records_every_step_of_every_date_and_is_then_not_missing(
     # Every writing step for each date, in date order, and one reconciliation, for the last date.
     assert [(r.day, r.step) for r in results if r.step != run.WINDOWS] == [
         *((day, run.GARBAGE_TIME) for day in DAYS),
-        *((day, step) for day in DAYS for step in WRITES[2:]),
+        # BPM and value before the view's refresh, which reads them (ADR 0005).
+        *((day, step) for day in DAYS for step in (run.BPM, run.VALUE)),
+        *((day, step) for day in DAYS for step in (run.TIERS, run.EVENTS, run.FLAGS)),
         (DAYS[-1], RECONCILE),
     ]
     assert [r.day for r in results if r.step == run.WINDOWS] == DAYS

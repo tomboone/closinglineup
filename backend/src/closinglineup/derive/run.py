@@ -2,14 +2,15 @@
 §3.2, §6.4).
 
 The steps, in order, for each date in date order: garbage time on its stints
-(`derive.garbage_time`), the `player_window_stats` refresh (`derive.windows`), rotation state,
-events and flags (`derive.rotation`, `derive.events`, `derive.flags`), the local BPM snapshot
-(`derive.bpm`) and the value metrics over it (`derive.value`); then a reconciliation sample
+(`derive.garbage_time`), the local BPM snapshot (`derive.bpm`) and the value metrics over it
+(`derive.value`), the `player_window_stats` refresh (`derive.windows`), rotation state, events and
+flags (`derive.rotation`, `derive.events`, `derive.flags`); then a reconciliation sample
 (`derive.reconcile`). Two depart from per-date order:
 
-- The view is computed whole, so it is refreshed once for the run, after every date's garbage time
-  (a refresh takes about 40 s over a full season, spec §6.4), and each date's `windows` row
-  records that one refresh.
+- The view is computed whole, so it is refreshed once for the run, after every date's garbage time,
+  BPM and value snapshots, which it reads (ADR 0005; a refresh takes about 40 s over a full
+  season, spec §6.4), and each date's `windows` row records that one refresh. Rotation state,
+  events and flags read the view, so they follow it.
 - Reconciliation compares season totals, the same whatever the date, so the sample is reconciled
   once, for the run's last date, as `nightly` did before it ran `derive`.
 
@@ -79,8 +80,9 @@ FLAGS = Step("player_flag", "flags")
 BPM = Step("impact_snapshot", "bpm")
 VALUE = Step("impact_snapshot", "value")
 RECONCILE = Step("stint", "reconcile")
-# The steps that write, all of which a date needs to have succeeded to count as derived.
-WRITES = (GARBAGE_TIME, WINDOWS, TIERS, EVENTS, FLAGS, BPM, VALUE)
+# The steps that write, in the order they run, all of which a date needs to have succeeded to count
+# as derived.
+WRITES = (GARBAGE_TIME, BPM, VALUE, WINDOWS, TIERS, EVENTS, FLAGS)
 # A date counts as loaded, and so due a derive, once its box scores have loaded.
 LOADED_TABLE = "player_game"
 
@@ -258,6 +260,11 @@ def derive(
     run = _Run(db, clock)
     for day in ordered:
         run.step(GARBAGE_TIME, [day], partial(write_garbage_time, db, day, rules.garbage_time))
+    # The view reads the BPM and value snapshots, so they are written first (ADR 0005).
+    for day in ordered:
+        run.step(BPM, [day], partial(write_bpm, db, day))
+        # VORP reads the date's BPM.
+        run.step(VALUE, [day], partial(compute_value, db, day))
     run.step(WINDOWS, ordered, partial(refresh_windows, db))
     for day in ordered:
         run.step(TIERS, [day], partial(compute_rotation_state, db, day, rules.tiers))
@@ -265,9 +272,6 @@ def derive(
         run.step(EVENTS, [day], partial(compute_events, db, day, rules.signals))
         # Flags read the date's events among their inputs.
         run.step(FLAGS, [day], partial(compute_flags, db, day, rules.flags))
-        run.step(BPM, [day], partial(write_bpm, db, day))
-        # VORP reads the date's BPM.
-        run.step(VALUE, [day], partial(compute_value, db, day))
     last = ordered[-1]
     if reconcile:
         run.step(

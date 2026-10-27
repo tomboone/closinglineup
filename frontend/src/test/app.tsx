@@ -217,13 +217,14 @@ const PRODUCTION: ProductionRow[] = [
     label: "Win Shares",
     format: "number",
     windows: {
-      "5": null,
-      "10": null,
-      "20": null,
+      "5": { ...cell(0.9, 5, null), o_value: 0.6, d_value: 0.3 },
+      "10": { ...cell(1.8, 10, null), o_value: 1.2, d_value: 0.6 },
+      "20": { ...cell(2.4, 12, null, true), o_value: 1.6, d_value: 0.8 },
       season: { ...cell(2.4, 12, null), o_value: 1.6, d_value: 0.8 },
       prior_season: { ...cell(7.1, 70, null), o_value: 4.5, d_value: 2.6 },
     },
   },
+  production("ws_48", "WS/48", "rate", 0.15),
   {
     metric: "vorp",
     label: "VORP",

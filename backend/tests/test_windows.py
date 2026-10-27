@@ -1,21 +1,27 @@
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import delete, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from closinglineup.clock import FakeClock
 from closinglineup.db.models import (
     Game,
     ImpactSnapshot,
+    LoadLog,
     PlayerGame,
     RosterMembership,
     Shot,
     Stint,
 )
+from closinglineup.derive import run
 from closinglineup.derive.windows import refresh_windows
+from closinglineup.settings import Settings
+from closinglineup.sources.cache import RawCache
 
 DB_DIR = Path(__file__).parents[1] / "src" / "closinglineup" / "db"
 
@@ -527,6 +533,95 @@ def test_the_value_snapshots_carry_forward_within_the_season_and_prior_reads_its
     assert _row(seeded, FIXTURE, None, "5", _day(20))["ws_local"] == 1.2
     assert (prior["ws_local"], prior["ws_local_o"], prior["vorp_local"]) == (0.9, 0.6, 0.2)
     assert prior["ws_local_d"] == pytest.approx(0.3)
+    # 2025-26's final Win Shares over his 30 minutes that season.
+    assert (prior["ws_window"], prior["ws_window_o"]) == (0.9, 0.6)
+    assert prior["ws_48"] == pytest.approx(0.9 * 2880 / (30 * 60))
+    assert (prior["ws_48_delta_prior"], rows[_day(20)]["ws_window"]) == (None, 1.2)
+
+
+def _add_win_shares(db: sessionmaker[Session], *snapshots: tuple[int, float, float]) -> None:
+    """Add the fixture player's (SAC game, Win Shares, offensive Win Shares) snapshots and refresh
+    the view; the seeded fixture's teardown clears them."""
+    with db.begin() as session:
+        session.add_all(_snapshot(_day(g), "ws_local", ws, ows) for g, ws, ows in snapshots)
+    refresh_windows(db)
+
+
+def _fixture_seconds(games: range) -> int:
+    return sum(_fixture_minutes(g) for g in games) * 60
+
+
+def test_win_shares_over_a_window_are_the_snapshot_less_the_one_n_games_back(
+    seeded: sessionmaker[Session],
+) -> None:
+    _add_win_shares(seeded, (5, 1.0, 0.6), (15, 2.5, 1.5))
+    ten = _rows(seeded, FIXTURE, None, "10")
+    season = _row(seeded, FIXTURE, None, "season", _day(15))
+
+    assert ten[_day(15)]["ws_window"] == pytest.approx(1.5)
+    assert ten[_day(15)]["ws_window_o"] == pytest.approx(0.9)
+    assert ten[_day(15)]["ws_window_d"] == pytest.approx(0.6)
+    assert ten[_day(15)]["ws_48"] == pytest.approx(1.5 * 2880 / _fixture_seconds(range(6, 16)))
+    # Before his 11th game the window's start counts as 0, so it holds the season to date.
+    assert ten[_day(8)]["ws_window"] == 1.0
+    assert ten[_day(15)]["ws_local"] == 2.5
+    assert ten[_day(15)]["ws_48_delta_prior"] == pytest.approx(
+        ten[_day(15)]["ws_48"] - 1.0 * 2880 / _fixture_seconds(range(1, 6))
+    )
+    assert season["ws_window"] == 2.5
+    assert season["ws_48"] == pytest.approx(2.5 * 2880 / _fixture_seconds(range(1, 16)))
+    assert ten[_day(15)]["ws_48_delta_season"] == pytest.approx(
+        ten[_day(15)]["ws_48"] - season["ws_48"]
+    )
+
+
+def test_win_shares_over_a_window_with_no_snapshot_at_its_start_are_null(
+    seeded: sessionmaker[Session],
+) -> None:
+    _add_win_shares(seeded, (12, 2.0, 1.2))
+
+    assert _row(seeded, FIXTURE, None, "5", _day(15))["ws_window"] is None
+    assert _row(seeded, FIXTURE, None, "5", _day(15))["ws_48"] is None
+    assert _row(seeded, FIXTURE, None, "20", _day(15))["ws_window"] == 2.0
+
+
+def test_derive_refreshes_the_view_after_writing_the_dates_bpm_and_value_snapshots(
+    seeded: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    day = _day(19)
+
+    def nothing(*_: object) -> dict[str, Any]:
+        return {}
+
+    def writes(source: str, value: float, o_value: float) -> Any:
+        def step(db: sessionmaker[Session], on: date, *_: Any) -> dict[str, Any]:
+            with db.begin() as session:
+                session.add(_snapshot(on, source, value, o_value))
+            return {}
+
+        return step
+
+    # The date's snapshots, written by the BPM and value steps; the other steps do nothing.
+    monkeypatch.setattr(run, "write_bpm", writes("bpm_local", 4.0, 2.5))
+    monkeypatch.setattr(run, "compute_value", writes("ws_local", 2.0, 1.4))
+    for name in ("write_garbage_time", "compute_rotation_state", "compute_events", "compute_flags"):
+        monkeypatch.setattr(run, name, nothing)
+    unused = "postgresql+psycopg://unused@127.0.0.1:1/x"
+    rules = run.DeriveRules.from_settings(Settings(database_url=unused, tz=ZoneInfo("UTC")))
+    clock = FakeClock(datetime(2026, 11, 9, 8, tzinfo=UTC))
+    try:
+        results = run.derive(seeded, RawCache(tmp_path), clock, [day], rules, reconcile=False)
+    finally:
+        with seeded.begin() as session:
+            session.execute(
+                delete(LoadLog).where(
+                    LoadLog.game_date == day, LoadLog.step.in_(s.name for s in run.WRITES)
+                )
+            )
+
+    run.raise_for_failures(results)
+    row = _row(seeded, FIXTURE, None, "season", day)
+    assert (row["bpm_local"], row["ws_local"]) == (4.0, 2.0)
 
 
 def test_a_traded_players_role_windows_restart_and_his_production_windows_continue(
@@ -575,6 +670,7 @@ def test_a_second_game_on_a_teams_date_counts_once_and_the_refresh_holds(
 
 
 def test_views_sql_is_the_view_migration_s_copy() -> None:
-    copy = DB_DIR / "alembic" / "versions" / "c7e19a4d2b30_player_window_stats_value_snapshots.sql"
+    versions = DB_DIR / "alembic" / "versions"
+    copy = versions / "d2a9f3b8e614_player_window_stats_windowed_win_shares.sql"
 
     assert (DB_DIR / "views.sql").read_text() == copy.read_text()

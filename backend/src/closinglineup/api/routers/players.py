@@ -104,8 +104,7 @@ REGULATION_SECONDS = 5 * 2880
 OVERTIME_SECONDS = 5 * 300
 OFF_REPORT = "Off the injury report"
 PRODUCTION_WINDOWS = ("5", "10", "20", "season", "prior_season")
-# Win Shares and VORP are snapshotted as season-to-date totals, so they have no 5, 10 or 20-game
-# window.
+# VORP is snapshotted as a season-to-date total and kept for these windows only (NEU-2003).
 SEASON_WINDOWS = ("season", "prior_season")
 _KIND_RANK = {"injury": 0, "transaction": 1, "starter": 2, "closer": 3}
 
@@ -675,6 +674,8 @@ class _Metric(NamedTuple):
     format: ProductionFormat
     column: str
     windows: tuple[str, ...] = PRODUCTION_WINDOWS
+    # Whether it has a delta against the season window.
+    delta: bool = True
 
 
 # v2 spec §8.6's order.
@@ -692,8 +693,9 @@ PRODUCTION_METRICS = (
     _Metric("reb_per36", "REB/36", "number", "reb_per36"),
     _Metric("ast_per36", "AST/36", "number", "ast_per36"),
     _Metric("game_score", "Game Score", "per_game", "game_score"),
-    _Metric("ws", "Win Shares", "number", "ws_local", SEASON_WINDOWS),
-    _Metric("vorp", "VORP", "number", "vorp_local", SEASON_WINDOWS),
+    _Metric("ws", "Win Shares", "number", "ws_window", delta=False),
+    _Metric("ws_48", "WS/48", "rate", "ws_48"),
+    _Metric("vorp", "VORP", "number", "vorp_local", SEASON_WINDOWS, delta=False),
 )
 
 
@@ -701,21 +703,19 @@ def _production_table(
     session: Session, player_id: int, latest: date | None, day: date
 ) -> list[ProductionRow]:
     """Each metric over his production windows, from the rows the shot profile reads. Win Shares
-    and VORP carry no delta: the season's is to date and the prior season's whole, so their
-    difference measures how far into the season he is, not a change in him. Before his first game
-    of `day`'s season the prior season has no season to compare with, and its Win Shares and VORP
-    are that season's final snapshots, as the view's prior_season rows read them."""
+    carry no delta: a window's are a total over its games and the season's over the season to
+    date, so their difference measures the window's length, not a change in him; WS/48, their
+    rate, does carry one. VORP is kept for the season and the prior season only, with no delta for
+    the same reason. Before his first game of `day`'s season the prior season has no season to
+    compare with, and its Win Shares and VORP are that season's final snapshots, as the view's
+    prior_season rows read them."""
     columns = [
         "games_in_window",
         "is_short",
-        "ws_local_o",
-        "ws_local_d",
+        "ws_window_o",
+        "ws_window_d",
         *(metric.column for metric in PRODUCTION_METRICS),
-        *(
-            f"{metric.column}_delta_season"
-            for metric in PRODUCTION_METRICS
-            if metric.windows == PRODUCTION_WINDOWS
-        ),
+        *(f"{metric.column}_delta_season" for metric in PRODUCTION_METRICS if metric.delta),
     ]
     rows = _production_rows(session, player_id, latest, day, list(PRODUCTION_WINDOWS), columns)
     prior = rows.get("prior_season")
@@ -747,8 +747,8 @@ def _cell(metric: _Metric, row: dict[str, Any] | None) -> ProductionCell | None:
         delta_season=row.get(f"{metric.column}_delta_season"),
         games=row["games_in_window"],
         is_short=row["is_short"],
-        o_value=row["ws_local_o"] if ws else None,
-        d_value=row["ws_local_d"] if ws else None,
+        o_value=row["ws_window_o"] if ws else None,
+        d_value=row["ws_window_d"] if ws else None,
     )
 
 
@@ -775,7 +775,7 @@ def _final_values(session: Session, player_id: int, day: date) -> dict[str, floa
     latest = {source: (value, o_value, d_value) for source, value, o_value, d_value in found}
     ws, ws_o, ws_d = latest.get("ws_local", (None, None, None))
     vorp, _, _ = latest.get("vorp_local", (None, None, None))
-    return {"ws_local": ws, "ws_local_o": ws_o, "ws_local_d": ws_d, "vorp_local": vorp}
+    return {"ws_window": ws, "ws_window_o": ws_o, "ws_window_d": ws_d, "vorp_local": vorp}
 
 
 # Teammates and matchups.

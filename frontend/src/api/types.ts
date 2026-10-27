@@ -651,7 +651,7 @@ export interface components {
         /** @enum {string} */
         ProductionFormat: "percent" | "rate" | "number" | "per_game";
         /** @enum {string} */
-        ProductionMetric: "ts_pct" | "efg_pct" | "usg_pct" | "ast_pct" | "tov_pct" | "oreb_pct" | "dreb_pct" | "ftr" | "fg3a_rate" | "pts_per36" | "reb_per36" | "ast_per36" | "game_score" | "ws" | "vorp";
+        ProductionMetric: "ts_pct" | "efg_pct" | "usg_pct" | "ast_pct" | "tov_pct" | "oreb_pct" | "dreb_pct" | "ftr" | "fg3a_rate" | "pts_per36" | "reb_per36" | "ast_per36" | "game_score" | "ws" | "ws_48" | "vorp";
         /** ProductionRow */
         ProductionRow: {
             format: components["schemas"]["ProductionFormat"];
