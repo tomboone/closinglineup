@@ -13,13 +13,17 @@ off the schedule and the reports alone, nothing on it derived (v2 spec §5, §9)
   either report, and an assignment's shows as the `g_league` badge, as `derive.availability` reads
   `g_league` from an assignment alone, never a two-way line. A team with no report shows the
   badges of its roster's players on assignment alone;
-- **projected starters** are empty until NEU-1988 fills them.
+- the **projected starters** are the team's players by `starter_rate_5` on the same date as the
+  lines' tiers, ties by 10-game minutes share and then name, less anyone Out or Doubtful on the
+  report: the first five left, each a `replacement` when he ranks below the top five, so starts
+  only for one removed above him (v2 spec §5.3, CONTEXT.md). A rule applied to the report, not a
+  prediction; a team with fewer than five players with a starter rate has what it has.
 
 `last_night` is the latest derived date before the date, the one the feed's other tabs read.
 """
 
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Container, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any, NamedTuple, cast
@@ -34,6 +38,7 @@ from closinglineup.api.schemas import (
     Impact,
     InjurySource,
     LineChange,
+    ProjectedStarter,
     SlateGame,
     SlateLine,
     SlatePage,
@@ -54,6 +59,7 @@ from closinglineup.db.models import (
 from closinglineup.derive.availability import NOT_INJURIES
 from closinglineup.derive.roster import ON_ASSIGNMENT, current_g_league_assignment
 from closinglineup.injuries import ESPN_SOURCE, PDF_SOURCE
+from closinglineup.season import season_bounds, season_label
 from closinglineup.sources.injury_pdf import EASTERN
 from closinglineup.teams import by_nba_team_id
 
@@ -65,6 +71,8 @@ STATUSES = ("Out", "Doubtful", "Questionable", "Probable", "Available")
 OUT = frozenset({"Out", "Doubtful"})
 _STATUS_RANK = {line_status: rank for rank, line_status in enumerate(STATUSES)}
 _TIER_RANK = {tier: rank for rank, tier in enumerate(ROTATION_TIERS)}
+# How many starters a team projects.
+STARTERS = 5
 
 
 @router.get("/api/slate")
@@ -89,14 +97,25 @@ def slate(
         for team_id in team_ids
         if reports.get(team_id, _Reports()).now is None
     }
-    states = _states(session, team_ids, last_night)
+    states = _states(session, team_ids, day, last_night)
     lines = {
         team_id: _lines(reports.get(team_id, _Reports()), badges.get(team_id, set()))
         for team_id in team_ids
     }
+    rated = {
+        player_id for (player_id, _), state in states.items() if state.starter_rate_5 is not None
+    }
     players = {line.player_id for team in lines.values() for line in team}
-    names = player_names(session, players)
-    impacts = player_impacts(session, players, day)
+    names = player_names(session, players | rated)
+    starters = {
+        team_id: projected_starters(
+            _by_starter_rate(team_id, states, names), _out(reports.get(team_id, _Reports()))
+        )
+        for team_id in team_ids
+    }
+    impacts = player_impacts(
+        session, players | {player_id for team in starters.values() for player_id, _ in team}, day
+    )
 
     def side(team_id: int, b2b: bool) -> SlateTeam:
         now = reports.get(team_id, _Reports()).now
@@ -121,7 +140,12 @@ def slate(
                 submitted=True,
             ),
             lines=sorted(team, key=_line_order),
-            projected_starters=[],
+            projected_starters=[
+                _projected_starter(
+                    player_id, replacement, names, impacts, states[player_id, team_id]
+                )
+                for player_id, replacement in starters[team_id]
+            ],
         )
 
     return SlatePage(
@@ -236,17 +260,28 @@ def _assigned(session: Session, team_id: int, day: date) -> set[int]:
     }
 
 
+class _State(NamedTuple):
+    tier: str
+    minutes_share_10: float | None
+    starter_rate_5: float | None
+
+
 def _states(
-    session: Session, team_ids: Iterable[int], last_night: date | None
-) -> dict[tuple[int, int], tuple[str, float | None]]:
-    """Each player-team's tier and 10-game minutes share on the team's latest derived date on or
-    before `last_night`."""
+    session: Session, team_ids: Iterable[int], day: date, last_night: date | None
+) -> dict[tuple[int, int], _State]:
+    """Each player-team's tier, 10-game minutes share and 5-game starter rate on the team's latest
+    derived date in `day`'s season on or before `last_night`, as the team page's `tier_date` is."""
     team_ids = list(team_ids)
     if last_night is None or not team_ids:
         return {}
+    season_start, _ = season_bounds(season_label(day))
     latest = (
         select(RotationState.team_id, func.max(RotationState.game_date).label("game_date"))
-        .where(RotationState.team_id.in_(team_ids), RotationState.game_date <= last_night)
+        .where(
+            RotationState.team_id.in_(team_ids),
+            RotationState.game_date >= season_start,
+            RotationState.game_date <= last_night,
+        )
         .group_by(RotationState.team_id)
         .subquery()
     )
@@ -256,13 +291,17 @@ def _states(
             RotationState.team_id,
             RotationState.tier,
             RotationState.minutes_share_10,
+            RotationState.starter_rate_5,
         ).where(
             tuple_(RotationState.team_id, RotationState.game_date).in_(
                 select(latest.c.team_id, latest.c.game_date)
             )
         )
     ).all()
-    return {(player_id, team_id): (tier, share) for player_id, team_id, tier, share in found}
+    return {
+        (player_id, team_id): _State(tier, share, rate)
+        for player_id, team_id, tier, share, rate in found
+    }
 
 
 # Lines.
@@ -295,9 +334,9 @@ class _SlateLine:
         self,
         names: dict[int, str],
         impacts: dict[int, Impact],
-        state: tuple[str, float | None] | None,
+        state: _State | None,
     ) -> SlateLine:
-        tier, share = (None, None) if state is None else state
+        tier, share = (None, None) if state is None else (state.tier, state.minutes_share_10)
         # An `off` line's reason is the one he came off with.
         line = self.now or self.was
         return SlateLine(
@@ -347,4 +386,67 @@ def _line_order(line: SlateLine) -> tuple[Any, ...]:
         line.player.name is None,
         line.player.name or "",
         line.player.player_id,
+    )
+
+
+# Projected starters.
+
+
+def projected_starters(ranked: Iterable[int], out: Container[int]) -> list[tuple[int, bool]]:
+    """The first `STARTERS` of `ranked` not `out`, each with whether he is a replacement: ranked
+    below the first `STARTERS`, he fills the gap of one removed above him (v2 spec §5.3)."""
+    starters: list[tuple[int, bool]] = []
+    for rank, player_id in enumerate(ranked):
+        if len(starters) == STARTERS:
+            break
+        if player_id not in out:
+            starters.append((player_id, rank >= STARTERS))
+    return starters
+
+
+def _by_starter_rate(
+    team_id: int, states: dict[tuple[int, int], _State], names: dict[int, str]
+) -> list[int]:
+    """The team's players with a starter rate, the highest first, ties by 10-game minutes share,
+    the highest first, and then name."""
+    rated = [
+        (player_id, state.starter_rate_5, state.minutes_share_10)
+        for (player_id, team), state in states.items()
+        if team == team_id and state.starter_rate_5 is not None
+    ]
+    rated.sort(
+        key=lambda row: (
+            -row[1],
+            row[2] is None,
+            -(row[2] or 0.0),
+            row[0] not in names,
+            names.get(row[0], ""),
+            row[0],
+        )
+    )
+    return [player_id for player_id, _, _ in rated]
+
+
+def _out(reports: _Reports) -> set[int]:
+    """The players Out or Doubtful on the team's report."""
+    now = reports.now
+    if now is None:
+        return set()
+    return {player_id for player_id, line in now.lines.items() if line.status in OUT}
+
+
+def _projected_starter(
+    player_id: int,
+    replacement: bool,
+    names: dict[int, str],
+    impacts: dict[int, Impact],
+    state: _State,
+) -> ProjectedStarter:
+    assert state.starter_rate_5 is not None
+    return ProjectedStarter(
+        player=player_ref(player_id, names),
+        starter_rate_5=state.starter_rate_5,
+        minutes_share_10=state.minutes_share_10,
+        replacement=replacement,
+        impact=impacts.get(player_id),
     )

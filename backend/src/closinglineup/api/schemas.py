@@ -374,11 +374,11 @@ class SlateLine(BaseModel):
 
 class ProjectedStarter(BaseModel):
     """One of the first five of the team's players by `starter_rate_5` on its latest derived date
-    whose line on the report is not Out or Doubtful; `replacement` when one ranked above him was
-    removed (v2 spec §5.3)."""
+    whose line on the report is not Out or Doubtful; `replacement` when he ranks below the top five,
+    so fills the gap of one removed above him (v2 spec §5.3)."""
 
     player: PlayerRef
-    starter_rate_5: float | None
+    starter_rate_5: float
     minutes_share_10: float | None
     replacement: bool
     impact: Impact | None

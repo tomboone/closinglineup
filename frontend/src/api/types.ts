@@ -629,8 +629,8 @@ export interface components {
         /**
          * ProjectedStarter
          * @description One of the first five of the team's players by `starter_rate_5` on its latest derived date
-         *     whose line on the report is not Out or Doubtful; `replacement` when one ranked above him was
-         *     removed (v2 spec §5.3).
+         *     whose line on the report is not Out or Doubtful; `replacement` when he ranks below the top five,
+         *     so fills the gap of one removed above him (v2 spec §5.3).
          */
         ProjectedStarter: {
             impact: components["schemas"]["Impact"] | null;
@@ -640,7 +640,7 @@ export interface components {
             /** Replacement */
             replacement: boolean;
             /** Starter Rate 5 */
-            starter_rate_5: number | null;
+            starter_rate_5: number;
         };
         /**
          * QuietSignal

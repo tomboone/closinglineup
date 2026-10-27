@@ -1357,7 +1357,7 @@
         "type": "object"
       },
       "ProjectedStarter": {
-        "description": "One of the first five of the team's players by `starter_rate_5` on its latest derived date\nwhose line on the report is not Out or Doubtful; `replacement` when one ranked above him was\nremoved (v2 spec \u00a75.3).",
+        "description": "One of the first five of the team's players by `starter_rate_5` on its latest derived date\nwhose line on the report is not Out or Doubtful; `replacement` when he ranks below the top five,\nso fills the gap of one removed above him (v2 spec \u00a75.3).",
         "properties": {
           "impact": {
             "anyOf": [
@@ -1388,15 +1388,8 @@
             "type": "boolean"
           },
           "starter_rate_5": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Starter Rate 5"
+            "title": "Starter Rate 5",
+            "type": "number"
           }
         },
         "required": [
