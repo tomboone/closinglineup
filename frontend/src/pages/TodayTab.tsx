@@ -17,8 +17,8 @@ const TIP_TIME = new Intl.DateTimeFormat("en-US", {
 });
 
 /**
- * The morning's slate (v2 spec §4.1, §5): a card per game of the selected teams, every game when none
- * is selected, with each side's newest report, its lines and the change on each since the previous
+ * The morning's slate (v2 spec §4.1, §5): each game of the selected teams, every game when none is
+ * selected, with each side's newest report, its lines and the change on each since the previous
  * report, and its projected starters.
  */
 function TodayTab({ slate, teams }: { slate: SlatePage; teams: ReadonlySet<string> }) {
@@ -67,7 +67,11 @@ function SlateSide({ team }: { team: SlateTeam }) {
         <TeamLink tricode={team.tricode} />
       </h3>
       <ReportLine report={team.report} none="Not yet submitted" />
-      {team.lines.length > 0 && <Lines lines={team.lines} />}
+      {team.lines.length > 0 ? (
+        <Lines lines={team.lines} />
+      ) : (
+        team.report.submitted && <p>Nobody listed.</p>
+      )}
       <h4>Projected starters</h4>
       {team.projected_starters.length === 0 ? (
         <p>No starter rates yet.</p>
@@ -77,7 +81,7 @@ function SlateSide({ team }: { team: SlateTeam }) {
             <li key={starter.player.player_id}>
               <PlayerLink player={starter.player} />
               {starter.replacement && (
-                <span className="badge" title="In for a player ranked above him who is out">
+                <span className="marker marker-replacement" title="In for a player ranked above him who is out">
                   replacement
                 </span>
               )}

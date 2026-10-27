@@ -365,7 +365,8 @@ body {
   align-items: start;
 }
 
-.marker-b2b {
+.marker-b2b,
+.marker-replacement {
   border: 1px solid #8c959f;
   color: #57606a;
   font-style: normal;

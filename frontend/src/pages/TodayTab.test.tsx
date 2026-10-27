@@ -65,7 +65,7 @@ const BOS: SlateTeam = {
       tier: "starter",
     }),
     line(PRITCHARD, { status: "Probable", reason: "Ankle", previous_status: "Probable" }),
-    line(HOLIDAY, { previous_status: "Questionable", reason: "Back", change: "off" }),
+    line(HOLIDAY, { previous_status: "Questionable", change: "off" }),
   ],
   projected_starters: [
     starter(BROWN),
@@ -94,11 +94,22 @@ const LAL: SlateTeam = {
 
 const team = (tricode: string): SlateTeam => ({ ...LAL, tricode, b2b: false, lines: [] });
 
+/** Philadelphia's report is ESPN's fallback, listing nobody. */
+const PHI: SlateTeam = {
+  ...team("PHI"),
+  report: {
+    report_datetime: "2026-03-21T09:00:00-04:00",
+    source: "espn",
+    stale: true,
+    submitted: true,
+  },
+};
+
 const SLATE: SlatePage = {
   ...SLATE_PAGE,
   games: [
     { game_id: "0022501000", tip_time: "2026-03-21T19:30:00-04:00", away: LAL, home: BOS },
-    { game_id: "0022501001", tip_time: null, away: team("NYK"), home: team("PHI") },
+    { game_id: "0022501001", tip_time: null, away: team("NYK"), home: PHI },
   ],
 };
 
@@ -110,7 +121,7 @@ const rowOf = (side: HTMLElement, name: string) =>
   within(within(side).getByRole("table")).getByRole("link", { name }).closest("tr")!;
 
 describe("TodayTab", () => {
-  it("renders a card per game: matchup, tip-off in Eastern and the B2B side", async () => {
+  it("renders each game: matchup, tip-off in Eastern and the B2B side", async () => {
     morning();
     renderApp(MORNING);
 
@@ -136,6 +147,13 @@ describe("TodayTab", () => {
     expect(lal).toHaveTextContent("Not yet submitted");
     const knecht = rowOf(lal, "Dalton Knecht");
     expect(knecht).toHaveTextContent("Dalton KnechtG League—");
+
+    const phi = within(screen.getByRole("region", { name: "NYK @ PHI" })).getByRole("region", {
+      name: "PHI",
+    });
+    expect(phi).toHaveTextContent("ESPN, Mar 21, 2026, 9:00 AM ETstale");
+    expect(phi).toHaveTextContent("Nobody listed.");
+    expect(within(phi).getByText("stale")).toHaveClass("marker-stale");
   });
 
   it("leads each changed line with its kind, the previous status beside the new", async () => {
