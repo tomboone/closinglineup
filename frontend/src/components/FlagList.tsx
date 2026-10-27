@@ -1,4 +1,5 @@
 import type { components } from "../api/types";
+import FlagVisual from "./charts/FlagVisual";
 import { money, percent, signed } from "./format";
 import ImpactValue from "./ImpactValue";
 import PlayerLink from "./PlayerLink";
@@ -71,8 +72,9 @@ function FlagList({ flags }: { flags: RaisedFlag[] }) {
 }
 
 /**
- * A date's raised flags under a heading per flag, each with its player, his impact, his team and what
- * raised it; the API sends them by flag in spec §7.7's order, which the groups keep.
+ * A date's raised flags under a heading per flag, each with its player, his impact, his team, what
+ * raised it and its `FlagVisual`; the API sends them by flag in spec §7.7's order, which the groups
+ * keep.
  */
 export function FlagGroups({ flags }: { flags: RaisedFlag[] }) {
   const groups = new Map<Schemas["Flag"], RaisedFlag[]>();
@@ -84,10 +86,13 @@ export function FlagGroups({ flags }: { flags: RaisedFlag[] }) {
       </h3>
       <ul className="flag-list">
         {raised.map((one) => (
-          <li key={`${one.tricode}-${one.player.player_id}`}>
-            <PlayerLink player={one.player} /> <ImpactValue impact={one.impact} />{" "}
-            <TeamLink tricode={one.tricode} />{" "}
-            <span className="note">{describe(flag, one.detail)}</span>
+          <li key={`${one.tricode}-${one.player.player_id}`} className="flag-row">
+            <span>
+              <PlayerLink player={one.player} /> <ImpactValue impact={one.impact} />{" "}
+              <TeamLink tricode={one.tricode} />{" "}
+              <span className="note">{describe(flag, one.detail)}</span>
+            </span>
+            <FlagVisual raised={one} />
           </li>
         ))}
       </ul>

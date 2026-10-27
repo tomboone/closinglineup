@@ -246,10 +246,10 @@ class Impact(BaseModel):
 
 
 class TierPoint(BaseModel):
-    """His tier on one of his team's game dates."""
+    """His tier on one of his team's game dates, null on a date he has no row on."""
 
     game_date: dt.date
-    tier: Tier
+    tier: Tier | None
 
 
 class RotationEventSummary(BaseModel):
@@ -281,7 +281,7 @@ class Mover(BaseModel):
 class RaisedFlag(BaseModel):
     """A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the
     team's last 20 final game dates this season through it, the oldest first, a date he has no row
-    on left out (v2 spec §6.2); other flags', and every flag's elsewhere, are null."""
+    on kept with a null tier (v2 spec §6.2); other flags', and every flag's elsewhere, are null."""
 
     player: PlayerRef
     tricode: str

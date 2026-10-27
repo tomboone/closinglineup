@@ -1,5 +1,6 @@
 import type { components } from "../api/types";
 import AnnotatedTimeSeries from "../components/charts/AnnotatedTimeSeries";
+import FlagVisual from "../components/charts/FlagVisual";
 import MoverChart from "../components/charts/MoverChart";
 import ShotProfile from "../components/charts/ShotProfile";
 import SparklineCell from "../components/charts/SparklineCell";
@@ -99,6 +100,34 @@ function movers(n: number, sign: 1 | -1): Schemas["Mover"][] {
   });
 }
 
+const TIER_CYCLE: Schemas["Tier"][] = ["core", "core", "fringe", "core", "starter", "fringe", "out"];
+
+/** One raised flag of each kind, a yo-yo's strip with no row on two of its dates. */
+const FLAGS: Schemas["RaisedFlag"][] = (
+  [
+    ["minutes_cliff", { share_5: 0.05, share_20: 0.12, ratio: 0.42 }],
+    ["usage_up_efficiency_down", { usg_pct_delta_season: 0.041, ts_pct_delta_season: -0.052 }],
+    ["bleeding", { on_court_net: -8.2, possessions: 412, off_court_net: 3.1 }],
+    ["earning_trust", { shares: [0.08, 0.1, 0.13] }],
+    ["yo_yo", { events: 5, changes: [] }],
+    ["contract_pressure", { reason: "two_way", active_games: 46, limit: 50 }],
+  ] as const
+).map(([flag, detail]) => ({
+  game_date: DATES[19],
+  flag,
+  player: { player_id: 1, name: "Jrue Holiday" },
+  tricode: "BOS",
+  detail,
+  impact: null,
+  tiers:
+    flag === "yo_yo"
+      ? DATES.map((game_date, i) => ({
+          game_date,
+          tier: i === 2 || i === 3 ? null : TIER_CYCLE[i % TIER_CYCLE.length]!,
+        }))
+      : null,
+}));
+
 const SHOT_WINDOWS = [
   { label: "Last 10", shift: 0.03 },
   { label: "Season", shift: 0 },
@@ -157,6 +186,20 @@ function ChartsPage() {
         unitLabel="Minutes share, pts"
         scale={100}
       />
+
+      <h2>FlagVisual</h2>
+      <table>
+        <tbody>
+          {FLAGS.map((raised) => (
+            <tr key={raised.flag}>
+              <td>{raised.flag}</td>
+              <td>
+                <FlagVisual raised={raised} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       <h2>StintTimeline</h2>
       <StintTimeline rows={ROWS} periods={4} garbageTimeFrom={{ period: 4, start_sec: 600 }} />

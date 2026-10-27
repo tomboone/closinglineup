@@ -139,14 +139,16 @@ describe("/dev/charts", () => {
       "SparklineCell",
       "AnnotatedTimeSeries",
       "MoverChart",
+      "FlagVisual",
       "StintTimeline",
       "ShotProfile",
     ]) {
       expect(screen.getByRole("heading", { name: chart })).toBeInTheDocument();
     }
-    // Four sparklines and one of each other chart. The charts set their options in an effect, which
-    // can land after the lazily loaded page's headings do.
-    await waitFor(() => expect(allOptions()).toHaveLength(8));
+    // Four sparklines, five flag visuals (contract pressure has none) and one of each other chart.
+    // The charts set their options in an effect, which can land after the lazily loaded page's
+    // headings do.
+    await waitFor(() => expect(allOptions()).toHaveLength(13));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
