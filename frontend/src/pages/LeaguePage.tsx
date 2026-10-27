@@ -1,5 +1,6 @@
-import type { LeaguePage as LeaguePageData } from "../api/client";
-import { useLeague } from "../api/hooks";
+import { useId } from "react";
+import type { LeaguePage as LeaguePageData, SlatePage } from "../api/client";
+import { useLeague, useSlate, useTeams } from "../api/hooks";
 import type { components } from "../api/types";
 import SparklineCell, { type SparklineRange } from "../components/charts/SparklineCell";
 import { TIER_COLOURS } from "../components/charts/theme";
@@ -8,7 +9,7 @@ import { percent, signed } from "../components/format";
 import { IMPACT_LABELS, TIER_LABELS, TRANSACTION_LABELS } from "../components/labels";
 import PlayerLink from "../components/PlayerLink";
 import TeamLink from "../components/TeamLink";
-import { useShellParams } from "../shell/params";
+import { dayBefore, easternToday, type Tab, TABS, useShellParams } from "../shell/params";
 import QueryStatus from "./QueryStatus";
 
 type Schemas = components["schemas"];
@@ -18,38 +19,217 @@ type Mover = Schemas["Mover"];
 const MINUTES_MOVERS = 15;
 const IMPACT_MOVERS = 10;
 
-/** The morning feed: what changed across the league on the date (spec §8). */
+const TAB_LABELS: Record<Tab, string> = {
+  today: "Today",
+  rotation: "Rotation",
+  movers: "Movers",
+  flags: "Flags",
+  moves: "Moves",
+};
+
+/**
+ * The morning feed (v2 spec §3, §4): the morning's two dates, a tab per view and a team filter, the
+ * derived tabs reading last night through `GET /api/league` and Today reading the morning's slate.
+ * Last night is the slate's `last_night`, the latest derived date before the morning; every page is
+ * fetched up front, so switching tabs does not refetch.
+ */
 function LeaguePage() {
-  const { date } = useShellParams();
-  const league = useLeague({ date });
+  const { date, tab, teams, setTab, setTeams } = useShellParams();
+  const morning = date ?? easternToday();
+  const yesterday = dayBefore(morning);
+  const slate = useSlate({ date: morning });
+  const lastNight = slate.data?.last_night ?? null;
+  const league = useLeague({ date: lastNight ?? undefined }, { enabled: lastNight !== null });
+  // The route gives a date's transactions and the day after's, so last night's page has the
+  // morning's only when last night is the day before; when it lags, the day before's page has them.
+  const lagging = lastNight !== null && lastNight < yesterday;
+  const dayBeforeLeague = useLeague({ date: yesterday }, { enabled: lagging });
+  const morningLeague = lagging ? dayBeforeLeague : league;
+  const ids = useId();
+  const tabId = (one: Tab) => `${ids}-tab-${one}`;
+  const panelId = `${ids}-panel`;
 
   return (
     <>
       <h1>League</h1>
-      <QueryStatus query={league}>{(page) => <LeaguePageBody page={page} />}</QueryStatus>
+      <QueryStatus query={slate}>
+        {(page) => (
+          <>
+            <div className="feed-header">
+              <FeedDates morning={morning} lastNight={page.last_night} />
+              <div role="tablist" aria-label="Feed">
+                {TABS.map((one) => (
+                  <button
+                    key={one}
+                    type="button"
+                    role="tab"
+                    id={tabId(one)}
+                    aria-selected={one === tab}
+                    aria-controls={panelId}
+                    onClick={() => setTab(one)}
+                  >
+                    {TAB_LABELS[one]}
+                  </button>
+                ))}
+              </div>
+              <TeamFilter selected={teams} onChange={setTeams} />
+            </div>
+            <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)} className="league-page">
+              {tab === "today" ? (
+                <TodayPanel slate={page} />
+              ) : page.last_night === null ? (
+                <p>No last night yet: no game date before {morning} has been derived.</p>
+              ) : (
+                <QueryStatus query={league}>
+                  {(derived) =>
+                    tab === "moves" ? (
+                      <QueryStatus query={morningLeague}>
+                        {(ofMorning) => (
+                          <DerivedPanel
+                            tab={tab}
+                            page={filtered(withMoves(derived, ofMorning, morning), teams)}
+                          />
+                        )}
+                      </QueryStatus>
+                    ) : (
+                      <DerivedPanel tab={tab} page={filtered(derived, teams)} />
+                    )
+                  }
+                </QueryStatus>
+              )}
+            </div>
+          </>
+        )}
+      </QueryStatus>
     </>
   );
 }
 
-function LeaguePageBody({ page }: { page: LeaguePageData }) {
-  // The page reads the date alone, so a date no team played has no events, movers or flags, which
-  // come of its games; an injury report or a transaction can still land on it (spec §8).
-  const noGames = [
-    page.rotation_events,
-    page.minutes_risers,
-    page.minutes_fallers,
-    page.flags,
-    page.impact_risers,
-    page.impact_fallers,
-  ].every((list) => list.length === 0);
+/**
+ * The morning's two dates: last night, saying which date is not derived yet when it lags the day
+ * before the morning, and today.
+ */
+function FeedDates({ morning, lastNight }: { morning: string; lastNight: string | null }) {
+  const yesterday = dayBefore(morning);
+  return (
+    <p className="feed-dates">
+      <span>
+        Last night: {lastNight ?? "none yet"}
+        {lastNight !== null && lastNight < yesterday && ` (${yesterday} not derived yet)`}
+      </span>
+      <span>Today: {morning}</span>
+    </p>
+  );
+}
+
+/** A checkbox per tricode; none checked is every team. */
+function TeamFilter({
+  selected,
+  onChange,
+}: {
+  selected: ReadonlySet<string>;
+  onChange: (teams: ReadonlySet<string>) => void;
+}) {
+  const teams = useTeams();
+  const toggle = (tricode: string, on: boolean) => {
+    const next = new Set(selected);
+    if (on) next.add(tricode);
+    else next.delete(tricode);
+    onChange(next);
+  };
+  return (
+    <details className="team-filter">
+      <summary>Teams: {selected.size === 0 ? "all" : [...selected].sort().join(", ")}</summary>
+      <fieldset>
+        <legend>Show teams</legend>
+        {teams.data?.teams.map((team) => (
+          <label key={team.tricode}>
+            <input
+              type="checkbox"
+              checked={selected.has(team.tricode)}
+              onChange={(event) => toggle(team.tricode, event.target.checked)}
+            />{" "}
+            {team.tricode}
+          </label>
+        ))}
+        <button type="button" disabled={selected.size === 0} onClick={() => onChange(new Set())}>
+          All teams
+        </button>
+      </fieldset>
+    </details>
+  );
+}
+
+/**
+ * The page's rows of the selected teams, every row when none is selected: an event by its team, a
+ * mover or a flag by its tricode, a transaction by either of its teams. The movers are filtered after
+ * the API ranked them league-wide.
+ */
+function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
+  const has = (tricode: string | null) => tricode !== null && teams.has(tricode);
+  const keep = <T,>(rows: T[], tricodes: (row: T) => (string | null)[]) =>
+    teams.size === 0 ? rows : rows.filter((row) => tricodes(row).some(has));
+  const byTricode = (row: { tricode: string | null }) => [row.tricode];
+  return {
+    ...page,
+    // The page reads the date alone, so a date no team played has no events, movers or flags, which
+    // come of its games; a transaction can still land on it (spec §8).
+    noGames: [
+      page.rotation_events,
+      page.minutes_risers,
+      page.minutes_fallers,
+      page.flags,
+      page.impact_risers,
+      page.impact_fallers,
+    ].every((list) => list.length === 0),
+    rotation_events: keep(page.rotation_events, byTricode),
+    minutes_risers: keep(page.minutes_risers, byTricode),
+    minutes_fallers: keep(page.minutes_fallers, byTricode),
+    impact_risers: keep(page.impact_risers, byTricode),
+    impact_fallers: keep(page.impact_fallers, byTricode),
+    flags: keep(page.flags, byTricode),
+    transactions: keep(page.transactions, (row) => [row.from_tricode, row.to_tricode]),
+  };
+}
+
+type FeedPage = LeaguePageData & { noGames: boolean };
+
+/** Last night's page with its transactions narrowed to last night's and the morning's (v2 spec §3). */
+function withMoves(
+  lastNight: LeaguePageData,
+  ofMorning: LeaguePageData,
+  morning: string,
+): LeaguePageData {
+  return {
+    ...lastNight,
+    transactions: [
+      ...lastNight.transactions.filter((transaction) => transaction.date === lastNight.date),
+      ...ofMorning.transactions.filter((transaction) => transaction.date === morning),
+    ],
+  };
+}
+
+/** Today's slate; its games, reports and projected starters come with the Today tab's own ticket. */
+function TodayPanel({ slate }: { slate: SlatePage }) {
+  const games = slate.games.length;
+  return (
+    <p>
+      {games === 0
+        ? `No games on ${slate.date}.`
+        : `${games} ${games === 1 ? "game" : "games"} on ${slate.date}.`}
+    </p>
+  );
+}
+
+/** One of the tabs that read last night, its page already filtered to the selected teams. */
+function DerivedPanel({ tab, page }: { tab: Exclude<Tab, "today">; page: FeedPage }) {
   const empty = (emptyMessage: string) => (
-    <p>{noGames ? `No games on ${page.date}.` : emptyMessage}</p>
+    <p>{page.noGames ? `No games on ${page.date}.` : emptyMessage}</p>
   );
 
-  return (
-    <>
-      <p>Morning feed for {page.date}.</p>
-      <div className="league-page">
+  switch (tab) {
+    case "rotation":
+      return (
         <section className="league-events" aria-labelledby="league-events">
           <h2 id="league-events">Rotation changes</h2>
           {page.rotation_events.length === 0 ? (
@@ -58,44 +238,47 @@ function LeaguePageBody({ page }: { page: LeaguePageData }) {
             <RotationEvents teams={page.rotation_events} />
           )}
         </section>
-        <section aria-labelledby="league-minutes">
-          <h2 id="league-minutes">Minutes movers</h2>
-          <p className="note">10-game minutes share against the 10 games before.</p>
-          {page.minutes_risers.length + page.minutes_fallers.length === 0 ? (
-            empty("No minutes movers.")
-          ) : (
-            <>
-              <MoverTable caption="Rising" movers={page.minutes_risers} kind="minutes" />
-              <MoverTable caption="Falling" movers={page.minutes_fallers} kind="minutes" />
-            </>
-          )}
-        </section>
-        <section aria-labelledby="league-impact">
-          <h2 id="league-impact">Impact movers</h2>
-          <p className="note">
-            Impact against 10 team games before, in the first of EPM, DARKO and BPM with both.
-          </p>
-          {page.impact_risers.length + page.impact_fallers.length === 0 ? (
-            empty("No impact movers.")
-          ) : (
-            <>
-              <MoverTable caption="Rising" movers={page.impact_risers} kind="impact" />
-              <MoverTable caption="Falling" movers={page.impact_fallers} kind="impact" />
-            </>
-          )}
-        </section>
+      );
+    case "movers":
+      return (
+        <>
+          <section aria-labelledby="league-minutes">
+            <h2 id="league-minutes">Minutes movers</h2>
+            <p className="note">10-game minutes share against the 10 games before.</p>
+            {page.minutes_risers.length + page.minutes_fallers.length === 0 ? (
+              empty("No minutes movers.")
+            ) : (
+              <>
+                <MoverTable caption="Rising" movers={page.minutes_risers} kind="minutes" />
+                <MoverTable caption="Falling" movers={page.minutes_fallers} kind="minutes" />
+              </>
+            )}
+          </section>
+          <section aria-labelledby="league-impact">
+            <h2 id="league-impact">Impact movers</h2>
+            <p className="note">
+              Impact against 10 team games before, in the first of EPM, DARKO and BPM with both.
+            </p>
+            {page.impact_risers.length + page.impact_fallers.length === 0 ? (
+              empty("No impact movers.")
+            ) : (
+              <>
+                <MoverTable caption="Rising" movers={page.impact_risers} kind="impact" />
+                <MoverTable caption="Falling" movers={page.impact_fallers} kind="impact" />
+              </>
+            )}
+          </section>
+        </>
+      );
+    case "flags":
+      return (
         <section aria-labelledby="league-flags">
           <h2 id="league-flags">Flags</h2>
           {page.flags.length === 0 ? empty("No flags raised.") : <FlagGroups flags={page.flags} />}
         </section>
-        <section aria-labelledby="league-injuries">
-          <h2 id="league-injuries">Injury changes</h2>
-          {page.injury_changes.length === 0 ? (
-            <p>No injury changes.</p>
-          ) : (
-            <InjuryChanges changes={page.injury_changes} />
-          )}
-        </section>
+      );
+    case "moves":
+      return (
         <section aria-labelledby="league-transactions">
           <h2 id="league-transactions">Transactions</h2>
           {page.transactions.length === 0 ? (
@@ -104,9 +287,8 @@ function LeaguePageBody({ page }: { page: LeaguePageData }) {
             <Transactions transactions={page.transactions} />
           )}
         </section>
-      </div>
-    </>
-  );
+      );
+  }
 }
 
 function Tier({ tier }: { tier: Schemas["Tier"] | null }) {
@@ -225,29 +407,13 @@ function MoverSparkline({
   );
 }
 
-const status = (value: Schemas["InjuryStatus"] | null, none: string) => value ?? none;
-
-/** Players newly Out or Doubtful, or back from either, with the report that said so. */
-function InjuryChanges({ changes }: { changes: Schemas["InjuryChange"][] }) {
-  return (
-    <ul className="league-list">
-      {changes.map((change) => (
-        <li key={`${change.tricode}-${change.player.player_id}`}>
-          <PlayerLink player={change.player} /> <TeamLink tricode={change.tricode} />{" "}
-          {status(change.from_status, "Not listed")} → {status(change.to_status, "Off the report")}
-          {change.reason && <span className="note"> {change.reason}</span>}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** The date's transactions, each with the teams it moved the player between. */
+/** Last night's and the morning's transactions, each dated, with the teams it moved the player between. */
 function Transactions({ transactions }: { transactions: Schemas["TransactionSummary"][] }) {
   return (
     <ul className="league-list">
       {transactions.map((transaction, i) => (
         <li key={`${transaction.player.player_id}-${i}`}>
+          <span className="flag-date">{transaction.date}</span>{" "}
           <PlayerLink player={transaction.player} />
           <span className="badge">
             {TRANSACTION_LABELS[transaction.type] ?? transaction.type}

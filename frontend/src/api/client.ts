@@ -11,6 +11,7 @@ export type TeamPage = Schemas["TeamPage"];
 export type PlayerPage = Schemas["PlayerPage"];
 export type LeaguePage = Schemas["LeaguePage"];
 export type GamePage = Schemas["GamePage"];
+export type SlatePage = Schemas["SlatePage"];
 
 type Query<Op extends keyof operations> = NonNullable<operations[Op]["parameters"]["query"]>;
 
@@ -18,6 +19,7 @@ export type TeamQuery = Query<"team_page_api_teams__tricode__get">;
 export type PlayerQuery = Query<"player_page_api_players__player_id__get">;
 export type LeagueQuery = Query<"league_api_league_get">;
 export type GameQuery = Query<"game_page_api_games__game_id__get">;
+export type SlateQuery = Query<"slate_api_slate_get">;
 export type GarbageTime = NonNullable<GameQuery["garbage_time"]>;
 
 /** A non-2xx response; `message` is the API's `detail` when it sent a string one. */
@@ -81,4 +83,8 @@ export function getLeague(query: LeagueQuery = {}) {
 
 export function getGame(gameId: string, query: GameQuery = {}) {
   return get<GamePage>(apiUrl(`/api/games/${encodeURIComponent(gameId)}`, query));
+}
+
+export function getSlate(query: SlateQuery) {
+  return get<SlatePage>(apiUrl("/api/slate", query));
 }

@@ -5,11 +5,13 @@ import {
   getLeague,
   getMeta,
   getPlayer,
+  getSlate,
   getTeam,
   getTeams,
   type GameQuery,
   type LeagueQuery,
   type PlayerQuery,
+  type SlateQuery,
   type TeamQuery,
 } from "./client";
 
@@ -49,8 +51,13 @@ export function usePlayer(playerId: number, query: PlayerQuery) {
   });
 }
 
-export function useLeague(query: LeagueQuery) {
-  return useQuery({ queryKey: ["league", query], queryFn: () => getLeague(query) });
+/** `enabled` false holds the query until what it needs is known (the feed's last night). */
+export function useLeague(query: LeagueQuery, { enabled = true } = {}) {
+  return useQuery({ queryKey: ["league", query], queryFn: () => getLeague(query), enabled });
+}
+
+export function useSlate(query: SlateQuery) {
+  return useQuery({ queryKey: ["slate", query], queryFn: () => getSlate(query) });
 }
 
 export function useGame(gameId: string, query: GameQuery) {

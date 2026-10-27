@@ -7,6 +7,7 @@ import type {
   LeaguePage,
   MetaResponse,
   PlayerPage,
+  SlatePage,
   TeamPage,
   TeamsResponse,
 } from "../api/client";
@@ -354,6 +355,28 @@ export const EMPTY_LEAGUE_PAGE: LeaguePage = {
   transactions: [],
   impact_risers: [],
   impact_fallers: [],
+};
+
+const slateTeam = (tricode: string, b2b = false): SlatePage["games"][number]["home"] => ({
+  tricode,
+  b2b,
+  report: { report_datetime: null, source: null, stale: false, submitted: false },
+  lines: [],
+  projected_starters: [],
+});
+
+/** The morning of 2026-03-21, the day after `LEAGUE_PAGE`'s date: one game, no reports yet. */
+export const SLATE_PAGE: SlatePage = {
+  date: "2026-03-21",
+  last_night: "2026-03-20",
+  games: [
+    {
+      game_id: "0022501000",
+      tip_time: "2026-03-21T19:30:00-04:00",
+      away: slateTeam("LAL", true),
+      home: slateTeam("BOS"),
+    },
+  ],
 };
 
 const KNICKS = {

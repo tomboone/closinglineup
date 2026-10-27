@@ -1,17 +1,36 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { FRESH_META, LEAGUE_PAGE, mockApi, renderApp, TEAM_PAGE as BODY } from "../test/app";
+import {
+  FRESH_META,
+  LEAGUE_PAGE,
+  mockApi,
+  renderApp,
+  SLATE_PAGE,
+  TEAM_PAGE as BODY,
+} from "../test/app";
+import { easternToday } from "./params";
 
 vi.mock("../components/charts/echarts", () => import("../test/echarts"));
 
 const TEAM_PAGE = { body: BODY };
+const FEED = { "/api/slate": { body: SLATE_PAGE }, "/api/league": { body: LEAGUE_PAGE } };
 
 describe("Layout", () => {
-  it("defaults the date picker to the latest derived date", async () => {
+  it("defaults the date picker to the latest derived date off the feed, reaching today", async () => {
     mockApi({ "/api/teams/BOS": TEAM_PAGE });
     renderApp("/teams/BOS");
 
     await waitFor(() => expect(screen.getByLabelText("Date")).toHaveValue("2026-03-20"));
+    expect(screen.getByLabelText("Date")).toHaveAttribute("max", easternToday());
+  });
+
+  it("defaults the date picker to today on the feed, its morning", async () => {
+    mockApi(FEED);
+    renderApp("/");
+
+    expect(screen.getByLabelText("Date")).toHaveValue(easternToday());
+    expect(screen.getByLabelText("Date")).toHaveAttribute("max", easternToday());
+    await screen.findByText(`Today: ${easternToday()}`);
   });
 
   it("puts a picked date in ?date= and refetches the page with it", async () => {
@@ -55,9 +74,9 @@ describe("Layout", () => {
   });
 
   it("shows no stale banner when every source is fresh", async () => {
-    mockApi({ "/api/league": { body: LEAGUE_PAGE } });
-    renderApp("/");
-    await screen.findByText("Morning feed for 2026-03-20.");
+    mockApi(FEED);
+    renderApp("/?date=2026-03-21");
+    await screen.findByText("Last night: 2026-03-20");
 
     expect(screen.queryByRole("complementary", { name: "Stale data" })).not.toBeInTheDocument();
   });
@@ -70,7 +89,7 @@ describe("Layout", () => {
         { tricode: "LAL", source: "espn", stale: true },
       ],
     };
-    mockApi({ "/api/meta": { body: meta }, "/api/league": "pending" });
+    mockApi({ "/api/meta": { body: meta }, "/api/slate": "pending" });
     renderApp("/");
 
     expect(await screen.findByRole("complementary", { name: "Stale data" })).toHaveTextContent(
@@ -83,7 +102,7 @@ describe("Layout", () => {
       ...FRESH_META,
       freshness: [...FRESH_META.freshness, { source: "bpm_local", latest: null }],
     };
-    mockApi({ "/api/meta": { body: meta }, "/api/league": "pending" });
+    mockApi({ "/api/meta": { body: meta }, "/api/slate": "pending" });
     renderApp("/");
 
     expect(await screen.findByRole("complementary", { name: "Stale data" })).toHaveTextContent(
@@ -96,9 +115,9 @@ describe("Layout", () => {
       ...FRESH_META,
       freshness: [...FRESH_META.freshness, { source: "darko", latest: null }],
     };
-    mockApi({ "/api/meta": { body: meta }, "/api/league": { body: LEAGUE_PAGE } });
-    renderApp("/");
-    await screen.findByText("Morning feed for 2026-03-20.");
+    mockApi({ "/api/meta": { body: meta }, ...FEED });
+    renderApp("/?date=2026-03-21");
+    await screen.findByText("Last night: 2026-03-20");
 
     expect(screen.queryByRole("complementary", { name: "Stale data" })).not.toBeInTheDocument();
   });
