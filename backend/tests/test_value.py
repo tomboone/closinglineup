@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.db.models import Game, ImpactSnapshot, PlayerGame, RosterMembership
 from closinglineup.derive import value
+from closinglineup.derive.bpm import compute
 from closinglineup.derive.value import (
     PlayerSeason,
     available_seconds,
@@ -17,7 +18,7 @@ from closinglineup.derive.value import (
     vorp_rows,
 )
 from closinglineup.impact import ImpactSnapshotRow
-from tests.test_bpm import FIXTURES
+from tests.test_bpm import FIXTURES, bref_season
 
 # Every 2025-26 player's published VORP, read on 2026-10-27 from
 # https://www.basketball-reference.com/leagues/NBA_2026_advanced.html, one row per row of
@@ -49,6 +50,31 @@ def test_every_regulars_vorp_is_within_the_published_value() -> None:
             player["player"]
         )
     assert regulars == 263
+
+
+def test_vorp_from_local_bpm_is_within_the_published_value_but_where_bpm_strays() -> None:
+    """VORP over the BPM `derive.bpm` computes from the same fixture: local BPM's own error, up
+    to a point (`tests/test_bpm.py`), carries through scaled by playing time. Two regulars land
+    just outside the spec's ±0.3, each from a local BPM 0.5 to 0.9 below the published one."""
+    lines, teams, published = bref_season()
+    keys = list(published)
+    with PUBLISHED_VORP.open() as handle:
+        vorps = {
+            f"{row['bref_id']}/{row['team']}": float(row["vorp"]) for row in csv.DictReader(handle)
+        }
+
+    outside: list[str] = []
+    for result in compute(lines, teams):
+        if result.minutes < 1000:
+            continue
+        team = teams[result.team_id]
+        season = PlayerSeason(0, round(result.minutes * 60), round(team.minutes * 300), team.games)
+        key = keys[result.player_id - 1]
+        error = abs(vorp(result.bpm, season) - vorps[key])
+        assert error < 0.35, key
+        if error > 0.3:
+            outside.append(published[key]["player"])
+    assert sorted(outside) == ["Cade Cunningham", "Jaren Jackson Jr."]
 
 
 def test_vorp_is_bpm_over_replacement_times_the_share_of_the_season_played() -> None:

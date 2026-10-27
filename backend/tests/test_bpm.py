@@ -90,7 +90,7 @@ def test_the_sheets_cavaliers_are_reproduced() -> None:
     assert team_total == pytest.approx(margin / CLE_POSSESSIONS * 100 + 0.175 * margin / 82 / 2)
 
 
-def _bref_season(
+def bref_season(
     *, coarse: bool = False
 ) -> tuple[list[PlayerLine], dict[int, TeamLine], dict[str, dict[str, str]]]:
     """The 2025-26 fixture as lines, with each team's possessions estimated from its totals, and
@@ -139,7 +139,7 @@ def _bref_season(
 
 
 def test_possessions_estimate_matches_basketball_references_pace() -> None:
-    _, teams, _ = _bref_season()
+    _, teams, _ = bref_season()
     with (FIXTURES / "2025-26_teams.csv").open() as handle:
         paces = {i: float(row["pace"]) for i, row in enumerate(csv.DictReader(handle), 1)}
 
@@ -160,7 +160,7 @@ PUBLISHED = {
 
 
 def test_five_published_2025_26_values_are_within_a_point() -> None:
-    lines, teams, published = _bref_season()
+    lines, teams, published = bref_season()
     by_line = {line.player_id: line for line in lines}
     keys = {key: i for i, key in enumerate(published, 1)}
 
@@ -176,7 +176,7 @@ def test_five_published_2025_26_values_are_within_a_point() -> None:
 
 @pytest.mark.parametrize("coarse", [False, True], ids=["bref_positions", "nba_positions"])
 def test_every_regular_is_within_a_point_and_the_league_averages_to_zero(coarse: bool) -> None:
-    lines, teams, published = _bref_season(coarse=coarse)
+    lines, teams, published = bref_season(coarse=coarse)
     keys = list(published)
 
     results = compute(lines, teams)

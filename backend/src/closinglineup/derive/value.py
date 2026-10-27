@@ -183,8 +183,8 @@ def player_seasons(
 
 
 def compute_value(db: sessionmaker[Session], day: date) -> dict[str, Any]:
-    """Make `day`'s `vorp_local` rows every player with a `bpm_local` row on `day`'s VORP, and its
-    `ws_local` rows none until Win Shares is computed; return what was written."""
+    """Write `day`'s `vorp_local` rows, one per player with a `bpm_local` row on `day`, and clear
+    its `ws_local` rows, which stay empty until Win Shares is computed; return what was written."""
     season = season_label(day)
     with db.begin() as session:
         bpms = dict(

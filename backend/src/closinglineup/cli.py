@@ -74,8 +74,8 @@ COMMANDS = {
     "fetch": "Fetch raw responses from NBA.com into the raw cache.",
     "parse": "Parse cached raw responses into parquet rows.",
     "load": "Load parquet rows into Postgres.",
-    "derive": "Flag garbage time, refresh windows, write rotation state, events, flags and BPM, "
-    "and reconcile a sample.",
+    "derive": "Flag garbage time, refresh windows, write rotation state, events, flags, BPM and "
+    "VORP, and reconcile a sample.",
     "overlays": "Run one overlay by name: injuries, transactions, impact metrics or contracts.",
     "api": "Serve the API and the built frontend.",
     "worker": "Run the job scheduler.",
