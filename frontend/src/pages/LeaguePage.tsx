@@ -2,7 +2,7 @@ import { useId } from "react";
 import type { LeaguePage as LeaguePageData } from "../api/client";
 import { useLeague, useSlate, useTeams } from "../api/hooks";
 import type { components } from "../api/types";
-import SparklineCell, { type SparklineRange } from "../components/charts/SparklineCell";
+import MoverChart from "../components/charts/MoverChart";
 import { TIER_COLOURS } from "../components/charts/theme";
 import { FlagGroups } from "../components/FlagList";
 import { percent, signed } from "../components/format";
@@ -18,7 +18,7 @@ type Schemas = components["schemas"];
 type Mover = Schemas["Mover"];
 type TeamSummary = Schemas["TeamSummary"];
 
-// The API's counts (`api/routers/league.py`), which the tables never exceed.
+// The API's counts (`api/routers/league.py`), which the charts and tables never exceed.
 const MINUTES_MOVERS = 15;
 const IMPACT_MOVERS = 10;
 // The team games each empty list needs before it can fill: a minutes mover's 10-game window against
@@ -277,6 +277,11 @@ function DerivedPanel({
   const empty = (emptyMessage: string) => (
     <p>{page.noGames ? `No games on ${page.date}.` : emptyMessage}</p>
   );
+  // The chart and the tables beneath it draw the same movers, the API's counts at most.
+  const minutesRisers = page.minutes_risers.slice(0, MINUTES_MOVERS);
+  const minutesFallers = page.minutes_fallers.slice(0, MINUTES_MOVERS);
+  const impactRisers = page.impact_risers.slice(0, IMPACT_MOVERS);
+  const impactFallers = page.impact_fallers.slice(0, IMPACT_MOVERS);
 
   switch (tab) {
     case "rotation":
@@ -310,7 +315,7 @@ function DerivedPanel({
           <section aria-labelledby="league-minutes">
             <h2 id="league-minutes">Minutes movers</h2>
             <p className="note">10-game minutes share against the 10 games before.</p>
-            {page.minutes_risers.length + page.minutes_fallers.length === 0 ? (
+            {minutesRisers.length + minutesFallers.length === 0 ? (
               empty(
                 emptyList(
                   "No minutes movers.",
@@ -321,8 +326,15 @@ function DerivedPanel({
               )
             ) : (
               <>
-                <MoverTable caption="Rising" movers={page.minutes_risers} kind="minutes" />
-                <MoverTable caption="Falling" movers={page.minutes_fallers} kind="minutes" />
+                <MoverChart
+                  risers={minutesRisers}
+                  fallers={minutesFallers}
+                  format={percent}
+                  unitLabel="Minutes share, pts"
+                  scale={100}
+                />
+                <MoverTable caption="Rising" movers={minutesRisers} kind="minutes" />
+                <MoverTable caption="Falling" movers={minutesFallers} kind="minutes" />
               </>
             )}
           </section>
@@ -331,7 +343,7 @@ function DerivedPanel({
             <p className="note">
               Impact against 10 team games before, in the first of EPM, DARKO and BPM with both.
             </p>
-            {page.impact_risers.length + page.impact_fallers.length === 0 ? (
+            {impactRisers.length + impactFallers.length === 0 ? (
               empty(
                 emptyList(
                   "No impact movers.",
@@ -342,8 +354,14 @@ function DerivedPanel({
               )
             ) : (
               <>
-                <MoverTable caption="Rising" movers={page.impact_risers} kind="impact" />
-                <MoverTable caption="Falling" movers={page.impact_fallers} kind="impact" />
+                <MoverChart
+                  risers={impactRisers}
+                  fallers={impactFallers}
+                  format={signed}
+                  unitLabel={impactUnit([...impactRisers, ...impactFallers])}
+                />
+                <MoverTable caption="Rising" movers={impactRisers} kind="impact" />
+                <MoverTable caption="Falling" movers={impactFallers} kind="impact" />
               </>
             )}
           </section>
@@ -442,9 +460,9 @@ function QuietSignals({ signals }: { signals: Schemas["QuietSignal"][] }) {
 }
 
 /**
- * Movers one way, each with his impact beside him, with their 10-game value, its change and a line
- * from the prior window to it, the table's lines sharing one y range so a bigger move is a steeper
- * one; a minutes mover's value is a share, an impact mover's an impact value named by its source.
+ * Movers one way, each with his impact beside him, with their 10-game value and its change, the
+ * exact numbers beneath the chart's bars; a minutes mover's value is a share, an impact mover's an
+ * impact value named by its source.
  */
 function MoverTable({
   caption,
@@ -455,10 +473,8 @@ function MoverTable({
   movers: Mover[];
   kind: "minutes" | "impact";
 }) {
-  const shown = movers.slice(0, kind === "minutes" ? MINUTES_MOVERS : IMPACT_MOVERS);
-  if (shown.length === 0) return null;
+  if (movers.length === 0) return null;
   const minutes = kind === "minutes";
-  const range = sharedRange(shown);
   return (
     <table>
       <caption>{caption}</caption>
@@ -468,11 +484,10 @@ function MoverTable({
           <th scope="col">Team</th>
           <th scope="col">{minutes ? "Share" : "Impact"}</th>
           <th scope="col">Change</th>
-          <th scope="col">Trend</th>
         </tr>
       </thead>
       <tbody>
-        {shown.map((mover) => (
+        {movers.map((mover) => (
           <tr key={mover.player.player_id}>
             <td>
               <PlayerLink player={mover.player} /> <ImpactValue impact={mover.impact} />
@@ -485,16 +500,6 @@ function MoverTable({
             <td className={`number ${mover.delta > 0 ? "trend-up" : "trend-down"}`}>
               {minutes ? `${signed(mover.delta * 100)} pts` : signed(mover.delta)}
             </td>
-            <td>
-              {mover.value !== null && (
-                <MoverSparkline
-                  value={mover.value}
-                  delta={mover.delta}
-                  range={range}
-                  format={minutes ? percent : signed}
-                />
-              )}
-            </td>
           </tr>
         ))}
       </tbody>
@@ -502,38 +507,14 @@ function MoverTable({
   );
 }
 
-/** The lowest and highest of the movers' prior and latest values. */
-function sharedRange(movers: Mover[]): SparklineRange | undefined {
-  const values = movers.flatMap((mover) =>
-    mover.value === null ? [] : [mover.value, mover.value - mover.delta],
-  );
-  return values.length === 0
-    ? undefined
-    : { min: Math.min(...values), max: Math.max(...values) };
-}
-
-// The API gives a mover's two windows, not a series: the line runs from the prior one to the latest.
-function MoverSparkline({
-  value,
-  delta,
-  range,
-  format,
-}: {
-  value: number;
-  delta: number;
-  range: SparklineRange | undefined;
-  format: (value: number) => string;
-}) {
-  return (
-    <SparklineCell
-      series={[
-        { game_date: "prior 10", value: value - delta },
-        { game_date: "last 10", value },
-      ]}
-      range={range}
-      format={format}
-    />
-  );
+/**
+ * The impact movers' axis unit: the rating of the source every mover shares ("DARKO rating"), or
+ * "Impact rating" when their sources differ.
+ */
+function impactUnit(movers: Mover[]) {
+  const sources = new Set(movers.map((mover) => mover.source));
+  const [source] = sources;
+  return sources.size === 1 && source ? `${IMPACT_LABELS[source]} rating` : "Impact rating";
 }
 
 /**

@@ -9,7 +9,8 @@ import {
   SLATE_PAGE,
   TEAMS,
 } from "../test/app";
-import { allOptions } from "../test/echarts";
+import { MOVER_COLOURS } from "../components/charts/theme";
+import { allOptions, click } from "../test/echarts";
 
 vi.mock("../components/charts/echarts", () => import("../test/echarts"));
 
@@ -32,6 +33,17 @@ const movers = (n: number, sign: 1 | -1, source: "epm" | null = null) =>
   }));
 
 const openTab = (name: string) => fireEvent.click(screen.getByRole("tab", { name }));
+
+type MoverOption = {
+  xAxis: { name: string };
+  series: { data: { value: number; itemStyle: { color: string } }[] }[];
+};
+
+/** The latest option each mover chart set, by its axis name. */
+const moverCharts = () =>
+  new Map(
+    (allOptions() as unknown as MoverOption[]).map((option) => [option.xAxis.name, option]),
+  );
 
 const DARKO = { source: "darko", value: 2.25 } as const;
 
@@ -202,8 +214,50 @@ describe("LeaguePage", () => {
     );
     expect(within(rows(minutes, "Rising")[0]!).getByText("+5.0 pts")).toBeInTheDocument();
     expect(within(rows(impact, "Falling")[0]!).getByText("EPM")).toBeInTheDocument();
-    // A sparkline a mover.
-    expect(allOptions()).toHaveLength(2 * 15 + 2 * 10);
+    // A bar a mover, the impact axis naming the one source every mover shares.
+    const charts = moverCharts();
+    expect([...charts.keys()]).toEqual(["Minutes share, pts", "EPM rating"]);
+    expect(charts.get("Minutes share, pts")!.series[0]!.data).toHaveLength(2 * 15);
+    expect(charts.get("EPM rating")!.series[0]!.data).toHaveLength(2 * 10);
+  });
+
+  it("draws a chart per metric above its tables, its bars the tables' changes", async () => {
+    morning();
+    const router = renderApp(`${MORNING}&tab=movers`);
+    const minutes = await screen.findByRole("region", { name: "Minutes movers" });
+    const impact = screen.getByRole("region", { name: "Impact movers" });
+
+    // Each table's change column, Rising's rows then Falling's.
+    const changes = (region: HTMLElement) =>
+      within(region)
+        .getAllByRole("row")
+        .flatMap((row) => within(row).queryAllByRole("cell").slice(3, 4))
+        .map((cell) => cell.textContent);
+    expect(changes(minutes)).toEqual(["+4.1 pts", "−5.0 pts"]);
+    expect(changes(impact)).toEqual(["+0.8", "−0.6"]);
+
+    // Sources differ across the impact movers, so the axis names none.
+    const charts = moverCharts();
+    expect([...charts.keys()]).toEqual(["Minutes share, pts", "Impact rating"]);
+    const bars = (name: string) => charts.get(name)!.series[0]!.data;
+    const lengths = (name: string) => bars(name).map((bar) => bar.value.toFixed(1));
+    expect(lengths("Minutes share, pts")).toEqual(["4.1", "-5.0"]);
+    expect(lengths("Impact rating")).toEqual(["0.8", "-0.6"]);
+    for (const name of charts.keys()) {
+      expect(bars(name).map((bar) => bar.itemStyle.color)).toEqual([
+        MOVER_COLOURS.rising,
+        MOVER_COLOURS.falling,
+      ]);
+    }
+
+    // The impact chart mounted last; its second bar is the faller.
+    click({ componentType: "series", dataIndex: 1 });
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        `/players/${LEAGUE_PAGE.impact_fallers[0]!.player.player_id}`,
+      ),
+    );
+    expect(router.state.location.search).toBe("?date=2026-03-21&tab=movers");
   });
 
   it("groups flags by flag", async () => {
