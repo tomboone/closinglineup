@@ -77,8 +77,26 @@ MORNING = LAST + timedelta(days=1)
 STRIP = {g: ("core" if g % 2 else "fringe") for g in GAMES if g != 7}
 
 
+# The last game's counts, every other line all zeros, and each line's Game Score: BOS's top two
+# are STARTERS[1]'s then RISER's, NYK's NYK_FIVE[2]'s then NYK_FIVE[0]'s.
+BOX = {
+    # 30 + 0.4·12 - 0.7·20 + 0.3·6 + 0.7·5
+    STARTERS[1]: ({"pts": 30, "fgm": 12, "fga": 20, "dreb": 6, "ast": 5}, 26.1),
+    # 20 + 0.4·8 - 0.7·15 + 0.7·2 + 0.7·2
+    RISER: ({"pts": 20, "fgm": 8, "fga": 15, "oreb": 2, "ast": 2}, 15.5),
+    STARTERS[0]: ({"pts": 10}, 10.0),
+    # 25 + 0.4·10 - 0.7·18 - 0.4·(6 - 5) + 0.3·8
+    NYK_FIVE[2]: ({"pts": 25, "fgm": 10, "fga": 18, "fta": 6, "ftm": 5, "dreb": 8}, 18.4),
+    # 12 + 3 + 0.7·2 - 1
+    NYK_FIVE[0]: ({"pts": 12, "stl": 3, "blk": 2, "tov": 1}, 15.4),
+    # 12 - 0.4·4
+    NYK_FIVE[1]: ({"pts": 12, "pf": 4}, 10.4),
+}
+
+
 def _line(g: int, player_id: int, team_id: int) -> dict[str, Any]:
     counts = ("pts", "fgm", "fga", "fg3m", "fg3a", "ftm", "fta", "oreb", "dreb", "ast", "stl")
+    box = BOX[player_id][0] if g == GAMES[-1] and player_id in BOX else {}
     return {
         "game_id": _game_id(g),
         "player_id": player_id,
@@ -87,6 +105,7 @@ def _line(g: int, player_id: int, team_id: int) -> dict[str, Any]:
         "seconds": 2880,
         "dnp_reason": None,
         **dict.fromkeys((*counts, "blk", "tov", "pf", "plus_minus"), 0),
+        **box,
         "source": "stats",
     }
 
@@ -361,6 +380,37 @@ def test_movers_rank_by_their_change_and_keep_the_top_n() -> None:
 
 def test_a_mover_whose_value_did_not_move_is_neither() -> None:
     assert top_movers([MoverRow(1, BOS, 0.2, 0.0)], 15) == ([], [])
+
+
+def test_the_date_s_final_games_carry_both_scores_and_each_side_s_top_game_scores(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    (game,) = _page(client)["games"]
+
+    assert game["game_id"] == _game_id(GAMES[-1])
+    assert (game["home"]["tricode"], game["home"]["score"]) == ("BOS", 100)
+    assert (game["away"]["tricode"], game["away"]["score"]) == ("NYK", 95)
+    assert game["margin"] == 5
+    for side, top in (("home", [STARTERS[1], RISER]), ("away", [NYK_FIVE[2], NYK_FIVE[0]])):
+        lines = game[side]["top"]
+        assert [line["player"]["player_id"] for line in lines] == top
+        assert [line["game_score"] for line in lines] == [
+            pytest.approx(BOX[p][1], abs=1e-6) for p in top
+        ]
+    best = game["home"]["top"][0]
+    assert best["player"]["name"] == f"Player {STARTERS[1]}"
+    assert (best["pts"], best["reb"], best["ast"], best["seconds"]) == (30, 6, 5, 2880)
+
+
+def test_a_game_not_yet_final_is_not_among_the_date_s_games(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    with seeded.begin() as session:
+        session.execute(
+            update(Game).where(Game.game_id == _game_id(GAMES[-1])).values(status="scheduled")
+        )
+
+    assert _page(client)["games"] == []
 
 
 def test_every_rotation_event_on_the_date_appears_once_with_its_signals(

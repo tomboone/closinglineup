@@ -446,6 +446,18 @@ body {
   padding-left: 20px;
 }
 
+/* Last night's games: a side's top Game Scores, one a line. */
+.last-night th[scope="row"] {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.top-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .rotation-events,
 .league-list {
   margin: 0;

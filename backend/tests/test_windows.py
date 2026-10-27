@@ -19,6 +19,7 @@ from closinglineup.db.models import (
     Stint,
 )
 from closinglineup.derive import run
+from closinglineup.derive.value import game_score
 from closinglineup.derive.windows import refresh_windows
 from closinglineup.settings import Settings
 from closinglineup.sources.cache import RawCache
@@ -482,6 +483,18 @@ def test_the_fixture_players_game_score_is_the_formula_over_the_window_per_game_
     # The season before: 20 + 0.4·8 - 0.7·10 - 0.4·5.
     assert prior["game_score"] == pytest.approx(14.2, abs=1e-6)
     assert season["game_score_delta_prior"] == pytest.approx(season_score - 14.2, abs=1e-6)
+
+
+def test_game_score_of_a_line_is_the_views_season_window_at_his_first_game(
+    seeded: sessionmaker[Session],
+) -> None:
+    # The view has no one-game window; the season window at his first game covers only it.
+    (line,) = (line for line in _sac_lines(1) if line.player_id == FIXTURE)
+    season = _row(seeded, FIXTURE, None, "season", _day(1))
+
+    assert season["games_in_window"] == 1
+    assert game_score(line) == pytest.approx(season["game_score"], abs=1e-6)
+    assert game_score(line) == pytest.approx(1 - 1.5)
 
 
 def test_game_score_is_null_over_a_window_he_played_none_of(

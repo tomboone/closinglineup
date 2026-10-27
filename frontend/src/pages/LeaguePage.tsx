@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { Link, useLocation } from "react-router";
 import type { LeaguePage as LeaguePageData } from "../api/client";
 import { useLeague, useSlate, useTeams } from "../api/hooks";
 import type { components } from "../api/types";
@@ -32,6 +33,7 @@ const FLAG_GAMES = 20;
 
 const TAB_LABELS: Record<Tab, string> = {
   today: "Today",
+  last_night: "Last night",
   rotation: "Rotation",
   movers: "Movers",
   flags: "Flags",
@@ -171,9 +173,9 @@ function TeamFilter({
 }
 
 /**
- * The page's rows of the selected teams, every row when none is selected: an event by its team, a
- * quiet signal, a mover or a flag by its tricode, a transaction by either of its teams. The movers
- * are filtered after the API ranked them league-wide.
+ * The page's rows of the selected teams, every row when none is selected: a game or a
+ * transaction by either of its teams, an event by its team, a quiet signal, a mover or a flag by
+ * its tricode. The movers are filtered after the API ranked them league-wide.
  */
 function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
   const has = (tricode: string | null) => tricode !== null && teams.has(tricode);
@@ -185,6 +187,7 @@ function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
     // The page reads the date alone, so a date no team played has no events, movers or flags, which
     // come of its games; a transaction can still land on it (spec §8).
     noGames: [
+      page.games,
       page.rotation_events,
       page.quiet_signals,
       page.minutes_risers,
@@ -193,6 +196,7 @@ function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
       page.impact_risers,
       page.impact_fallers,
     ].every((list) => list.length === 0),
+    games: keep(page.games, (game) => [game.home.tricode, game.away.tricode]),
     rotation_events: keep(page.rotation_events, byTricode),
     quiet_signals: keep(page.quiet_signals, byTricode),
     minutes_risers: keep(page.minutes_risers, byTricode),
@@ -278,6 +282,18 @@ function DerivedPanel({
   const impactFallers = page.impact_fallers.slice(0, IMPACT_MOVERS);
 
   switch (tab) {
+    case "last_night":
+      return (
+        <section aria-labelledby="league-games">
+          <h2 id="league-games">Final scores</h2>
+          <p className="note">Each side&apos;s two highest Game Scores.</p>
+          {page.games.length === 0 ? (
+            empty("No games for the selected teams.")
+          ) : (
+            <LastNightGames games={page.games} />
+          )}
+        </section>
+      );
     case "rotation":
       return (
         <>
@@ -392,6 +408,68 @@ function DerivedPanel({
         </section>
       );
   }
+}
+
+/**
+ * Last night's final games, a row per game linking to its game page, each side's score and its two
+ * highest Game Scores with the box line behind them.
+ */
+function LastNightGames({ games }: { games: Schemas["LastNightGame"][] }) {
+  const { search } = useLocation();
+  return (
+    <table className="last-night">
+      <thead>
+        <tr>
+          <th scope="col">Final</th>
+          <th scope="col">Away</th>
+          <th scope="col">Home</th>
+        </tr>
+      </thead>
+      <tbody>
+        {games.map((game) => (
+          <tr key={game.game_id}>
+            <th scope="row">
+              <Link to={{ pathname: `/games/${game.game_id}`, search }}>
+                {game.away.tricode} {game.away.score ?? "–"} @ {game.home.tricode}{" "}
+                {game.home.score ?? "–"}
+              </Link>
+              {game.margin !== null && game.margin !== 0 && (
+                <span className="note">
+                  {" "}
+                  {game.margin > 0 ? game.home.tricode : game.away.tricode} by{" "}
+                  {Math.abs(game.margin)}
+                </span>
+              )}
+            </th>
+            <td>
+              <TopLines lines={game.away.top} />
+            </td>
+            <td>
+              <TopLines lines={game.home.top} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** A side's top Game Scores, the highest first, with points, rebounds, assists and minutes. */
+function TopLines({ lines }: { lines: Schemas["GameScoreLine"][] }) {
+  if (lines.length === 0) return null;
+  return (
+    <ol className="top-lines">
+      {lines.map((line) => (
+        <li key={line.player.player_id}>
+          <PlayerLink player={line.player} />{" "}
+          <span className="number">{line.game_score.toFixed(1)}</span>{" "}
+          <span className="note">
+            {line.pts} pts, {line.reb} reb, {line.ast} ast, {Math.round(line.seconds / 60)} min
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function Tier({ tier }: { tier: Schemas["Tier"] | null }) {

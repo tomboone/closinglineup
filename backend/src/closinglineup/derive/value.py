@@ -3,6 +3,10 @@ the impact metrics as `source='vorp_local'` and `source='ws_local'` (v2 spec §8
 value metrics, not impact metrics: `IMPACT_PREFERENCE` and the player page's impact chart leave
 them out.
 
+Game Score (v2 spec §8.1) is neither: a single game's box-score score, the one the feed's Last
+night tab ranks by, here as `game_score`, the formula `player_window_stats` averages over a
+window's games.
+
 VORP: Basketball Reference's, "About Box Plus/Minus (BPM)",
 https://www.basketball-reference.com/about/bpm2.html: the points per 100 team possessions a player
 added over a replacement-level one (a BPM of -2.0), scaled by his share of his team's floor time
@@ -159,6 +163,24 @@ class PlayerSeason:
     @property
     def minutes_share(self) -> float:
         return self.seconds / self.team_seconds if self.team_seconds else 0.0
+
+
+def game_score(line: PlayerGame) -> float:
+    """Hollinger's Game Score of a box line (v2 spec §8.1), the formula `player_window_stats`
+    averages over a window's games played."""
+    return (
+        line.pts
+        + 0.4 * line.fgm
+        - 0.7 * line.fga
+        - 0.4 * (line.fta - line.ftm)
+        + 0.7 * line.oreb
+        + 0.3 * line.dreb
+        + line.stl
+        + 0.7 * line.ast
+        + 0.7 * line.blk
+        - 0.4 * line.pf
+        - line.tov
+    )
 
 
 def vorp(bpm: float, season: PlayerSeason) -> float:

@@ -401,6 +401,44 @@
         "title": "GamePlayer",
         "type": "object"
       },
+      "GameScoreLine": {
+        "description": "A player's line in a game, ranked by its Game Score (v2 spec \u00a78.1).",
+        "properties": {
+          "ast": {
+            "title": "Ast",
+            "type": "integer"
+          },
+          "game_score": {
+            "title": "Game Score",
+            "type": "number"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerRef"
+          },
+          "pts": {
+            "title": "Pts",
+            "type": "integer"
+          },
+          "reb": {
+            "title": "Reb",
+            "type": "integer"
+          },
+          "seconds": {
+            "title": "Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player",
+          "game_score",
+          "pts",
+          "reb",
+          "ast",
+          "seconds"
+        ],
+        "title": "GameScoreLine",
+        "type": "object"
+      },
       "GameStatus": {
         "enum": [
           "scheduled",
@@ -754,6 +792,74 @@
         "title": "JobRunSummary",
         "type": "object"
       },
+      "LastNightGame": {
+        "description": "A final game on the date (v2 spec \u00a715.3); `margin` is the home score less the away, null\nwhile a score is missing.",
+        "properties": {
+          "away": {
+            "$ref": "#/components/schemas/LastNightTeam"
+          },
+          "game_id": {
+            "title": "Game Id",
+            "type": "string"
+          },
+          "home": {
+            "$ref": "#/components/schemas/LastNightTeam"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          }
+        },
+        "required": [
+          "game_id",
+          "home",
+          "away",
+          "margin"
+        ],
+        "title": "LastNightGame",
+        "type": "object"
+      },
+      "LastNightTeam": {
+        "description": "One side of a final game: its score and its two highest Game Scores, the highest first.",
+        "properties": {
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/GameScoreLine"
+            },
+            "title": "Top",
+            "type": "array"
+          },
+          "tricode": {
+            "title": "Tricode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tricode",
+          "score",
+          "top"
+        ],
+        "title": "LastNightTeam",
+        "type": "object"
+      },
       "LeaguePage": {
         "properties": {
           "date": {
@@ -766,6 +872,13 @@
               "$ref": "#/components/schemas/RaisedFlag"
             },
             "title": "Flags",
+            "type": "array"
+          },
+          "games": {
+            "items": {
+              "$ref": "#/components/schemas/LastNightGame"
+            },
+            "title": "Games",
             "type": "array"
           },
           "impact_fallers": {
@@ -827,6 +940,7 @@
         },
         "required": [
           "date",
+          "games",
           "rotation_events",
           "quiet_signals",
           "minutes_risers",
