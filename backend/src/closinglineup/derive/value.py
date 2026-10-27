@@ -1,8 +1,11 @@
 """The value metrics, VORP and Win Shares, computed here and written to `impact_snapshot` beside
 the impact metrics as `source='vorp_local'` and `source='ws_local'` (v2 spec §8.2 to 8.4). They are
 value metrics, not impact metrics: `IMPACT_PREFERENCE` and the player page's impact chart leave
-them out. A single game's Game Score (v2 spec §8.1), the one the feed's Last night tab ranks by,
-is here too, the formula `player_window_stats` averages over a window's games.
+them out.
+
+Game Score (v2 spec §8.1) is neither: a single game's box-score score, the one the feed's Last
+night tab ranks by, here as `game_score`, the formula `player_window_stats` averages over a
+window's games.
 
 VORP: Basketball Reference's, "About Box Plus/Minus (BPM)",
 https://www.basketball-reference.com/about/bpm2.html: the points per 100 team possessions a player

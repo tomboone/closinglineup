@@ -173,9 +173,9 @@ function TeamFilter({
 }
 
 /**
- * The page's rows of the selected teams, every row when none is selected: a game or a transaction by
- * either of its teams, an event by its team, a quiet signal, a mover or a flag by its tricode. The movers
- * are filtered after the API ranked them league-wide.
+ * The page's rows of the selected teams, every row when none is selected: a game or a
+ * transaction by either of its teams, an event by its team, a quiet signal, a mover or a flag by
+ * its tricode. The movers are filtered after the API ranked them league-wide.
  */
 function filtered(page: LeaguePageData, teams: ReadonlySet<string>): FeedPage {
   const has = (tricode: string | null) => tricode !== null && teams.has(tricode);
@@ -454,7 +454,7 @@ function LastNightGames({ games }: { games: Schemas["LastNightGame"][] }) {
   );
 }
 
-/** A side's top Game Scores, the highest first, each with its points, rebounds, assists, minutes. */
+/** A side's top Game Scores, the highest first, with points, rebounds, assists and minutes. */
 function TopLines({ lines }: { lines: Schemas["GameScoreLine"][] }) {
   if (lines.length === 0) return null;
   return (
