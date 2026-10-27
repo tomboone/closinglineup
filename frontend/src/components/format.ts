@@ -1,6 +1,6 @@
 // Number formats shared by the page tables. A missing value reads as an em dash.
 
-const DASH = "—";
+export const DASH = "—";
 
 /** A fraction as a percentage to one decimal: 0.123 → "12.3%". */
 export function percent(value: number | null | undefined) {
@@ -11,6 +11,24 @@ export function percent(value: number | null | undefined) {
 export function signed(value: number | null | undefined) {
   if (value == null) return DASH;
   const fixed = Math.abs(value).toFixed(1);
+  if (Number(fixed) === 0) return fixed;
+  return value > 0 ? `+${fixed}` : `−${fixed}`;
+}
+
+/** A number to one decimal: 12.34 → "12.3". */
+export function decimal(value: number | null | undefined) {
+  return value == null ? DASH : value.toFixed(1);
+}
+
+/** A ratio to three decimals, as Basketball Reference prints FTr and 3PAr: 0.345 → ".345". */
+export function ratio(value: number | null | undefined) {
+  return value == null ? DASH : value.toFixed(3).replace(/^0\./, ".");
+}
+
+/** A difference of ratios with its sign: 0.012 → "+.012", -0.04 → "−.040". */
+export function signedRatio(value: number | null | undefined) {
+  if (value == null) return DASH;
+  const fixed = ratio(Math.abs(value));
   if (Number(fixed) === 0) return fixed;
   return value > 0 ? `+${fixed}` : `−${fixed}`;
 }

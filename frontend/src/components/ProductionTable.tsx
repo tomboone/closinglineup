@@ -1,5 +1,5 @@
 import type { components } from "../api/types";
-import { percent, signed } from "./format";
+import { DASH, decimal, percent, ratio, signed, signedRatio } from "./format";
 
 type Schemas = components["schemas"];
 type Row = Schemas["ProductionRow"];
@@ -14,27 +14,16 @@ const COLUMNS: { window: keyof Row["windows"]; label: string }[] = [
   { window: "prior_season", label: "Prior season" },
 ];
 
-const DASH = "—";
-
-const decimal = (value: number | null) => (value == null ? DASH : value.toFixed(1));
-
-/** A ratio to three decimals, as Basketball Reference prints FTr and 3PAr: 0.345 → ".345". */
-const ratio = (value: number) => value.toFixed(3).replace(/^0\./, ".");
-
 function formatValue(format: Format, value: number | null) {
   if (format === "percent") return percent(value);
-  if (format === "rate") return value == null ? DASH : ratio(value);
+  if (format === "rate") return ratio(value);
   return decimal(value);
 }
 
 /** A difference in the metric's units, a percentage's in points: 0.012 → "+1.2". */
 function formatDelta(format: Format, delta: number) {
   if (format === "percent") return signed(delta * 100);
-  if (format === "rate") {
-    const fixed = ratio(Math.abs(delta));
-    if (Number(fixed) === 0) return fixed;
-    return delta > 0 ? `+${fixed}` : `−${fixed}`;
-  }
+  if (format === "rate") return signedRatio(delta);
   return signed(delta);
 }
 
