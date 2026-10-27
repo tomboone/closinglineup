@@ -1,7 +1,14 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { easternToday } from "../shell/params";
-import { EMPTY_LEAGUE_PAGE, LEAGUE_PAGE, mockApi, renderApp, SLATE_PAGE } from "../test/app";
+import {
+  EMPTY_LEAGUE_PAGE,
+  LEAGUE_PAGE,
+  mockApi,
+  renderApp,
+  SLATE_PAGE,
+  TEAMS,
+} from "../test/app";
 import { allOptions } from "../test/echarts";
 
 vi.mock("../components/charts/echarts", () => import("../test/echarts"));
@@ -25,6 +32,19 @@ const movers = (n: number, sign: 1 | -1, source: "epm" | null = null) =>
   }));
 
 const openTab = (name: string) => fireEvent.click(screen.getByRole("tab", { name }));
+
+const DARKO = { source: "darko", value: 2.25 } as const;
+
+/** A quiet signal of a Boston player: a DNP-CD when `seconds` is null. */
+const quiet = (player_id: number, name: string, seconds: number | null) => ({
+  player: { player_id, name },
+  tricode: "BOS",
+  tier: "starter" as const,
+  seconds: seconds ?? 0,
+  minutes_per_game_10: 28.43,
+  dnp_reason: seconds === null ? ("cd" as const) : null,
+  impact: null,
+});
 
 describe("LeaguePage", () => {
   it("opens on Today, the morning's slate, with both dates in the header", async () => {
@@ -121,9 +141,9 @@ describe("LeaguePage", () => {
       });
     }
     const bos = within(events).getByRole("region", { name: "BOS" });
-    expect(bos).toHaveTextContent("Payton Pritchard Fringe → Core");
+    expect(bos).toHaveTextContent("Payton Pritchard — Fringe → Core");
     expect(within(events).getByRole("region", { name: "LAL" })).toHaveTextContent(
-      "Dalton Knecht New → Fringe",
+      "Dalton Knecht — New → Fringe",
     );
   });
 
@@ -192,7 +212,7 @@ describe("LeaguePage", () => {
 
     const flags = await screen.findByRole("region", { name: "Flags" });
     const cliff = within(flags).getByRole("region", { name: "Minutes cliff" });
-    expect(cliff).toHaveTextContent("Jrue Holiday BOS 5-game share 5.0% vs 20-game 12.0%");
+    expect(cliff).toHaveTextContent("Jrue Holiday — BOS 5-game share 5.0% vs 20-game 12.0%");
     expect(within(flags).getByRole("region", { name: "Contract pressure" })).toHaveTextContent(
       "Two-way: 46 of 50 active games",
     );
@@ -242,6 +262,113 @@ describe("LeaguePage", () => {
     expect(players.map((link) => link.textContent)).toEqual(["Last night's", "Morning's"]);
   });
 
+  it("lists last night's quiet signals under the events, in the API's shortfall order", async () => {
+    morning({
+      ...LEAGUE_PAGE,
+      quiet_signals: [
+        quiet(1, "Sat Out", null),
+        { ...quiet(2, "Short Night", 660), impact: DARKO },
+        quiet(3, "Bit Short", 900),
+      ],
+    });
+    renderApp(`${MORNING}&tab=rotation`);
+
+    const signals = await screen.findByRole("region", { name: "Quiet signals" });
+    const events = screen.getByRole("region", { name: "Rotation changes" });
+    expect(events.compareDocumentPosition(signals)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(within(signals).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Sat Out — BOS Starter DNP-CD",
+      "Short Night +2.3DARKO BOS Starter 11 min vs 28.4 avg",
+      "Bit Short — BOS Starter 15 min vs 28.4 avg",
+    ]);
+  });
+
+  it("says when there are no quiet signals", async () => {
+    morning();
+    renderApp(`${MORNING}&tab=rotation`);
+
+    expect(await screen.findByRole("region", { name: "Quiet signals" })).toHaveTextContent(
+      "No quiet signals.",
+    );
+  });
+
+  it("shows the impact beside the player on every row, a dash when he has none", async () => {
+    const withImpact = <T,>(row: T) => ({ ...row, impact: DARKO });
+    const [bos, lal] = LEAGUE_PAGE.rotation_events;
+    morning({
+      ...LEAGUE_PAGE,
+      rotation_events: [{ ...bos!, events: bos!.events.map(withImpact) }, lal!],
+      quiet_signals: [withImpact(quiet(1, "Sat Out", null))],
+      minutes_risers: LEAGUE_PAGE.minutes_risers.map(withImpact),
+      impact_fallers: LEAGUE_PAGE.impact_fallers.map(withImpact),
+      flags: LEAGUE_PAGE.flags.map(withImpact),
+      transactions: LEAGUE_PAGE.transactions.map(withImpact),
+    });
+    renderApp(`${MORNING}&tab=rotation`);
+    const impacts = (region: HTMLElement) =>
+      [...region.querySelectorAll(".impact")].map((span) => span.textContent);
+
+    const events = await screen.findByRole("region", { name: "Rotation changes" });
+    expect(impacts(events)).toEqual(["+2.3DARKO", "+2.3DARKO", "—"]);
+    expect(impacts(screen.getByRole("region", { name: "Quiet signals" }))).toEqual(["+2.3DARKO"]);
+    openTab("Movers");
+    const table = (region: string, caption: string) =>
+      within(screen.getByRole("region", { name: region })).getByRole("table", { name: caption });
+    expect(impacts(table("Minutes movers", "Rising"))).toEqual(["+2.3DARKO"]);
+    expect(impacts(table("Minutes movers", "Falling"))).toEqual(["—"]);
+    expect(impacts(table("Impact movers", "Falling"))).toEqual(["+2.3DARKO"]);
+    openTab("Flags");
+    expect(impacts(screen.getByRole("region", { name: "Flags" }))).toEqual([
+      "+2.3DARKO",
+      "+2.3DARKO",
+    ]);
+    openTab("Moves");
+    expect(impacts(screen.getByRole("region", { name: "Transactions" }))).toEqual(["+2.3DARKO"]);
+  });
+
+  it("says an early empty Movers or Flags tab needs its window, with the games played", async () => {
+    const early = (tricode: string, wins: number, losses: number) => ({
+      ...TEAMS.teams.find((team) => team.tricode === tricode)!,
+      wins,
+      losses,
+    });
+    mockApi({
+      "/api/slate": { body: SLATE_PAGE },
+      "/api/league": {
+        body: {
+          ...LEAGUE_PAGE,
+          minutes_risers: [],
+          minutes_fallers: [],
+          impact_risers: [],
+          impact_fallers: [],
+          flags: [],
+        },
+      },
+      "/api/teams": { body: { ...TEAMS, teams: [early("BOS", 2, 1), early("LAL", 1, 4)] } },
+    });
+    renderApp(`${MORNING}&tab=movers`);
+
+    expect(await screen.findByRole("region", { name: "Minutes movers" })).toHaveTextContent(
+      "Minutes movers need 20 team games. The league has played 3–5.",
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "BOS" }));
+    expect(screen.getByRole("region", { name: "Minutes movers" })).toHaveTextContent(
+      "Minutes movers need 20 team games. BOS has played 3.",
+    );
+    expect(screen.getByRole("region", { name: "Impact movers" })).toHaveTextContent(
+      "Impact movers need an impact value 10 games back. BOS has played 3.",
+    );
+    openTab("Flags");
+    expect(screen.getByRole("region", { name: "Flags" })).toHaveTextContent(
+      "No flags raised. Earning trust needs 15 games of a spell; minutes cliff needs the 5- and " +
+        "20-game windows to differ. BOS has played 3.",
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "LAL" }));
+    expect(screen.getByRole("region", { name: "Flags" })).toHaveTextContent(
+      "BOS, LAL have played 3–5.",
+    );
+  });
+
   describe("team filter", () => {
     const LAL_FLAG = {
       ...LEAGUE_PAGE.flags[0]!,
@@ -265,13 +392,14 @@ describe("LeaguePage", () => {
 
       const flags = await screen.findByRole("region", { name: "Flags" });
       expect(within(flags).getAllByRole("listitem")).toHaveLength(1);
-      expect(flags).toHaveTextContent("Dalton Knecht LAL");
+      expect(flags).toHaveTextContent("Dalton Knecht — LAL");
 
       openTab("Rotation");
       const events = screen.getByRole("region", { name: "Rotation changes" });
       expect(within(events).queryByRole("region", { name: "BOS" })).not.toBeInTheDocument();
       expect(within(events).getByRole("region", { name: "LAL" })).toBeInTheDocument();
 
+      // LAL has played its 20 games: the list is empty for the date, not for the window.
       openTab("Movers");
       expect(screen.getByRole("region", { name: "Minutes movers" })).toHaveTextContent(
         "No minutes movers.",

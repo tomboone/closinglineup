@@ -68,7 +68,7 @@ const BOS: SlateTeam = {
     line(HOLIDAY, { previous_status: "Questionable", change: "off" }),
   ],
   projected_starters: [
-    starter(BROWN),
+    { ...starter(BROWN), impact: { source: "bpm_local", value: -0.75 } },
     starter(WHITE),
     starter(HOLIDAY),
     starter(PORZINGIS),
@@ -202,7 +202,7 @@ describe("TodayTab", () => {
     }
   });
 
-  it("lists the projected starters, linking each, a replacement badged", async () => {
+  it("lists the projected starters with their impact, linking each, a replacement badged", async () => {
     morning();
     renderApp(MORNING);
     const game = await screen.findByRole("region", { name: "LAL @ BOS" });
@@ -211,11 +211,11 @@ describe("TodayTab", () => {
       "listitem",
     );
     expect(starters.map((li) => li.textContent)).toEqual([
-      "Jaylen Brown",
-      "Derrick White",
-      "Jrue Holiday",
-      "Kristaps Porzingis",
-      "Payton Pritchardreplacement",
+      "Jaylen Brown −0.8BPM",
+      "Derrick White —",
+      "Jrue Holiday —",
+      "Kristaps Porzingis —",
+      "Payton Pritchard —replacement",
     ]);
     expect(within(starters[0]!).getByRole("link", { name: "Jaylen Brown" })).toHaveAttribute(
       "href",
