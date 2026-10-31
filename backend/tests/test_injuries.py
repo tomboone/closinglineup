@@ -229,23 +229,24 @@ def _run_injuries(
         return jobs.overlay("injuries", day)
 
 
-@pytest.mark.parametrize(
-    "pdf", [None, b"%PDF-1.7 not an injury report"], ids=["not published", "not readable"]
-)
+def _overlay_run(db: sessionmaker[Session]) -> JobRun:
+    with db() as session:
+        return session.scalars(select(JobRun).where(JobRun.job == "overlay:injuries")).one()
+
+
 @respx.mock
-def test_a_report_not_had_falls_back_to_espn_for_every_team_with_an_injury(
-    seeded: sessionmaker[Session], tmp_path: Path, pdf: bytes | None
+def test_a_report_not_published_falls_back_to_espn_for_every_team_with_an_injury(
+    seeded: sessionmaker[Session], tmp_path: Path
 ) -> None:
-    ten = datetime(2026, 10, 23, 10, 0, tzinfo=EASTERN)
-    routes = {} if pdf is None else {report_url(ten): pdf}
     espn = respx.get(espn_injuries.URL).respond(200, content=ESPN_REPORT.read_bytes())
 
-    detail = _run_injuries(seeded, tmp_path, ESPN_DAY, routes)
+    detail = _run_injuries(seeded, tmp_path, ESPN_DAY, {})
 
     stored = _stored(seeded, ESPN_REPORTED)
     assert espn.called
     assert detail["source"] == "espn"
-    assert detail["pdf_error"]
+    assert detail["pdf_error"].startswith("InjuryReportNotFoundError: ")
+    assert _overlay_run(seeded).status == "succeeded"
     assert len(stored) == detail["rows"] == 79
     assert detail["statuses"] == {"Out": 50, "Questionable": 29}
     assert (detail["unresolved"], detail["unmapped"], detail["duplicates"]) == ([], [], [])
@@ -255,19 +256,37 @@ def test_a_report_not_had_falls_back_to_espn_for_every_team_with_an_injury(
 
 
 @respx.mock
-def test_a_report_with_no_lines_on_a_day_with_games_falls_back_to_espn(
+def test_a_report_not_readable_falls_back_to_espn_and_fails_the_run(
+    seeded: sessionmaker[Session], tmp_path: Path
+) -> None:
+    espn = respx.get(espn_injuries.URL).respond(200, content=ESPN_REPORT.read_bytes())
+    ten = datetime(2026, 10, 23, 10, 0, tzinfo=EASTERN)
+
+    with pytest.raises(injuries.InjuryReportUnavailableError, match="stored ESPN's 79 rows"):
+        _run_injuries(seeded, tmp_path, ESPN_DAY, {report_url(ten): b"%PDF-1.7 not a report"})
+
+    assert espn.called
+    assert len(_stored(seeded, ESPN_REPORTED)) == 79
+    assert _overlay_run(seeded).status == "failed"
+
+
+@respx.mock
+def test_a_report_with_no_lines_on_a_day_with_games_falls_back_to_espn_and_fails_the_run(
     seeded: sessionmaker[Session], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(injuries, "parse", _no_lines)
     espn = respx.get(espn_injuries.URL).respond(200, content=ESPN_REPORT.read_bytes())
     ten = datetime(2026, 3, 1, 10, 0, tzinfo=EASTERN)
 
-    detail = _run_injuries(seeded, tmp_path, DAY, {report_url(ten): WEEKEND.read_bytes()})
+    with pytest.raises(
+        injuries.InjuryReportUnavailableError,
+        match=r"^2026-03-01T1000\.pdf has no lines on a day with games; stored ESPN's 79 rows",
+    ):
+        _run_injuries(seeded, tmp_path, DAY, {report_url(ten): WEEKEND.read_bytes()})
 
     assert espn.called
-    assert detail["source"] == "espn"
-    assert detail["pdf_error"] == "2026-03-01T1000.pdf has no lines on a day with games"
     assert len(_stored(seeded, ESPN_REPORTED)) == 79
+    assert _overlay_run(seeded).status == "failed"
 
 
 @respx.mock(assert_all_called=False)

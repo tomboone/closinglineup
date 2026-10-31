@@ -5,9 +5,11 @@ once. Each line of the report becomes a row with `source='pdf'`, its player and 
 NBA.com IDs and its game to a `game` row where one is loaded. A line whose player cannot be
 resolved is logged and listed in the run's detail, and has no row.
 
-When the report cannot be had, because it fails to fetch or parse or holds no lines on a day with
-games, ESPN's injuries are stored in its place, with `source='espn'`, no game and the run's date
-as `game_date`; `derive.availability.latest_injury_source` tells a team's stale ESPN rows apart.
+When the report cannot be had, ESPN's injuries are stored in its place, with `source='espn'`, no
+game and the run's date as `game_date`; `derive.availability.latest_injury_source` tells a team's
+stale ESPN rows apart. A report the NBA did not publish is no fault, even on a game day (see
+`sources.injury_pdf`), and the run succeeds. One that is blocked, fails to fetch or parse, or holds
+no lines on a day with games fails the run once ESPN's rows are stored, so its heartbeat alerts.
 """
 
 import logging
@@ -15,7 +17,7 @@ from collections import Counter
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
@@ -25,7 +27,12 @@ from closinglineup.names import NameIndex, first_last
 from closinglineup.resolve import Rosters, name_index, rosters
 from closinglineup.sources import espn_injuries
 from closinglineup.sources.espn_injuries import EspnInjuries
-from closinglineup.sources.injury_pdf import InjuryReport, discover, parse
+from closinglineup.sources.injury_pdf import (
+    InjuryReport,
+    InjuryReportNotFoundError,
+    discover,
+    parse,
+)
 from closinglineup.teams import by_tricode
 
 if TYPE_CHECKING:
@@ -38,6 +45,11 @@ ESPN_SOURCE = "espn"
 type GameKeys = Mapping[tuple[date, int, int], str]
 
 log = logging.getLogger(__name__)
+
+
+class InjuryReportUnavailableError(Exception):
+    """The report was published, or may have been, but could not be had; ESPN's rows are stored in
+    its place."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,17 +152,23 @@ def resolve_espn_rows(
 def run(jobs: "Jobs", day: date) -> dict[str, Any]:
     """Find, parse and store the latest report stamped on `day`, or ESPN's report when it cannot
     be had. Either replaces any rows an earlier run stored from the same report, so a re-run
-    leaves the table as it was."""
+    leaves the table as it was.
+
+    Raises `InjuryReportUnavailableError`, after storing ESPN's rows, unless the report was had or
+    was not published."""
     try:
         with jobs.nba() as session:
             path = discover(day, session, jobs.cache, jobs.clock.now())
         report = parse(path)
-    # Anything: a PDF the NBA reformats can fail inside pdfplumber, not only in `parse`.
+    except InjuryReportNotFoundError as exc:
+        log.info("injury report not published; falling back to ESPN", extra={"error": str(exc)})
+        return _run_espn(jobs, day, f"{type(exc).__name__}: {exc}")
+    # Anything else: a PDF the NBA reformats can fail inside pdfplumber, not only in `parse`.
     except Exception as exc:
         log.warning("injury report not had; falling back to ESPN", exc_info=True)
-        return _run_espn(jobs, day, f"{type(exc).__name__}: {exc}")
+        _fall_back(jobs, day, f"{type(exc).__name__}: {exc}")
     if not report.rows and _has_games(jobs, day):
-        return _run_espn(jobs, day, f"{path.name} has no lines on a day with games")
+        _fall_back(jobs, day, f"{path.name} has no lines on a day with games")
     dates = {line.game_date for line in report.rows}
     with jobs.db.begin() as session:
         resolved = resolve_rows(
@@ -168,6 +186,11 @@ def run(jobs: "Jobs", day: date) -> dict[str, Any]:
         "unmatched_games": resolved.unmatched_games,
         "duplicates": resolved.duplicates,
     }
+
+
+def _fall_back(jobs: "Jobs", day: date, pdf_error: str) -> NoReturn:
+    detail = _run_espn(jobs, day, pdf_error)
+    raise InjuryReportUnavailableError(f"{pdf_error}; stored ESPN's {detail['rows']} rows instead")
 
 
 def _run_espn(jobs: "Jobs", day: date, pdf_error: str) -> dict[str, Any]:
