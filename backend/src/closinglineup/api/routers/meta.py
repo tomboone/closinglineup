@@ -18,7 +18,7 @@ from closinglineup.api.schemas import (
     SourceFreshness,
 )
 from closinglineup.db.models import (
-    IMPACT_SOURCES,
+    IMPACT_RATINGS,
     Contract,
     Game,
     ImpactSnapshot,
@@ -80,7 +80,7 @@ def _freshness(session: Session) -> list[SourceFreshness]:
         ("injury_pdf", reports.get(PDF_SOURCE)),
         ("injury_espn", reports.get(ESPN_SOURCE)),
         ("transactions", session.scalar(select(func.max(Transaction.date)))),
-        *((source, impacts.get(source)) for source in IMPACT_SOURCES),
+        *((source, impacts.get(source)) for source in IMPACT_RATINGS),
         ("contracts", session.scalar(select(func.max(Contract.as_of_date)))),
     ]
     return [SourceFreshness(source=source, latest=value) for source, value in latest]

@@ -5,11 +5,11 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, insert
+from sqlalchemy import delete, insert, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.api.app import create_app
-from closinglineup.api.routers.league import MoverRow, top_movers
+from closinglineup.api.routers.league import MoverRow, QuietRow, top_movers
 from closinglineup.db.models import (
     Game,
     ImpactSnapshot,
@@ -19,6 +19,7 @@ from closinglineup.db.models import (
     PlayerGame,
     RosterMembership,
     RotationEvent,
+    RotationState,
     Transaction,
 )
 from closinglineup.derive.windows import refresh_windows
@@ -70,10 +71,32 @@ LAST = _day(GAMES[-1])
 OFF_DAY = FIRST + timedelta(days=1)
 # The day between games 11 and 12, on which no one played but BOS filed a report.
 BREAK = LAST - timedelta(days=1)
+# The morning after the last game, on which a transaction is filed.
+MORNING = LAST + timedelta(days=1)
+# FALLER's tier on each BOS game, the yo-yo strip's; he has no row on game 7.
+STRIP = {g: ("core" if g % 2 else "fringe") for g in GAMES if g != 7}
+
+
+# The last game's counts, every other line all zeros, and each line's Game Score: BOS's top two
+# are STARTERS[1]'s then RISER's, NYK's NYK_FIVE[2]'s then NYK_FIVE[0]'s.
+BOX = {
+    # 30 + 0.4·12 - 0.7·20 + 0.3·6 + 0.7·5
+    STARTERS[1]: ({"pts": 30, "fgm": 12, "fga": 20, "dreb": 6, "ast": 5}, 26.1),
+    # 20 + 0.4·8 - 0.7·15 + 0.7·2 + 0.7·2
+    RISER: ({"pts": 20, "fgm": 8, "fga": 15, "oreb": 2, "ast": 2}, 15.5),
+    STARTERS[0]: ({"pts": 10}, 10.0),
+    # 25 + 0.4·10 - 0.7·18 - 0.4·(6 - 5) + 0.3·8
+    NYK_FIVE[2]: ({"pts": 25, "fgm": 10, "fga": 18, "fta": 6, "ftm": 5, "dreb": 8}, 18.4),
+    # 12 + 3 + 0.7·2 - 1
+    NYK_FIVE[0]: ({"pts": 12, "stl": 3, "blk": 2, "tov": 1}, 15.4),
+    # 12 - 0.4·4
+    NYK_FIVE[1]: ({"pts": 12, "pf": 4}, 10.4),
+}
 
 
 def _line(g: int, player_id: int, team_id: int) -> dict[str, Any]:
     counts = ("pts", "fgm", "fga", "fg3m", "fg3a", "ftm", "fta", "oreb", "dreb", "ast", "stl")
+    box = BOX[player_id][0] if g == GAMES[-1] and player_id in BOX else {}
     return {
         "game_id": _game_id(g),
         "player_id": player_id,
@@ -82,6 +105,7 @@ def _line(g: int, player_id: int, team_id: int) -> dict[str, Any]:
         "seconds": 2880,
         "dnp_reason": None,
         **dict.fromkeys((*counts, "blk", "tov", "pf", "plus_minus"), 0),
+        **box,
         "source": "stats",
     }
 
@@ -137,6 +161,22 @@ def _impact(player_id: int, day: date, source: str, value: float) -> dict[str, A
     return {"date": day, "player_id": player_id, "source": source, "value": value}
 
 
+def _state(player_id: int, team_id: int, day: date, tier: str) -> dict[str, Any]:
+    return {
+        "player_id": player_id,
+        "team_id": team_id,
+        "game_date": day,
+        "tier": tier,
+        "minutes_share_10": None,
+        "starter_rate_5": None,
+        "played_rate_10": None,
+        "availability": "active",
+        "badges": [],
+        "is_short": False,
+        "inputs": {},
+    }
+
+
 SIGNALS = [
     {"name": "minutes_share", "value": 0.2, "label": "minutes share up 20 pts"},
     {"name": "injury", "value": "Out → Available", "label": "back from injury 2 days ago"},
@@ -173,6 +213,7 @@ def clear(db: sessionmaker[Session]) -> None:
     with db.begin() as session:
         for model in (
             RotationEvent,
+            RotationState,
             PlayerFlag,
             InjuryStatus,
             Transaction,
@@ -188,8 +229,10 @@ def clear(db: sessionmaker[Session]) -> None:
 @pytest.fixture
 def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """BOS's 12 games against NYK, every other day, with box scores and rosters; impact snapshots
-    on the first and last dates; on the last, three rotation events, two flags, a transaction and
-    a BOS injury report, each with an earlier one beside it; the view refreshed."""
+    on the first and last dates and the morning after; on the last, three rotation events, three
+    flags (FALLER's yo-yo with his `rotation_state` over BOS's games), a transaction and a BOS
+    injury report, each with an earlier one beside it, and a transaction the morning after; the
+    view refreshed."""
     clear(db)
     before = datetime.combine(_day(11), time(17), EASTERN)
     on_break = datetime.combine(BREAK, time(17), EASTERN)
@@ -221,7 +264,16 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 _impact(STARTERS[0], LAST, "epm", 1.5),
                 # Unchanged: neither a riser nor a faller.
                 _impact(STARTERS[1], FIRST, "darko", 0.5),
+                # His DARKO is older than his local BPM, but comes first.
+                _impact(NYK_FIVE[0], FIRST, "darko", 0.8),
+                _impact(NYK_FIVE[0], LAST, "bpm_local", 1.2),
+                # After the date, so none on it.
+                _impact(NEWLY_OUT, MORNING, "darko", 4.0),
             ],
+        )
+        session.execute(
+            insert(RotationState),
+            [_state(FALLER, BOS, _day(g), tier) for g, tier in STRIP.items()],
         )
         session.execute(
             insert(RotationEvent),
@@ -237,6 +289,7 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
             [
                 _flag(RISER, BOS, LAST, "earning_trust"),
                 _flag(FALLER, BOS, LAST, "minutes_cliff"),
+                _flag(FALLER, BOS, LAST, "yo_yo"),
                 _flag(FALLER, BOS, _day(11), "yo_yo"),
             ],
         )
@@ -258,6 +311,22 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                     "from_team_id": NYK,
                     "to_team_id": None,
                     "detail": "New York waived Player 9500012.",
+                },
+                {
+                    "date": MORNING,
+                    "type": "waive",
+                    "player_id": STILL_OUT,
+                    "from_team_id": BOS,
+                    "to_team_id": None,
+                    "detail": "Boston waived Player 9500014.",
+                },
+                {
+                    "date": MORNING + timedelta(days=1),
+                    "type": "sign",
+                    "player_id": STILL_OUT,
+                    "from_team_id": None,
+                    "to_team_id": NYK,
+                    "detail": "New York signed Player 9500014.",
                 },
             ],
         )
@@ -311,6 +380,37 @@ def test_movers_rank_by_their_change_and_keep_the_top_n() -> None:
 
 def test_a_mover_whose_value_did_not_move_is_neither() -> None:
     assert top_movers([MoverRow(1, BOS, 0.2, 0.0)], 15) == ([], [])
+
+
+def test_the_date_s_final_games_carry_both_scores_and_each_side_s_top_game_scores(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    (game,) = _page(client)["games"]
+
+    assert game["game_id"] == _game_id(GAMES[-1])
+    assert (game["home"]["tricode"], game["home"]["score"]) == ("BOS", 100)
+    assert (game["away"]["tricode"], game["away"]["score"]) == ("NYK", 95)
+    assert game["margin"] == 5
+    for side, top in (("home", [STARTERS[1], RISER]), ("away", [NYK_FIVE[2], NYK_FIVE[0]])):
+        lines = game[side]["top"]
+        assert [line["player"]["player_id"] for line in lines] == top
+        assert [line["game_score"] for line in lines] == [
+            pytest.approx(BOX[p][1], abs=1e-6) for p in top
+        ]
+    best = game["home"]["top"][0]
+    assert best["player"]["name"] == f"Player {STARTERS[1]}"
+    assert (best["pts"], best["reb"], best["ast"], best["seconds"]) == (30, 6, 5, 2880)
+
+
+def test_a_game_not_yet_final_is_not_among_the_date_s_games(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    with seeded.begin() as session:
+        session.execute(
+            update(Game).where(Game.game_id == _game_id(GAMES[-1])).values(status="scheduled")
+        )
+
+    assert _page(client)["games"] == []
 
 
 def test_every_rotation_event_on_the_date_appears_once_with_its_signals(
@@ -369,8 +469,51 @@ def test_flags_are_the_date_s_by_flag(seeded: sessionmaker[Session], client: Tes
     assert [(f["flag"], f["player"]["player_id"], f["tricode"]) for f in page["flags"]] == [
         ("minutes_cliff", FALLER, "BOS"),
         ("earning_trust", RISER, "BOS"),
+        ("yo_yo", FALLER, "BOS"),
     ]
     assert page["flags"][0]["detail"] == {"share_5": 0.1}
+
+
+def test_a_yo_yo_flag_carries_his_tier_on_each_team_game_date_the_oldest_first(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    flags = _page(client)["flags"]
+
+    (yo_yo,) = (flag for flag in flags if flag["flag"] == "yo_yo")
+    # Game 7, on which he has no row, is kept in its place with no tier, for the strip's gap.
+    assert yo_yo["tiers"] == [
+        {"game_date": _day(g).isoformat(), "tier": STRIP.get(g)} for g in GAMES
+    ]
+    assert [flag["tiers"] for flag in flags if flag["flag"] != "yo_yo"] == [None, None]
+
+
+def test_every_player_row_carries_his_impact_in_the_first_source_with_a_value(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
+    page = _page(client)
+
+    rows = [
+        *(event for team in page["rotation_events"] for event in team["events"]),
+        *page["minutes_risers"],
+        *page["minutes_fallers"],
+        *page["impact_risers"],
+        *page["impact_fallers"],
+        *page["flags"],
+        *page["transactions"],
+    ]
+    impacts = {row["player"]["player_id"]: row["impact"] for row in rows}
+    assert impacts == {
+        # His latest of each source on or before the date, DARKO before local BPM; EPM, cancelled,
+        # is never one.
+        RISER: {"source": "darko", "value": 3.0},
+        FALLER: {"source": "bpm_local", "value": -1.0},
+        STARTERS[0]: None,
+        NYK_FIVE[0]: {"source": "darko", "value": 0.8},
+        NEWLY_OUT: None,
+        STILL_OUT: None,
+    }
+    # Each player's rows agree.
+    assert all(row["impact"] == impacts[row["player"]["player_id"]] for row in rows)
 
 
 def test_injury_changes_are_new_outs_then_returns(
@@ -389,13 +532,18 @@ def test_injury_changes_are_new_outs_then_returns(
     assert report == datetime.combine(LAST, time(17), EASTERN)
 
 
-def test_transactions_are_the_date_s(seeded: sessionmaker[Session], client: TestClient) -> None:
+def test_transactions_are_the_date_s_and_the_morning_after_s(
+    seeded: sessionmaker[Session], client: TestClient
+) -> None:
     transactions = _page(client)["transactions"]
 
     assert [
-        (t["player"]["player_id"], t["type"], t["from_tricode"], t["to_tricode"])
+        (t["player"]["player_id"], t["date"], t["type"], t["from_tricode"], t["to_tricode"])
         for t in transactions
-    ] == [(NEWLY_OUT, "sign", None, "BOS")]
+    ] == [
+        (NEWLY_OUT, LAST.isoformat(), "sign", None, "BOS"),
+        (STILL_OUT, MORNING.isoformat(), "waive", "BOS", None),
+    ]
 
 
 def test_a_date_with_no_games_has_empty_lists(
@@ -405,3 +553,76 @@ def test_a_date_with_no_games_has_empty_lists(
 
     assert page["date"] == OFF_DAY.isoformat()
     assert all(page[key] == [] for key in page if key != "date")
+
+
+# On BOS's last game, against averages of 48 minutes over games 2-11: a Starter who sat by coach's
+# decision, a Core player at 40% and one at 70% of his minutes, a Core player at 40% with a
+# rotation event on the date, a Fringe NYK player at 40%, and a Core NYK player out injured.
+DNP_CD, LOW, ENOUGH, MOVED = STARTERS
+FRINGE, INJURED = NYK_FIVE[1:3]
+QUIET_LINES = {
+    DNP_CD: (0, "cd"),
+    LOW: (1152, None),
+    ENOUGH: (2016, None),
+    MOVED: (1152, None),
+    FRINGE: (1152, None),
+    INJURED: (0, "injury"),
+}
+
+
+@pytest.fixture
+def quiet(seeded: sessionmaker[Session]) -> sessionmaker[Session]:
+    """`seeded`, with the last game's lines and tiers of `QUIET_LINES`' players, MOVED's event and
+    LOW's impact on the date; the view refreshed. `seeded` clears it all."""
+    tiers = {
+        DNP_CD: "starter",
+        LOW: "core",
+        ENOUGH: "core",
+        MOVED: "core",
+        FRINGE: "fringe",
+        INJURED: "core",
+    }
+    with seeded.begin() as session:
+        for player_id, (seconds, dnp_reason) in QUIET_LINES.items():
+            session.execute(
+                update(PlayerGame)
+                .where(PlayerGame.game_id == _game_id(GAMES[-1]))
+                .where(PlayerGame.player_id == player_id)
+                .values(seconds=seconds, dnp_reason=dnp_reason)
+            )
+        session.execute(
+            insert(RotationState),
+            [_state(p, NYK if p in NYK_FIVE else BOS, LAST, tier) for p, tier in tiers.items()],
+        )
+        session.execute(insert(RotationEvent), [_event(MOVED, BOS, LAST, "starter", "core")])
+        session.execute(insert(ImpactSnapshot), [_impact(LOW, LAST, "darko", 2.5)])
+    refresh_windows(seeded)
+    return seeded
+
+
+def test_quiet_signals_are_starters_and_core_well_short_of_their_minutes_a_dnp_first(
+    quiet: sessionmaker[Session], client: TestClient
+) -> None:
+    signals = _page(client)["quiet_signals"]
+
+    assert [
+        (s["player"]["player_id"], s["tricode"], s["tier"], s["seconds"], s["dnp_reason"])
+        for s in signals
+    ] == [(DNP_CD, "BOS", "starter", 0, "cd"), (LOW, "BOS", "core", 1152, None)]
+    # The average is over the games before the date's.
+    assert [s["minutes_per_game_10"] for s in signals] == [48.0, 48.0]
+    assert [s["impact"] for s in signals] == [None, {"source": "darko", "value": 2.5}]
+
+
+def test_quiet_signals_put_a_dnp_before_a_larger_shortfall() -> None:
+    dnp = QuietRow(1, BOS, "core", 0, 10.0, "cd")
+    short = QuietRow(2, BOS, "starter", 60, 40.0, None)
+    shorter = QuietRow(3, BOS, "starter", 600, 40.0, None)
+
+    assert sorted([shorter, short, dnp], key=QuietRow.rank) == [dnp, short, shorter]
+
+
+def test_a_date_with_no_games_has_no_quiet_signals(
+    quiet: sessionmaker[Session], client: TestClient
+) -> None:
+    assert _page(client, OFF_DAY)["quiet_signals"] == []

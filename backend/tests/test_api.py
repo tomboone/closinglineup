@@ -96,8 +96,19 @@ def test_the_openapi_schema_is_served_and_matches_its_snapshot(client: TestClien
 def test_every_spec_route_s_page_model_is_in_the_schema(client: TestClient) -> None:
     schema = client.get("/api/openapi.json").json()
 
-    assert {"/api/league", "/api/players/{player_id}", "/api/games/{game_id}"} <= set(
-        schema["paths"]
-    )
-    pages = {"MetaResponse", "TeamsResponse", "TeamPage", "LeaguePage", "PlayerPage", "GamePage"}
+    assert {
+        "/api/league",
+        "/api/slate",
+        "/api/players/{player_id}",
+        "/api/games/{game_id}",
+    } <= set(schema["paths"])
+    pages = {
+        "MetaResponse",
+        "TeamsResponse",
+        "TeamPage",
+        "LeaguePage",
+        "SlatePage",
+        "PlayerPage",
+        "GamePage",
+    }
     assert pages <= set(schema["components"]["schemas"])

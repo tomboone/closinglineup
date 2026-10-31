@@ -59,14 +59,7 @@ body {
 }
 
 .team-page {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 8px 32px;
-  align-items: start;
-}
-
-.team-page .team-tiers {
-  grid-row: span 2;
+  margin-top: 12px;
 }
 
 .team-page table {
@@ -127,6 +120,10 @@ body {
   font-style: normal;
 }
 
+.impact {
+  font-variant-numeric: tabular-nums;
+}
+
 .impact-source {
   margin-left: 4px;
   font-size: 0.75em;
@@ -160,9 +157,13 @@ body {
   color: #cf222e;
 }
 
+/* The default 120 × 28 px of line plus the end label's room (`END_LABEL_ROOM` and
+   `END_LABEL_HALF_HEIGHT` in SparklineCell): 40 px on the right, 7 px above and below. */
 .team-page .chart-sparkline {
   display: inline-block;
   vertical-align: middle;
+  width: 160px;
+  height: 38px;
 }
 
 .player-header .tier {
@@ -170,6 +171,11 @@ body {
   padding-left: 6px;
   border-left: 4px solid;
   font-weight: 600;
+}
+
+.player-header .availability {
+  margin-left: 8px;
+  font-style: italic;
 }
 
 .window-toggle {
@@ -191,6 +197,11 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 8px 32px;
   align-items: start;
+}
+
+/* The tier strip runs over the dates every chart below shares, so it takes the page's width. */
+.player-tiers {
+  grid-column: 1 / -1;
 }
 
 .player-page table {
@@ -217,6 +228,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.production .delta {
+  margin-left: 4px;
+  font-size: 0.75em;
+  color: #57606a;
+}
+
 .flag-list {
   margin: 0;
   padding: 0;
@@ -228,9 +245,99 @@ body {
   border-bottom: 1px solid #eee;
 }
 
+/* A flag's text, then its drawing at the row's right edge, the drawings one column down the list. */
+.flag-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chart-flag {
+  flex: none;
+  width: 160px;
+  height: 40px;
+}
+
+.chart-tier-strip {
+  width: 100%;
+  height: 32px;
+}
+
+.flag-row .chart-flag {
+  margin-left: auto;
+}
+
 .flag-date {
   font-variant-numeric: tabular-nums;
   color: #57606a;
+}
+
+.feed-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+.feed-dates {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-list {
+  display: flex;
+  gap: 4px;
+}
+
+.tab-list [role="tab"] {
+  padding: 4px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab-list [role="tab"][aria-selected="true"] {
+  border-color: #1a1a1a;
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.team-filter {
+  position: relative;
+  margin-left: auto;
+}
+
+.team-filter summary {
+  cursor: pointer;
+}
+
+.team-filter fieldset {
+  position: absolute;
+  right: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  gap: 4px 12px;
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.team-filter legend {
+  float: left;
+  grid-column: 1 / -1;
+  font-weight: 600;
+}
+
+.team-filter button {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 
 .league-page {
@@ -240,8 +347,9 @@ body {
   align-items: start;
 }
 
-.league-page .league-events {
-  grid-row: span 2;
+.league-page .league-events,
+.league-page .league-quiet {
+  grid-column: 1 / -1;
 }
 
 .league-page table {
@@ -269,16 +377,85 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.league-page .chart-sparkline {
-  display: inline-block;
-  vertical-align: middle;
-  width: 60px;
-}
-
 .league-page .tier {
   padding-left: 6px;
   border-left: 4px solid;
   font-weight: 600;
+}
+
+.slate-game {
+  grid-column: 1 / -1;
+}
+
+.slate-game h2 {
+  margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.slate-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 32px;
+  align-items: start;
+}
+
+.marker-b2b,
+.marker-replacement {
+  border: 1px solid #8c959f;
+  color: #57606a;
+  font-style: normal;
+}
+
+.change {
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 0.75em;
+  font-weight: 600;
+  color: #fff;
+}
+
+.change-new {
+  background: #cf222e;
+}
+
+.change-upgraded {
+  background: #2da44e;
+}
+
+.change-downgraded {
+  background: #bf8700;
+}
+
+.change-off {
+  background: #8c959f;
+}
+
+.line-off td {
+  color: #8c959f;
+}
+
+.status-change {
+  display: block;
+  font-size: 0.8em;
+  color: #57606a;
+}
+
+.projected-starters {
+  margin: 0;
+  padding-left: 20px;
+}
+
+/* Last night's games: a side's top Game Scores, one a line. */
+.last-night th[scope="row"] {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.top-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .rotation-events,
@@ -341,4 +518,50 @@ body {
 .game-page .number {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.players-controls {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.players-controls input[type="number"] {
+  width: 4em;
+}
+
+.players-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.players-table th,
+.players-table td {
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.players-table .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A header is a button that sorts by its column; the sorted one's arrow says which way. */
+.players-table th button {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.players-table th[aria-sort="descending"] button::after {
+  content: " ▼";
+}
+
+.players-table th[aria-sort="ascending"] button::after {
+  content: " ▲";
 }

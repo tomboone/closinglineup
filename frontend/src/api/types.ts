@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** League Table */
+        get: operations["league_table_api_players_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/players/{player_id}": {
         parameters: {
             query?: never;
@@ -81,6 +98,23 @@ export interface paths {
         };
         /** Player Page */
         get: operations["player_page_api_players__player_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/slate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Slate */
+        get: operations["slate_api_slate_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -131,7 +165,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** Annotation */
+        /**
+         * Annotation
+         * @description A change on one of the window's dates: an injury status, a transaction, a rotation event's
+         *     tier ("Fringe → Core", "Joined as Core"), or whether he started or closed.
+         */
         Annotation: {
             /**
              * Game Date
@@ -142,7 +180,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "injury" | "transaction" | "starter" | "closer";
+            kind: "injury" | "transaction" | "tier" | "starter" | "closer";
             /** Label */
             label: string;
         };
@@ -222,6 +260,8 @@ export interface components {
             salary: number | null;
         };
         /** @enum {string} */
+        DnpReason: "cd" | "injury" | "inactive" | "suspension" | "g_league" | "other";
+        /** @enum {string} */
         Flag: "minutes_cliff" | "usage_up_efficiency_down" | "bleeding" | "earning_trust" | "yo_yo" | "contract_pressure";
         /**
          * GameLineup
@@ -270,6 +310,23 @@ export interface components {
             /** Is Starter */
             is_starter: boolean;
             player: components["schemas"]["PlayerRef"];
+            /** Seconds */
+            seconds: number;
+        };
+        /**
+         * GameScoreLine
+         * @description A player's line in a game, ranked by its Game Score (v2 spec §8.1).
+         */
+        GameScoreLine: {
+            /** Ast */
+            ast: number;
+            /** Game Score */
+            game_score: number;
+            player: components["schemas"]["PlayerRef"];
+            /** Pts */
+            pts: number;
+            /** Reb */
+            reb: number;
             /** Seconds */
             seconds: number;
         };
@@ -326,6 +383,20 @@ export interface components {
             status: "ok" | "unavailable";
         };
         /**
+         * Impact
+         * @description A feed row's player's latest impact value on or before its date, in the first of DARKO and
+         *     local BPM he has one in (v2 spec §7).
+         */
+        Impact: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "darko" | "bpm_local";
+            /** Value */
+            value: number;
+        };
+        /**
          * ImpactSeries
          * @description One impact source's latest snapshot by each game date in the window.
          */
@@ -352,6 +423,15 @@ export interface components {
             to_status: components["schemas"]["InjuryStatus"] | null;
             /** Tricode */
             tricode: string;
+        };
+        /**
+         * InjuryLine
+         * @description A player's line on his team's newest injury report by the end of the date.
+         */
+        InjuryLine: {
+            /** Reason */
+            reason: string | null;
+            status: components["schemas"]["InjuryStatus"];
         };
         /** @enum {string} */
         InjurySource: "pdf" | "espn";
@@ -388,6 +468,31 @@ export interface components {
              */
             status: "running" | "succeeded" | "failed";
         };
+        /**
+         * LastNightGame
+         * @description A final game on the date (v2 spec §15.3); `margin` is the home score less the away, null
+         *     while a score is missing.
+         */
+        LastNightGame: {
+            away: components["schemas"]["LastNightTeam"];
+            /** Game Id */
+            game_id: string;
+            home: components["schemas"]["LastNightTeam"];
+            /** Margin */
+            margin: number | null;
+        };
+        /**
+         * LastNightTeam
+         * @description One side of a final game: its score and its two highest Game Scores, the highest first.
+         */
+        LastNightTeam: {
+            /** Score */
+            score: number | null;
+            /** Top */
+            top: components["schemas"]["GameScoreLine"][];
+            /** Tricode */
+            tricode: string;
+        };
         /** LeaguePage */
         LeaguePage: {
             /**
@@ -397,6 +502,8 @@ export interface components {
             date: string;
             /** Flags */
             flags: components["schemas"]["RaisedFlag"][];
+            /** Games */
+            games: components["schemas"]["LastNightGame"][];
             /** Impact Fallers */
             impact_fallers: components["schemas"]["Mover"][];
             /** Impact Risers */
@@ -407,11 +514,65 @@ export interface components {
             minutes_fallers: components["schemas"]["Mover"][];
             /** Minutes Risers */
             minutes_risers: components["schemas"]["Mover"][];
+            /** Quiet Signals */
+            quiet_signals: components["schemas"]["QuietSignal"][];
             /** Rotation Events */
             rotation_events: components["schemas"]["TeamRotationEvents"][];
             /** Transactions */
             transactions: components["schemas"]["TransactionSummary"][];
         };
+        /**
+         * LeagueTable
+         * @description Every player with a production row in the window, unsorted and unfiltered: the page sorts
+         *     and filters them.
+         */
+        LeagueTable: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Rows */
+            rows: components["schemas"]["LeagueTableRow"][];
+            window: components["schemas"]["LeagueWindow"];
+        };
+        /**
+         * LeagueTableRow
+         * @description A player's latest production row in the window: his games whatever the team. `tricode` and
+         *     `tier` are his latest `rotation_state` on or before the date in its season, null with none;
+         *     `games` counts his teams' games in the window and `games_played` those he played; `impact` is
+         *     the row's first of DARKO and local BPM he has; `vorp` is null but for the season and the prior
+         *     season.
+         */
+        LeagueTableRow: {
+            /** Game Score */
+            game_score: number | null;
+            /** Games */
+            games: number;
+            /** Games Played */
+            games_played: number;
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Per Game */
+            minutes_per_game: number | null;
+            player: components["schemas"]["PlayerRef"];
+            tier: components["schemas"]["Tier"] | null;
+            /** Tricode */
+            tricode: string | null;
+            /** Ts Pct */
+            ts_pct: number | null;
+            /** Usg Pct */
+            usg_pct: number | null;
+            /** Vorp */
+            vorp: number | null;
+            /** Ws */
+            ws: number | null;
+            /** Ws 48 */
+            ws_48: number | null;
+        };
+        /** @enum {string} */
+        LeagueWindow: "5" | "10" | "20" | "season" | "prior_season";
+        /** @enum {string} */
+        LineChange: "new" | "upgraded" | "downgraded" | "off";
         /**
          * LineupStats
          * @description A five or a pair over the season through the date, and over the team's last 10 games:
@@ -484,6 +645,7 @@ export interface components {
         Mover: {
             /** Delta */
             delta: number;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
             /** Source */
             source: ("epm" | "darko" | "bpm_local") | null;
@@ -492,10 +654,16 @@ export interface components {
             /** Value */
             value: number | null;
         };
-        /** PlayerHeader */
+        /**
+         * PlayerHeader
+         * @description `tier`, `availability` and `badges` are his `rotation_state` on his latest team game date,
+         *     null and empty with none; `injury` his line on his team's newest report, null off it.
+         */
         PlayerHeader: {
+            availability: components["schemas"]["Availability"] | null;
             /** Badges */
             badges: components["schemas"]["Badge"][];
+            injury: components["schemas"]["InjuryLine"] | null;
             player: components["schemas"]["PlayerRef"];
             /** Position */
             position: string | null;
@@ -503,10 +671,16 @@ export interface components {
             /** Tricode */
             tricode: string | null;
         };
-        /** PlayerPage */
+        /**
+         * PlayerPage
+         * @description `tiers` is his tier on each of his team's game dates in the window, the oldest first;
+         *     `contract` his non-guaranteed contract with his team, as the team page's contract notes read
+         *     one, null with none.
+         */
         PlayerPage: {
             /** Annotations */
             annotations: components["schemas"]["Annotation"][];
+            contract: components["schemas"]["ContractNote"] | null;
             /**
              * Date
              * Format: date
@@ -517,11 +691,15 @@ export interface components {
             garbage_time: components["schemas"]["GarbageTime"];
             header: components["schemas"]["PlayerHeader"];
             matchups: components["schemas"]["Matchups"];
+            /** Production */
+            production: components["schemas"]["ProductionRow"][];
             series: components["schemas"]["PlayerSeries"];
             /** Shot Profile */
             shot_profile: components["schemas"]["ShotZone"][];
             /** Teammates */
             teammates: components["schemas"]["Teammate"][];
+            /** Tiers */
+            tiers: components["schemas"]["TierPoint"][];
             window: components["schemas"]["Window"];
         };
         /**
@@ -588,7 +766,90 @@ export interface components {
             /** Value */
             value: number | null;
         };
-        /** RaisedFlag */
+        /**
+         * ProductionCell
+         * @description A metric over one production window: its value, that less the season window's, the games in
+         *     the window and whether it is short. `o_value` and `d_value` are Win Shares' offensive and
+         *     defensive parts, null for every other metric.
+         */
+        ProductionCell: {
+            /** D Value */
+            d_value: number | null;
+            /** Delta Season */
+            delta_season: number | null;
+            /** Games */
+            games: number;
+            /** Is Short */
+            is_short: boolean;
+            /** O Value */
+            o_value: number | null;
+            /** Value */
+            value: number | null;
+        };
+        /** @enum {string} */
+        ProductionFormat: "percent" | "rate" | "number" | "per_game";
+        /** @enum {string} */
+        ProductionMetric: "ts_pct" | "efg_pct" | "usg_pct" | "ast_pct" | "tov_pct" | "oreb_pct" | "dreb_pct" | "ftr" | "fg3a_rate" | "pts_per36" | "reb_per36" | "ast_per36" | "game_score" | "ws" | "ws_48" | "vorp";
+        /** ProductionRow */
+        ProductionRow: {
+            format: components["schemas"]["ProductionFormat"];
+            /** Label */
+            label: string;
+            metric: components["schemas"]["ProductionMetric"];
+            windows: components["schemas"]["ProductionWindows"];
+        };
+        /**
+         * ProductionWindows
+         * @description A metric's cell in each production window, null where he has no such window or the metric
+         *     is not kept for it.
+         */
+        ProductionWindows: {
+            5: components["schemas"]["ProductionCell"] | null;
+            10: components["schemas"]["ProductionCell"] | null;
+            20: components["schemas"]["ProductionCell"] | null;
+            prior_season: components["schemas"]["ProductionCell"] | null;
+            season: components["schemas"]["ProductionCell"] | null;
+        };
+        /**
+         * ProjectedStarter
+         * @description One of the first five of the team's players by `starter_rate_5` on its latest derived date
+         *     whose line on the report is not Out or Doubtful; `replacement` when he ranks below the top five,
+         *     so fills the gap of one removed above him (v2 spec §5.3).
+         */
+        ProjectedStarter: {
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Share 10 */
+            minutes_share_10: number | null;
+            player: components["schemas"]["PlayerRef"];
+            /** Replacement */
+            replacement: boolean;
+            /** Starter Rate 5 */
+            starter_rate_5: number;
+        };
+        /**
+         * QuietSignal
+         * @description A Starter or Core player with no rotation event on the date who sat by coach's decision in
+         *     his team's game on it, or played under 60% of his 10-game minutes per game before it (v2 spec
+         *     §5.4).
+         */
+        QuietSignal: {
+            dnp_reason: components["schemas"]["DnpReason"] | null;
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Per Game 10 */
+            minutes_per_game_10: number;
+            player: components["schemas"]["PlayerRef"];
+            /** Seconds */
+            seconds: number;
+            tier: components["schemas"]["Tier"];
+            /** Tricode */
+            tricode: string;
+        };
+        /**
+         * RaisedFlag
+         * @description A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the
+         *     team's last 20 final game dates this season through it, the oldest first, a date he has no row
+         *     on kept with a null tier (v2 spec §6.2); other flags', and every flag's elsewhere, are null.
+         */
         RaisedFlag: {
             /** Detail */
             detail: {
@@ -600,7 +861,10 @@ export interface components {
              * Format: date
              */
             game_date: string;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
+            /** Tiers */
+            tiers: components["schemas"]["TierPoint"][] | null;
             /** Tricode */
             tricode: string;
         };
@@ -627,6 +891,7 @@ export interface components {
              * Format: date
              */
             game_date: string;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
             /** Signals */
             signals: components["schemas"]["Signal"][];
@@ -668,6 +933,82 @@ export interface components {
             name: string;
             /** Value */
             value: number | string | null;
+        };
+        /** SlateGame */
+        SlateGame: {
+            away: components["schemas"]["SlateTeam"];
+            /** Game Id */
+            game_id: string;
+            home: components["schemas"]["SlateTeam"];
+            /** Tip Time */
+            tip_time: string | null;
+        };
+        /**
+         * SlateLine
+         * @description A player on the team's report for the game, or on G League assignment: his `status` and
+         *     `reason` on the report (null for a G League badge alone, and for an `off` line, which carries
+         *     its previous ones), his status on the previous report, the `change` between them (v2 spec
+         *     §5.2), and his tier and 10-game minutes share on the team's latest derived date on or before
+         *     last night.
+         */
+        SlateLine: {
+            change: components["schemas"]["LineChange"] | null;
+            /** G League */
+            g_league: boolean;
+            impact: components["schemas"]["Impact"] | null;
+            /** Minutes Share 10 */
+            minutes_share_10: number | null;
+            player: components["schemas"]["PlayerRef"];
+            previous_status: components["schemas"]["InjuryStatus"] | null;
+            /** Reason */
+            reason: string | null;
+            status: components["schemas"]["InjuryStatus"] | null;
+            tier: components["schemas"]["Tier"] | null;
+        };
+        /**
+         * SlatePage
+         * @description The date's games, by tip-off; `last_night` is the latest derived date before it, null
+         *     before the first (v2 spec §3, §9).
+         */
+        SlatePage: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Games */
+            games: components["schemas"]["SlateGame"][];
+            /** Last Night */
+            last_night: string | null;
+        };
+        /**
+         * SlateReport
+         * @description The team's newest injury report for the game by the end of the date, `stale` when it is
+         *     ESPN's fallback; `submitted` false, the other fields null, when it has none (v2 spec §5.1).
+         */
+        SlateReport: {
+            /** Report Datetime */
+            report_datetime: string | null;
+            source: components["schemas"]["InjurySource"] | null;
+            /** Stale */
+            stale: boolean;
+            /** Submitted */
+            submitted: boolean;
+        };
+        /**
+         * SlateTeam
+         * @description One side of a slate game; `b2b` when it is the team's second night in a row.
+         */
+        SlateTeam: {
+            /** B2B */
+            b2b: boolean;
+            /** Lines */
+            lines: components["schemas"]["SlateLine"][];
+            /** Projected Starters */
+            projected_starters: components["schemas"]["ProjectedStarter"][];
+            report: components["schemas"]["SlateReport"];
+            /** Tricode */
+            tricode: string;
         };
         /**
          * SourceFreshness
@@ -763,7 +1104,8 @@ export interface components {
          * TierBoardRow
          * @description A player's rotation state on the tier board's date, and three sparklines over the team's
          *     last 20 game dates through it: his 10-game role window's minutes share and on/off net, and his
-         *     impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for).
+         *     impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for); and
+         *     his season production window's Win Shares and VORP on that date (v2 spec §8.7).
          */
         TierBoardRow: {
             availability: components["schemas"]["Availability"];
@@ -787,6 +1129,22 @@ export interface components {
             /** Starter Rate 5 */
             starter_rate_5: number | null;
             tier: components["schemas"]["Tier"];
+            /** Vorp */
+            vorp: number | null;
+            /** Ws */
+            ws: number | null;
+        };
+        /**
+         * TierPoint
+         * @description His tier on one of his team's game dates, null on a date he has no row on.
+         */
+        TierPoint: {
+            /**
+             * Game Date
+             * Format: date
+             */
+            game_date: string;
+            tier: components["schemas"]["Tier"] | null;
         };
         /** TransactionSummary */
         TransactionSummary: {
@@ -799,6 +1157,7 @@ export interface components {
             detail: string;
             /** From Tricode */
             from_tricode: string | null;
+            impact: components["schemas"]["Impact"] | null;
             player: components["schemas"]["PlayerRef"];
             /** To Tricode */
             to_tricode: string | null;
@@ -934,6 +1293,39 @@ export interface operations {
             };
         };
     };
+    league_table_api_players_get: {
+        parameters: {
+            query?: {
+                window?: "5" | "10" | "20" | "season" | "prior_season";
+                /** @description A game date; the latest derived one if omitted. */
+                date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeagueTable"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     player_page_api_players__player_id__get: {
         parameters: {
             query?: {
@@ -957,6 +1349,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    slate_api_slate_get: {
+        parameters: {
+            query: {
+                /** @description The morning, a calendar date in Eastern time. */
+                date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlatePage"];
                 };
             };
             /** @description Validation Error */

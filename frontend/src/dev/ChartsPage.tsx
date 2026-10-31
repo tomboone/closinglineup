@@ -1,9 +1,12 @@
 import type { components } from "../api/types";
 import AnnotatedTimeSeries from "../components/charts/AnnotatedTimeSeries";
+import FlagVisual from "../components/charts/FlagVisual";
+import MoverChart from "../components/charts/MoverChart";
 import ShotProfile from "../components/charts/ShotProfile";
 import SparklineCell from "../components/charts/SparklineCell";
 import StintTimeline from "../components/charts/StintTimeline";
 import type { StintRow } from "../components/charts/StintTimeline";
+import { percent, signed } from "../components/format";
 
 // Every chart with made-up data, to eyeball them without a backend. Routed at `/dev/charts` in the
 // dev server only; the production bundle leaves this module out (see `routes.tsx`).
@@ -20,12 +23,23 @@ function wave(base: number, swing: number, phase: number): Schemas["Point"][] {
   return DATES.map((game_date, i) => ({ game_date, value: base + swing * Math.sin(i / 3 + phase) }));
 }
 
+// The last two share a range, as a tier-board column's cells do, so the smaller swing reads smaller.
 const SPARKLINES = [
-  { name: "Minutes share", series: wave(0.13, 0.03, 0), baseline: 0.12 },
-  { name: "On/off net", series: wave(2, 6, 1), baseline: 0 },
+  { name: "Minutes share", series: wave(0.13, 0.03, 0), baseline: 0.12, format: percent },
+  { name: "On/off net", series: wave(2, 6, 1), baseline: 0, format: signed },
   {
-    name: "Impact",
+    name: "Impact, ending early",
     series: wave(1.5, 0.8, 2).map((point, i) => (i < 15 ? point : { ...point, value: null })),
+    baseline: 0,
+    format: signed,
+    range: { min: -2, max: 4 },
+  },
+  {
+    name: "Impact, same range",
+    series: wave(0.5, 0.3, 0),
+    baseline: 0,
+    format: signed,
+    range: { min: -2, max: 4 },
   },
 ];
 
@@ -70,6 +84,50 @@ const ROWS: StintRow[] = TIMELINE_PLAYERS.map(([team, label], i) => {
   return { team, label, stints };
 });
 
+/** `n` made-up movers one way, the largest move first, each with a latest share near 15%. */
+function movers(n: number, sign: 1 | -1): Schemas["Mover"][] {
+  return Array.from({ length: n }, (_, i) => {
+    const [tricode, name] = TIMELINE_PLAYERS[i % TIMELINE_PLAYERS.length];
+    const delta = sign * (0.07 - i * 0.004);
+    return {
+      player: { player_id: 1000 + i * 2 + (sign > 0 ? 0 : 1), name },
+      tricode,
+      value: 0.15 + delta / 2,
+      delta,
+      source: null,
+      impact: null,
+    };
+  });
+}
+
+const TIER_CYCLE: Schemas["Tier"][] = ["core", "core", "fringe", "core", "starter", "fringe", "out"];
+
+/** One raised flag of each kind, a yo-yo's strip with no row on two of its dates. */
+const FLAGS: Schemas["RaisedFlag"][] = (
+  [
+    ["minutes_cliff", { share_5: 0.05, share_20: 0.12, ratio: 0.42 }],
+    ["usage_up_efficiency_down", { usg_pct_delta_season: 0.041, ts_pct_delta_season: -0.052 }],
+    ["bleeding", { on_court_net: -8.2, possessions: 412, off_court_net: 3.1 }],
+    ["earning_trust", { shares: [0.08, 0.1, 0.13] }],
+    ["yo_yo", { events: 5, changes: [] }],
+    ["contract_pressure", { reason: "two_way", active_games: 46, limit: 50 }],
+  ] as const
+).map(([flag, detail]) => ({
+  game_date: DATES[19],
+  flag,
+  player: { player_id: 1, name: "Jrue Holiday" },
+  tricode: "BOS",
+  detail,
+  impact: null,
+  tiers:
+    flag === "yo_yo"
+      ? DATES.map((game_date, i) => ({
+          game_date,
+          tier: i === 2 || i === 3 ? null : TIER_CYCLE[i % TIER_CYCLE.length]!,
+        }))
+      : null,
+}));
+
 const SHOT_WINDOWS = [
   { label: "Last 10", shift: 0.03 },
   { label: "Season", shift: 0 },
@@ -85,8 +143,6 @@ const SHOT_WINDOWS = [
   ],
 }));
 
-const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
-
 function ChartsPage() {
   return (
     <main className="shell">
@@ -95,11 +151,17 @@ function ChartsPage() {
       <h2>SparklineCell</h2>
       <table>
         <tbody>
-          {SPARKLINES.map(({ name, series, baseline }) => (
+          {SPARKLINES.map(({ name, series, baseline, format, range }) => (
             <tr key={name}>
               <td>{name}</td>
               <td>
-                <SparklineCell series={series} baseline={baseline} />
+                <SparklineCell
+                  series={series}
+                  baseline={baseline}
+                  range={range}
+                  endLabel
+                  format={format}
+                />
               </td>
             </tr>
           ))}
@@ -115,6 +177,29 @@ function ChartsPage() {
         annotations={ANNOTATIONS}
         yFormat={percent}
       />
+
+      <h2>MoverChart</h2>
+      <MoverChart
+        risers={movers(15, 1)}
+        fallers={movers(12, -1)}
+        format={percent}
+        unitLabel="Minutes share, pts"
+        scale={100}
+      />
+
+      <h2>FlagVisual</h2>
+      <table>
+        <tbody>
+          {FLAGS.map((raised) => (
+            <tr key={raised.flag}>
+              <td>{raised.flag}</td>
+              <td>
+                <FlagVisual raised={raised} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       <h2>StintTimeline</h2>
       <StintTimeline rows={ROWS} periods={4} garbageTimeFrom={{ period: 4, start_sec: 600 }} />

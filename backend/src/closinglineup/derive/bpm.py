@@ -139,8 +139,10 @@ class PlayerLine:
     minutes: float
     listed_position: float
     pts: int
+    fgm: int
     fga: int
     fg3m: int
+    ftm: int
     fta: int
     orb: int
     drb: int
@@ -152,20 +154,30 @@ class PlayerLine:
 
 
 class TeamBox(NamedTuple):
-    """The box-score totals the possession estimate reads: a team's, or its opponents'."""
+    """A team's box-score totals, or its opponents': its players' sums. The possession estimate
+    reads field goals, free throw attempts, rebounds and turnovers; Win Shares (`derive.value`)
+    reads the rest."""
 
     fgm: int
     fga: int
+    fg3m: int
+    ftm: int
     fta: int
     orb: int
     drb: int
+    ast: int
+    stl: int
+    blk: int
     tov: int
+    pf: int
+    pts: int
 
 
 @dataclass(frozen=True, slots=True)
 class TeamLine:
     """A team's season: its games, minutes (48 per regulation game, plus overtime), possessions,
-    and points for and against."""
+    points for and against, and its players' box-score totals and its opponents' in those
+    games."""
 
     team_id: int
     games: int
@@ -173,6 +185,8 @@ class TeamLine:
     possessions: float
     pts: int
     opp_pts: int
+    box: TeamBox
+    opp_box: TeamBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -415,6 +429,7 @@ class _Sums:
     fgm: int = 0
     fga: int = 0
     fg3m: int = 0
+    ftm: int = 0
     fta: int = 0
     orb: int = 0
     drb: int = 0
@@ -432,6 +447,7 @@ class _Sums:
         self.fgm += row.fgm
         self.fga += row.fga
         self.fg3m += row.fg3m
+        self.ftm += row.ftm
         self.fta += row.fta
         self.orb += row.oreb
         self.drb += row.dreb
@@ -443,7 +459,21 @@ class _Sums:
 
     @property
     def box(self) -> TeamBox:
-        return TeamBox(self.fgm, self.fga, self.fta, self.orb, self.drb, self.tov)
+        return TeamBox(
+            self.fgm,
+            self.fga,
+            self.fg3m,
+            self.ftm,
+            self.fta,
+            self.orb,
+            self.drb,
+            self.ast,
+            self.stl,
+            self.blk,
+            self.tov,
+            self.pf,
+            self.pts,
+        )
 
 
 @dataclass
@@ -453,6 +483,9 @@ class _TeamSums:
     possessions: float = 0.0
     pts: int = 0
     opp_pts: int = 0
+    # Its players' box-score sums, and its opponents' in the same games.
+    box: _Sums = field(default_factory=_Sums)
+    opp_box: _Sums = field(default_factory=_Sums)
     players: dict[int, _Sums] = field(default_factory=dict[int, _Sums])
 
 
@@ -507,7 +540,10 @@ def season_lines(
             team.possessions += possessions(boxes[team_id].box, boxes[opp_id].box)
             team.pts += score.get(team_id, boxes[team_id].pts)
             team.opp_pts += score.get(opp_id, boxes[opp_id].pts)
+            for row, _ in sides[opp_id]:
+                team.opp_box.add(row)
             for row, position in team_rows:
+                team.box.add(row)
                 player = team.players.setdefault(row.player_id, _Sums(position=position))
                 player.add(row)
     lines = [
@@ -517,8 +553,10 @@ def season_lines(
             sums.seconds / 60,
             listed_position(sums.position),
             sums.pts,
+            sums.fgm,
             sums.fga,
             sums.fg3m,
+            sums.ftm,
             sums.fta,
             sums.orb,
             sums.drb,
@@ -533,7 +571,14 @@ def season_lines(
     ]
     team_lines = {
         team_id: TeamLine(
-            team_id, team.games, team.minutes, team.possessions, team.pts, team.opp_pts
+            team_id,
+            team.games,
+            team.minutes,
+            team.possessions,
+            team.pts,
+            team.opp_pts,
+            team.box.box,
+            team.opp_box.box,
         )
         for team_id, team in sorted(teams.items())
     }

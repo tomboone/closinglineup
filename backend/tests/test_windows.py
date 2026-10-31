@@ -1,21 +1,28 @@
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import delete, text
+from sqlalchemy import delete, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from closinglineup.clock import FakeClock
 from closinglineup.db.models import (
     Game,
     ImpactSnapshot,
+    LoadLog,
     PlayerGame,
     RosterMembership,
     Shot,
     Stint,
 )
+from closinglineup.derive import run
+from closinglineup.derive.value import game_score
 from closinglineup.derive.windows import refresh_windows
+from closinglineup.settings import Settings
+from closinglineup.sources.cache import RawCache
 
 DB_DIR = Path(__file__).parents[1] / "src" / "closinglineup" / "db"
 
@@ -33,6 +40,7 @@ UTA_GAMES = range(7, 13)
 OVERTIME = 5
 PRIOR_GAME = "0022500990"
 PRIOR_DAY = date(2026, 3, 1)
+PRIOR_SEASON_END = date(2026, 4, 12)
 
 # The fixture player, on SAC all season and for one game of the last: he plays 20 + g minutes in
 # game g, starting the even ones, but sits game 3 by coach's decision and is missing from game 7's
@@ -87,9 +95,15 @@ def _line(
     pts: int = 0,
     fgm: int = 0,
     fga: int = 0,
+    ftm: int = 0,
     fta: int = 0,
     oreb: int = 0,
     dreb: int = 0,
+    ast: int = 0,
+    stl: int = 0,
+    blk: int = 0,
+    tov: int = 0,
+    pf: int = 0,
 ) -> PlayerGame:
     return PlayerGame(
         game_id=game_id,
@@ -103,15 +117,15 @@ def _line(
         fga=fga,
         fg3m=0,
         fg3a=0,
-        ftm=0,
+        ftm=ftm,
         fta=fta,
         oreb=oreb,
         dreb=dreb,
-        ast=0,
-        stl=0,
-        blk=0,
-        tov=0,
-        pf=0,
+        ast=ast,
+        stl=stl,
+        blk=blk,
+        tov=tov,
+        pf=pf,
         plus_minus=0,
         source="stats",
     )
@@ -132,8 +146,9 @@ def _game(game_id: str, season: str, day: date, home: int, away: int) -> Game:
 
 
 def _sac_lines(g: int) -> list[PlayerGame]:
-    """SAC's and POR's box in game g. The fixture player scores g on 4 of 10 with 4 free throw
-    attempts; the traded player 8 on 3 of 6 with 2."""
+    """SAC's and POR's box in game g. The fixture player scores g on 4 of 10 and 3 of 4 free
+    throws, with 1 offensive and 4 defensive rebounds, 5 assists, 2 steals, a block, 3 turnovers
+    and 2 fouls; the traded player 8 on 3 of 6 with 2 free throw attempts."""
     game_id = _sac_game(g)
     total = _game_seconds(g)
     fixture = _fixture_minutes(g) * 60
@@ -146,7 +161,25 @@ def _sac_lines(g: int) -> list[PlayerGame]:
         lines.append(_line(game_id, FIXTURE, SAC, 0, dnp_reason="cd"))
     elif g != ABSENT:
         lines.append(
-            _line(game_id, FIXTURE, SAC, fixture, starter=g % 2 == 0, pts=g, fgm=4, fga=10, fta=4)
+            _line(
+                game_id,
+                FIXTURE,
+                SAC,
+                fixture,
+                starter=g % 2 == 0,
+                pts=g,
+                fgm=4,
+                fga=10,
+                ftm=3,
+                fta=4,
+                oreb=1,
+                dreb=4,
+                ast=5,
+                stl=2,
+                blk=1,
+                tov=3,
+                pf=2,
+            )
         )
     if g < 7:
         lines.append(_line(game_id, TRADED, SAC, traded, pts=8, fgm=3, fga=6, fta=2))
@@ -218,14 +251,14 @@ def _membership(player_id: int, team_id: int, start: date, end: date | None) -> 
     )
 
 
-def _snapshot(day: date, source: str, value: float, o_value: float) -> ImpactSnapshot:
+def _snapshot(day: date, source: str, value: float, o_value: float | None) -> ImpactSnapshot:
     return ImpactSnapshot(
         date=day,
         player_id=FIXTURE,
         source=source,
         value=value,
         o_value=o_value,
-        d_value=value - o_value,
+        d_value=None if o_value is None else value - o_value,
         minutes_basis=None,
     )
 
@@ -252,7 +285,8 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
     """The games, stints, shots, roster spans and impact snapshots above, and the view refreshed
     over them. The fixture player also played SAC's one game of 2025-26, scoring 20 on 10 shots
     and 5 free throw attempts in 30 minutes; and has a BPM on SAC's games 18 and 20 and an EPM
-    on its first."""
+    on its first, Win Shares on its game 18 and VORP on its 19, and Win Shares twice and VORP
+    once in 2025-26."""
     _clear(db)
     with db.begin() as session:
         session.add_all(_game(_sac_game(g), SEASON, _day(g), SAC, POR) for g in SAC_GAMES)
@@ -298,6 +332,11 @@ def seeded(db: sessionmaker[Session]) -> Iterator[sessionmaker[Session]]:
                 _snapshot(_day(1), "epm", 1.0, 0.5),
                 _snapshot(_day(18), "bpm_local", 2.5, 1.5),
                 _snapshot(_day(20), "bpm_local", 3.0, 2.0),
+                _snapshot(_day(18), "ws_local", 1.2, 0.8),
+                _snapshot(_day(19), "vorp_local", 0.4, None),
+                _snapshot(PRIOR_DAY, "ws_local", 0.5, 0.3),
+                _snapshot(PRIOR_SEASON_END, "ws_local", 0.9, 0.6),
+                _snapshot(PRIOR_SEASON_END, "vorp_local", 0.2, None),
             ]
         )
     refresh_windows(db)
@@ -423,6 +462,62 @@ def test_the_fixture_players_production_windows(seeded: sessionmaker[Session]) -
     assert _rows(seeded, TRADED, None, "prior_season") == {}
 
 
+def test_the_fixture_players_game_score_is_the_formula_over_the_window_per_game_played(
+    seeded: sessionmaker[Session],
+) -> None:
+    rows = _rows(seeded, FIXTURE, None, "5")
+    season = _row(seeded, FIXTURE, None, "season", _day(20))
+    prior = _row(seeded, FIXTURE, None, "prior_season", _day(20))
+
+    # Game g's line: g + 0.4·4 - 0.7·10 - 0.4·(4 - 3) + 0.7·1 + 0.3·4 + 2 + 0.7·5 + 0.7·1 - 0.4·2
+    # - 3, which is g - 1.5. Games 16 to 20 average 16.5, games 11 to 15 11.5.
+    last = rows[_day(20)]
+    assert last["game_score"] == pytest.approx(16.5, abs=1e-6)
+    assert last["game_score_delta_prior"] == pytest.approx(16.5 - 11.5, abs=1e-6)
+    # The season: 18 games played, all but the coach's decision in 3 and the absence in 7.
+    season_score = (sum(SAC_GAMES) - DNP_CD - ABSENT) / 18 - 1.5
+    assert season["game_score"] == pytest.approx(season_score, abs=1e-6)
+    assert last["game_score_delta_season"] == pytest.approx(16.5 - season_score, abs=1e-6)
+    # Divided by games played, not the window's games: games 1 to 5 hold the coach's decision.
+    assert rows[_day(5)]["game_score"] == pytest.approx((1 + 2 + 4 + 5) / 4 - 1.5, abs=1e-6)
+    # The season before: 20 + 0.4·8 - 0.7·10 - 0.4·5.
+    assert prior["game_score"] == pytest.approx(14.2, abs=1e-6)
+    assert season["game_score_delta_prior"] == pytest.approx(season_score - 14.2, abs=1e-6)
+
+
+def test_game_score_of_a_line_is_the_views_season_window_at_his_first_game(
+    seeded: sessionmaker[Session],
+) -> None:
+    # The view has no one-game window; the season window at his first game covers only it.
+    (line,) = (line for line in _sac_lines(1) if line.player_id == FIXTURE)
+    season = _row(seeded, FIXTURE, None, "season", _day(1))
+
+    assert season["games_in_window"] == 1
+    assert game_score(line) == pytest.approx(season["game_score"], abs=1e-6)
+    assert game_score(line) == pytest.approx(1 - 1.5)
+
+
+def test_game_score_is_null_over_a_window_he_played_none_of(
+    seeded: sessionmaker[Session],
+) -> None:
+    with seeded.begin() as session:
+        session.execute(
+            update(PlayerGame)
+            .where(
+                PlayerGame.player_id == FIXTURE,
+                PlayerGame.game_id.in_([_sac_game(g) for g in range(16, 21)]),
+            )
+            .values(seconds=0, dnp_reason="cd")
+        )
+
+    refresh_windows(seeded)
+
+    last = _row(seeded, FIXTURE, None, "5", _day(20))
+    assert last["games_in_window"] == 5
+    assert last["game_score"] is None
+    assert last["game_score_delta_prior"] is None
+
+
 def test_the_latest_impact_snapshot_of_each_source_is_carried_forward(
     seeded: sessionmaker[Session],
 ) -> None:
@@ -433,6 +528,113 @@ def test_the_latest_impact_snapshot_of_each_source_is_carried_forward(
     assert (rows[_day(20)]["bpm_local"], rows[_day(20)]["bpm_local_d"]) == (3.0, 1.0)
     assert rows[_day(20)]["epm"] == 1.0
     assert rows[_day(20)]["darko"] is None
+
+
+def test_the_value_snapshots_carry_forward_within_the_season_and_prior_reads_its_final(
+    seeded: sessionmaker[Session],
+) -> None:
+    rows = _rows(seeded, FIXTURE, None, "season")
+    prior = _row(seeded, FIXTURE, None, "prior_season", _day(20))
+
+    # 2025-26's snapshots do not carry into 2026-27, whose first comes on game 18.
+    assert (rows[_day(17)]["ws_local"], rows[_day(17)]["vorp_local"]) == (None, None)
+    assert (rows[_day(18)]["ws_local"], rows[_day(18)]["vorp_local"]) == (1.2, None)
+    assert rows[_day(20)]["ws_local"] == 1.2
+    assert rows[_day(20)]["ws_local_o"] == 0.8
+    assert rows[_day(20)]["ws_local_d"] == pytest.approx(0.4)
+    assert rows[_day(20)]["vorp_local"] == 0.4
+    assert _row(seeded, FIXTURE, None, "5", _day(20))["ws_local"] == 1.2
+    assert (prior["ws_local"], prior["ws_local_o"], prior["vorp_local"]) == (0.9, 0.6, 0.2)
+    assert prior["ws_local_d"] == pytest.approx(0.3)
+    # 2025-26's final Win Shares over his 30 minutes that season.
+    assert (prior["ws_window"], prior["ws_window_o"]) == (0.9, 0.6)
+    assert prior["ws_48"] == pytest.approx(0.9 * 2880 / (30 * 60))
+    assert (prior["ws_48_delta_prior"], rows[_day(20)]["ws_window"]) == (None, 1.2)
+
+
+def _add_win_shares(db: sessionmaker[Session], *snapshots: tuple[int, float, float]) -> None:
+    """Add the fixture player's (SAC game, Win Shares, offensive Win Shares) snapshots and refresh
+    the view; the seeded fixture's teardown clears them."""
+    with db.begin() as session:
+        session.add_all(_snapshot(_day(g), "ws_local", ws, ows) for g, ws, ows in snapshots)
+    refresh_windows(db)
+
+
+def _fixture_seconds(games: range) -> int:
+    return sum(_fixture_minutes(g) for g in games) * 60
+
+
+def test_win_shares_over_a_window_are_the_snapshot_less_the_one_n_games_back(
+    seeded: sessionmaker[Session],
+) -> None:
+    _add_win_shares(seeded, (5, 1.0, 0.6), (15, 2.5, 1.5))
+    ten = _rows(seeded, FIXTURE, None, "10")
+    season = _row(seeded, FIXTURE, None, "season", _day(15))
+
+    assert ten[_day(15)]["ws_window"] == pytest.approx(1.5)
+    assert ten[_day(15)]["ws_window_o"] == pytest.approx(0.9)
+    assert ten[_day(15)]["ws_window_d"] == pytest.approx(0.6)
+    assert ten[_day(15)]["ws_48"] == pytest.approx(1.5 * 2880 / _fixture_seconds(range(6, 16)))
+    # Before his 11th game the window's start counts as 0, so it holds the season to date.
+    assert ten[_day(8)]["ws_window"] == 1.0
+    assert ten[_day(15)]["ws_local"] == 2.5
+    assert ten[_day(15)]["ws_48_delta_prior"] == pytest.approx(
+        ten[_day(15)]["ws_48"] - 1.0 * 2880 / _fixture_seconds(range(1, 6))
+    )
+    assert season["ws_window"] == 2.5
+    assert season["ws_48"] == pytest.approx(2.5 * 2880 / _fixture_seconds(range(1, 16)))
+    assert ten[_day(15)]["ws_48_delta_season"] == pytest.approx(
+        ten[_day(15)]["ws_48"] - season["ws_48"]
+    )
+
+
+def test_win_shares_over_a_window_with_no_snapshot_at_its_start_are_null(
+    seeded: sessionmaker[Session],
+) -> None:
+    _add_win_shares(seeded, (12, 2.0, 1.2))
+
+    assert _row(seeded, FIXTURE, None, "5", _day(15))["ws_window"] is None
+    assert _row(seeded, FIXTURE, None, "5", _day(15))["ws_48"] is None
+    assert _row(seeded, FIXTURE, None, "20", _day(15))["ws_window"] == 2.0
+
+
+def test_derive_refreshes_the_view_after_writing_the_dates_bpm_and_value_snapshots(
+    seeded: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    day = _day(19)
+
+    def nothing(*_: object) -> dict[str, Any]:
+        return {}
+
+    def writes(source: str, value: float, o_value: float) -> Any:
+        def step(db: sessionmaker[Session], on: date, *_: Any) -> dict[str, Any]:
+            with db.begin() as session:
+                session.add(_snapshot(on, source, value, o_value))
+            return {}
+
+        return step
+
+    # The date's snapshots, written by the BPM and value steps; the other steps do nothing.
+    monkeypatch.setattr(run, "write_bpm", writes("bpm_local", 4.0, 2.5))
+    monkeypatch.setattr(run, "compute_value", writes("ws_local", 2.0, 1.4))
+    for name in ("write_garbage_time", "compute_rotation_state", "compute_events", "compute_flags"):
+        monkeypatch.setattr(run, name, nothing)
+    unused = "postgresql+psycopg://unused@127.0.0.1:1/x"
+    rules = run.DeriveRules.from_settings(Settings(database_url=unused, tz=ZoneInfo("UTC")))
+    clock = FakeClock(datetime(2026, 11, 9, 8, tzinfo=UTC))
+    try:
+        results = run.derive(seeded, RawCache(tmp_path), clock, [day], rules, reconcile=False)
+    finally:
+        with seeded.begin() as session:
+            session.execute(
+                delete(LoadLog).where(
+                    LoadLog.game_date == day, LoadLog.step.in_(s.name for s in run.WRITES)
+                )
+            )
+
+    run.raise_for_failures(results)
+    row = _row(seeded, FIXTURE, None, "season", day)
+    assert (row["bpm_local"], row["ws_local"]) == (4.0, 2.0)
 
 
 def test_a_traded_players_role_windows_restart_and_his_production_windows_continue(
@@ -454,6 +656,25 @@ def test_a_traded_players_role_windows_restart_and_his_production_windows_contin
     assert first_for_uta["is_short"] is False
     # SAC's games 3 to 6 and UTA's first.
     assert first_for_uta["ts_pct"] == pytest.approx((4 * 8 + 12) / (2 * (4 * 6 + 8 + 0.44 * 12)))
+
+
+def test_a_traded_players_production_games_and_minutes_span_both_teams(
+    seeded: sessionmaker[Session],
+) -> None:
+    ten = _row(seeded, TRADED, None, "10", _day(12))
+    season = _row(seeded, TRADED, None, "season", _day(12))
+
+    # SAC's games 3 to 6 at 20 minutes and UTA's six at 30.
+    assert ten["games_played"] == 10
+    assert ten["minutes_per_game"] == pytest.approx((4 * 20 + 6 * 30) / 10)
+    assert season["games_played"] == 12
+    assert season["minutes_per_game"] == pytest.approx((6 * 20 + 6 * 30) / 12)
+    # The fixture player's season: 18 of SAC's 20 games, 20 + g minutes in each he played.
+    fixture = _row(seeded, FIXTURE, None, "season", _day(20))
+    assert fixture["games_played"] == 18
+    assert fixture["minutes_per_game"] == pytest.approx(
+        sum(_fixture_minutes(g) for g in SAC_GAMES) / 18
+    )
 
 
 def test_refresh_windows_is_idempotent(seeded: sessionmaker[Session]) -> None:
@@ -481,6 +702,7 @@ def test_a_second_game_on_a_teams_date_counts_once_and_the_refresh_holds(
 
 
 def test_views_sql_is_the_view_migration_s_copy() -> None:
-    copy = DB_DIR / "alembic" / "versions" / "869602e50229_player_window_stats.sql"
+    versions = DB_DIR / "alembic" / "versions"
+    copy = versions / "f3c8a1d6b902_player_window_stats_production_minutes.sql"
 
     assert (DB_DIR / "views.sql").read_text() == copy.read_text()

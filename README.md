@@ -71,8 +71,10 @@ Every push to `main` publishes `ghcr.io/tomboone/closinglineup:latest` and `:sha
 
 ## Deployment
 
-The home server runs `deploy/docker-compose.yml`: Postgres, the app, the worker and a scoped
-Watchtower that pulls each new image. `deploy/README.md` is the runbook.
+The home server runs `deploy/docker-compose.yml`: Postgres, the app, the worker, a Tailscale sidecar
+that serves the app on the personal tailnet, and a scoped Watchtower that pulls each new image. A
+systemd timer on the host dumps the database nightly to B2 (`deploy/backup/`). `deploy/README.md` is
+the runbook.
 
 ## License
 

@@ -64,6 +64,11 @@ FINAL_B = "0022600002"
 SCHEDULED = "0022600003"
 PRESEASON_FINAL = "0012600009"
 FINAL_DAY_BEFORE = "0022600004"
+# A game five days after DAY, not yet played.
+LATER = "0022600010"
+LATER_DAY = date(2026, 10, 25)
+# A final game two days before DAY, which a `nightly` for DAY neither fetches nor parses.
+PLAYED_EARLIER = "0022600011"
 
 
 def _game(game_id: str, status: int) -> dict[str, Any]:
@@ -71,10 +76,11 @@ def _game(game_id: str, status: int) -> dict[str, Any]:
 
 
 def _schedule_game(game_id: str, status: int, day: date) -> dict[str, Any]:
-    """A schedule game, GSW hosting DEN, with what `parse.schedule` reads."""
+    """A schedule game, GSW hosting DEN at 7:00 pm ET, with what `parse.schedule` reads."""
     return {
         **_game(game_id, status),
         "gameDateEst": f"{day.isoformat()}T00:00:00Z",
+        "gameDateTimeEst": f"{day.isoformat()}T19:00:00Z",
         "homeTeam": {"teamId": 1610612744, "score": 100},
         "awayTeam": {"teamId": 1610612743, "score": 90},
     }
@@ -144,6 +150,15 @@ def runs(db: sessionmaker[Session]) -> list[JobRun]:
 
 
 @pytest.fixture
+def db(db: sessionmaker[Session]) -> sessionmaker[Session]:
+    """The shared `db` with no date reconciled, so each `nightly` reconciles its date as the
+    date's first run does, whatever an earlier test left."""
+    with db.begin() as session:
+        session.execute(delete(LoadLog).where(LoadLog.step == RECONCILE.name))
+    return db
+
+
+@pytest.fixture
 def clock() -> FakeClock:
     return FakeClock(START)
 
@@ -155,10 +170,17 @@ def http() -> Iterator[httpx.Client]:
 
 
 @pytest.fixture
-def settings() -> Settings:
+def lookback_settings() -> Settings:
     # The jobs get their database from `db`, never from here.
     unused = "postgresql+psycopg://unused@127.0.0.1:1/x"
     return Settings(database_url=unused, tz=ZoneInfo("America/New_York"))
+
+
+@pytest.fixture
+def settings(lookback_settings: Settings) -> Settings:
+    """`lookback_settings` with no lookback, so `nightly` sees only its date's games, and not
+    `SCHEDULE`'s final the day before."""
+    return lookback_settings.model_copy(update={"nightly_lookback_days": 0})
 
 
 def make_jobs(
@@ -257,6 +279,42 @@ def test_nightly_fetches_exactly_the_final_games_of_the_date_and_records_the_run
     expected += [(step.name, "succeeded") for step in [*WRITES, RECONCILE]]
     assert sorted(logged) == sorted(expected)
     assert ok.call_count == 1
+
+
+def test_nightly_loads_every_game_of_the_schedule_not_yet_played_with_its_tip_off(
+    settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    schedule: dict[str, Any] = copy.deepcopy(SCHEDULE)
+    earlier = DAY - timedelta(days=2)
+    schedule["leagueSchedule"]["gameDates"][:0] = [
+        {"gameDate": "10/18/2026 00:00:00", "games": [_schedule_game(PLAYED_EARLIER, 3, earlier)]}
+    ]
+    schedule["leagueSchedule"]["gameDates"].append(
+        {"gameDate": "10/25/2026 00:00:00", "games": [_schedule_game(LATER, 1, LATER_DAY)]}
+    )
+    with db.begin() as session:
+        session.execute(delete(Game).where(Game.game_id.in_([LATER, PLAYED_EARLIER])))
+    get = RoutedGet(nba_routes(schedule, FINAL_A, FINAL_B))
+    jobs = make_jobs(settings, clock, tmp_path, db, get, Heartbeat({}, http))
+
+    detail = jobs.nightly(DAY)
+
+    assert detail["scheduled"] >= 1
+    with db() as session:
+        later = session.get_one(Game, LATER)
+        tips = {
+            game_id: tip for game_id, tip in session.execute(select(Game.game_id, Game.tip_time))
+        }
+    assert (later.game_date, later.status) == (LATER_DAY, "scheduled")
+    # 7:00 pm EDT; the date's games, final or not, carry theirs through the date's load.
+    assert later.tip_time == datetime(2026, 10, 25, 23, 0, tzinfo=UTC)
+    assert tips[FINAL_A] == tips[SCHEDULED] == datetime(2026, 10, 20, 23, 0, tzinfo=UTC)
+    # A final game comes only through its date's load, beside its box score.
+    assert PLAYED_EARLIER not in tips
 
 
 def test_nightly_logs_a_warning_for_each_reconciliation_row_outside_tolerance(
@@ -363,8 +421,8 @@ def test_nightly_with_a_table_that_fails_to_load_fails_the_job(
     failed = LoadResult("game", DAY, RunStatus.FAILED, error="IntegrityError: boom")
 
     def failing_load(*args: Any, missing: bool = False) -> list[LoadResult]:
-        # Fails the date's own load; there is no earlier date to heal.
-        return [] if missing else [failed]
+        # Fails the date's own load; there is no earlier date to heal or reload.
+        return [failed] if args[-1] == [DAY] and not missing else []
 
     monkeypatch.setattr(scheduler, "load_dates", failing_load)
     get = RoutedGet(nba_routes(SCHEDULE, FINAL_A, FINAL_B))
@@ -674,6 +732,203 @@ def test_nightly_also_fetches_the_games_poll_finals_saw_go_final(
     ]
 
 
+def _fixture_game_routes(*, hustle: bool = True, reconcile: bool = True) -> dict[str, bytes]:
+    """The fixture game alone, final on its date, with every endpoint of it answering, its hustle
+    box only if `hustle`, and with `reconcile` NBA.com's lineups and on/off (GSW's, for both
+    teams of the sample)."""
+    schedule = copy.deepcopy(FIXTURE_SCHEDULE)
+    [game_date] = schedule["leagueSchedule"]["gameDates"]
+    game_date["games"] = [g for g in game_date["games"] if g["gameId"] == FIXTURE_GAME]
+    routes = {
+        nba_cdn.SCHEDULE_URL: json.dumps(schedule).encode(),
+        **_stats_routes(),
+        **{
+            cdn_game_url(endpoint, FIXTURE_GAME): (
+                PBP_FIXTURES / endpoint / f"{FIXTURE_GAME}.json"
+            ).read_bytes()
+            for endpoint in (nba_cdn.BOXSCORE, nba_cdn.PLAYBYPLAY)
+        },
+    }
+    if not hustle:
+        del routes[HUSTLE_URL]
+    if reconcile:
+        for endpoint in (nba_stats.LEAGUE_DASH_LINEUPS, nba_stats.LEAGUE_PLAYER_ON_DETAILS):
+            routes[f"{nba_stats.STATS_BASE}/{endpoint}"] = season_fixture_body(endpoint)
+    return routes
+
+
+HUSTLE_URL = f"{nba_stats.STATS_BASE}/{nba_stats.BOXSCORE_HUSTLE_V2}"
+# The players the fixture game's hustle box lists, of its `PLAYER_GAMES`.
+HUSTLE_PLAYERS = 20
+
+
+def _with_deflections(db: sessionmaker[Session]) -> int:
+    """The fixture game's players with hustle stats loaded."""
+    with db() as session:
+        found = session.scalars(
+            select(PlayerGame.deflections).where(PlayerGame.game_id == FIXTURE_GAME)
+        )
+        return sum(deflections is not None for deflections in found)
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        pytest.param(timedelta(days=1), id="the-next-night"),
+        pytest.param(timedelta(0), id="a-re-run-for-the-date"),
+    ],
+)
+def test_nightly_catches_up_an_endpoint_nba_com_published_after_an_earlier_run(
+    lookback_settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+    later: timedelta,
+) -> None:
+    clear_fixture_game(db)
+    get = RoutedGet(_fixture_game_routes(hustle=False))
+    jobs = make_jobs(lookback_settings, clock, tmp_path, db, get, Heartbeat({}, http))
+    first = jobs.nightly(FIXTURE_DAY)
+    assert first["stats_failed"] == [FIXTURE_GAME]
+    assert _with_deflections(db) == 0
+
+    # stats.nba.com has published the hustle box since.
+    get.routes = _fixture_game_routes()
+    get.calls.clear()
+    detail = jobs.nightly(FIXTURE_DAY + later)
+
+    # The schedule and the one missing endpoint, not `playbyplayv2` or a reconciliation refresh.
+    assert [url for url, _ in get.calls] == [nba_cdn.SCHEDULE_URL, HUSTLE_URL]
+    assert detail["fetched"] == []
+    assert detail["caught_up"] == [
+        {
+            "date": FIXTURE_DAY.isoformat(),
+            "game_id": FIXTURE_GAME,
+            "endpoints": [nba_stats.BOXSCORE_HUSTLE_V2],
+        }
+    ]
+    # The date is parsed and loaded again, with the hustle box, and its game is no longer
+    # `stats_failed`.
+    assert _with_deflections(db) == HUSTLE_PLAYERS
+    assert _stats_fetch_log(db, FIXTURE_DAY) == ("succeeded", {scheduler.STATS_FAILED: {}})
+    assert [run.status for run in runs(db)] == ["succeeded", "succeeded"]
+
+
+def test_nightly_leaves_a_game_from_before_the_lookback_alone(
+    lookback_settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    assert lookback_settings.nightly_lookback_days == 3
+    clear_fixture_game(db)
+    get = RoutedGet(_fixture_game_routes(hustle=False))
+    jobs = make_jobs(lookback_settings, clock, tmp_path, db, get, Heartbeat({}, http))
+    jobs.nightly(FIXTURE_DAY)
+
+    get.routes = _fixture_game_routes()
+    get.calls.clear()
+    detail = jobs.nightly(FIXTURE_DAY + timedelta(days=4))
+
+    assert [url for url, _ in get.calls] == [nba_cdn.SCHEDULE_URL]
+    assert detail["caught_up"] == []
+    assert _with_deflections(db) == 0
+    assert _stats_fetch_log(db, FIXTURE_DAY)[0] == "failed"
+
+
+def test_nightly_with_nothing_left_to_fetch_requests_only_the_schedule(
+    lookback_settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    clear_fixture_game(db)
+    get = RoutedGet(_fixture_game_routes())
+    jobs = make_jobs(lookback_settings, clock, tmp_path, db, get, Heartbeat({}, http))
+    first = jobs.nightly(FIXTURE_DAY)
+    assert "skipped" not in first["reconcile"]
+
+    for day in (FIXTURE_DAY, FIXTURE_DAY + timedelta(days=1)):
+        get.calls.clear()
+        detail = jobs.nightly(day)
+
+        assert [url for url, _ in get.calls] == [nba_cdn.SCHEDULE_URL]
+        assert (detail["fetched"], detail["caught_up"]) == ([], [])
+    # The date was reconciled, so the re-run for it neither refreshes nor replaces that.
+    with db() as session:
+        row = session.get_one(LoadLog, (RECONCILE.table, FIXTURE_DAY, RECONCILE.name))
+    assert row.detail == first["reconcile"]
+    rerun = runs(db)[1].detail
+    assert rerun is not None
+    assert rerun["reconcile"] is None
+
+
+def test_a_re_run_reconciles_a_date_whose_reconciliation_was_skipped(
+    lookback_settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    clear_fixture_game(db)
+    get = RoutedGet(_fixture_game_routes(reconcile=False))
+    jobs = make_jobs(lookback_settings, clock, tmp_path, db, get, Heartbeat({}, http))
+    first = jobs.nightly(FIXTURE_DAY)
+    assert "skipped" in first["reconcile"]
+
+    get.routes = _fixture_game_routes()
+    detail = jobs.nightly(FIXTURE_DAY)
+
+    assert detail["fetched"] == []
+    assert "skipped" not in detail["reconcile"]
+
+
+class TimeoutGet(RoutedGet):
+    """`RoutedGet` with every request to `down`, once set, timing out."""
+
+    down: str | None = None
+
+    def __call__(self, url: str, params: dict[str, str] | None = None) -> Any:
+        if url == self.down:
+            self.calls.append((url, params))
+            raise curl_requests.exceptions.Timeout("Operation timed out")
+        return super().__call__(url, params)
+
+
+def test_catching_up_keeps_what_it_got_before_stats_nba_com_stopped_answering(
+    lookback_settings: Settings,
+    clock: FakeClock,
+    tmp_path: Path,
+    db: sessionmaker[Session],
+    http: httpx.Client,
+) -> None:
+    clear_fixture_game(db)
+    matchups_url = f"{nba_stats.STATS_BASE}/{nba_stats.BOXSCORE_MATCHUPS_V3}"
+    routes = _fixture_game_routes(hustle=False)
+    del routes[matchups_url]
+    get = TimeoutGet(routes)
+    jobs = make_jobs(lookback_settings, clock, tmp_path, db, get, Heartbeat({}, http))
+    jobs.nightly(FIXTURE_DAY)
+
+    # The hustle box has landed; the matchups, fetched after it, time out.
+    get.routes = _fixture_game_routes()
+    get.down = matchups_url
+    detail = jobs.nightly(FIXTURE_DAY + timedelta(days=1))
+
+    assert detail["caught_up"] == [
+        {
+            "date": FIXTURE_DAY.isoformat(),
+            "game_id": FIXTURE_GAME,
+            "endpoints": [nba_stats.BOXSCORE_HUSTLE_V2],
+        }
+    ]
+    assert detail["failed"][-1]["endpoint"] == scheduler.STATS_UNREACHABLE
+    assert _with_deflections(db) == HUSTLE_PLAYERS
+
+
 def test_scheduled_nightly_runs_for_yesterday_in_tz(
     settings: Settings,
     clock: FakeClock,
@@ -715,8 +970,12 @@ def test_worker_registers_every_job_with_the_spec_triggers(
     tz = settings.tz
     noon = datetime(2026, 10, 21, 12, tzinfo=tz)
     day_after = noon + timedelta(days=1)
-    assert _fire_times(registered[NIGHTLY].trigger, noon, day_after) == [
-        datetime(2026, 10, 22, 3, 30, tzinfo=tz)
+    midnight = datetime(2026, 10, 22, tzinfo=tz)
+    next_midnight = midnight + timedelta(days=1)
+    # 03:30, then hourly through noon while the late endpoints are measured (NEU-1918).
+    assert _fire_times(registered[NIGHTLY].trigger, midnight, next_midnight) == [
+        datetime(2026, 10, 22, 3, 30, tzinfo=tz),
+        *(datetime(2026, 10, 22, h, tzinfo=tz) for h in range(4, 13)),
     ]
     evening = [datetime(2026, 10, 21, h, m, tzinfo=tz) for h in range(18, 24) for m in (0, 30)]
     night = [datetime(2026, 10, 22, h, m, tzinfo=tz) for h in range(2) for m in (0, 30)]
@@ -731,10 +990,9 @@ def test_worker_registers_every_job_with_the_spec_triggers(
         datetime(2026, 10, 26, 4, 30, tzinfo=tz),
         datetime(2026, 11, 2, 4, 30, tzinfo=tz),
     ]
-    midnight = datetime(2026, 10, 22, tzinfo=tz)
-    next_midnight = midnight + timedelta(days=1)
     assert _fire_times(registered[INJURIES].trigger, midnight, next_midnight) == [
-        datetime(2026, 10, 22, h, m, tzinfo=tz) for h, m in [(10, 0), (13, 0), (16, 0), (18, 30)]
+        datetime(2026, 10, 22, h, m, tzinfo=tz)
+        for h, m in [(7, 30), (10, 0), (13, 0), (16, 0), (18, 30)]
     ]
     assert _fire_times(registered[DAILY_OVERLAYS].trigger, midnight, next_midnight) == [
         datetime(2026, 10, 22, 9, 0, tzinfo=tz)
@@ -982,14 +1240,14 @@ def test_only_the_last_injuries_run_of_the_day_pings_daily(
     tz = settings.tz
 
     pings: list[int] = []
-    for hour, minute in [(10, 0), (13, 0), (16, 0), (18, 30)]:
+    for hour, minute in [(7, 30), (10, 0), (13, 0), (16, 0), (18, 30)]:
         clock.advance(datetime(2026, 10, 21, hour, minute, tzinfo=tz) - clock.now())
         jobs.injuries_now()
         pings.append(ok.call_count)
 
-    assert pings == [0, 0, 0, 1]
-    assert [day for _, day in injury_report.calls] == [date(2026, 10, 21)] * 4
-    assert [(run.job, run.status) for run in runs(db)] == [(INJURIES, "succeeded")] * 4
+    assert pings == [0, 0, 0, 0, 1]
+    assert [day for _, day in injury_report.calls] == [date(2026, 10, 21)] * 5
+    assert [(run.job, run.status) for run in runs(db)] == [(INJURIES, "succeeded")] * 5
 
 
 @respx.mock

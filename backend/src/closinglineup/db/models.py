@@ -68,7 +68,11 @@ TRANSACTION_TYPES = (
     "option_decline",
     "other",
 )
-IMPACT_SOURCES = ("epm", "darko", "bpm_local")
+# Spec §4.5's impact ratings, then the value metrics `derive.value` writes beside them (v2 spec
+# §8.4), which are not ratings and are left out wherever ratings are listed.
+IMPACT_RATINGS = ("epm", "darko", "bpm_local")
+VALUE_METRICS = ("ws_local", "vorp_local")
+IMPACT_SOURCES = (*IMPACT_RATINGS, *VALUE_METRICS)
 # Spec §4.6: Hoops Rumors' non-guaranteed list, with no fallback (ADR-0004).
 CONTRACT_SOURCES = ("hoopsrumors",)
 # Spec §7.5, in order of precedence.
@@ -207,6 +211,8 @@ class Game(Timestamps, Base):
     game_id: Mapped[str] = mapped_column(String, primary_key=True)
     season: Mapped[str] = mapped_column(String)
     game_date: Mapped[date] = mapped_column(index=True)
+    # Tip-off, where the schedule states one.
+    tip_time: Mapped[datetime | None]
     phase: Mapped[str] = mapped_column(String)
     home_team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))
     away_team_id: Mapped[int] = mapped_column(ForeignKey("team.nba_team_id"))

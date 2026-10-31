@@ -1,16 +1,25 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { EMPTY_LEAGUE_PAGE, LEAGUE_PAGE, mockApi, renderApp } from "../test/app";
-import { allOptions } from "../test/echarts";
+import { easternToday } from "../shell/params";
+import {
+  EMPTY_LEAGUE_PAGE,
+  LEAGUE_PAGE,
+  mockApi,
+  renderApp,
+  SLATE_PAGE,
+  TEAMS,
+} from "../test/app";
+import { MOVER_COLOURS } from "../components/charts/theme";
+import { allOptions, click } from "../test/echarts";
 
 vi.mock("../components/charts/echarts", () => import("../test/echarts"));
 
-const SECTIONS = [
-  "Rotation changes",
-  "Minutes movers",
-  "Impact movers",
-  "Flags",
-];
+// The morning after `LEAGUE_PAGE`'s date, whose last night is that date.
+const MORNING = "/?date=2026-03-21";
+
+/** The API for a morning: its slate with the given last night, and last night's league page. */
+const morning = (league: unknown = LEAGUE_PAGE, slate: unknown = SLATE_PAGE) =>
+  mockApi({ "/api/slate": { body: slate }, "/api/league": { body: league } });
 
 /** `n` movers one way, each a player of his own. */
 const movers = (n: number, sign: 1 | -1, source: "epm" | null = null) =>
@@ -20,19 +29,144 @@ const movers = (n: number, sign: 1 | -1, source: "epm" | null = null) =>
     value: 0.1,
     delta: sign * (0.05 - i / 1000),
     source,
+    impact: null,
   }));
 
+const openTab = (name: string) => fireEvent.click(screen.getByRole("tab", { name }));
+
+type MoverOption = {
+  xAxis: { name: string };
+  series: { data: { value: number; itemStyle: { color: string } }[] }[];
+};
+
+/** The latest option each mover chart set, by its axis name. */
+const moverCharts = () =>
+  new Map(
+    (allOptions() as unknown as MoverOption[]).map((option) => [option.xAxis.name, option]),
+  );
+
+const DARKO = { source: "darko", value: 2.25 } as const;
+
+/** A quiet signal of a Boston player: a DNP-CD when `seconds` is null. */
+const quiet = (player_id: number, name: string, seconds: number | null) => ({
+  player: { player_id, name },
+  tricode: "BOS",
+  tier: "starter" as const,
+  seconds: seconds ?? 0,
+  minutes_per_game_10: 28.43,
+  dnp_reason: seconds === null ? ("cd" as const) : null,
+  impact: null,
+});
+
 describe("LeaguePage", () => {
-  it("renders every rotation event under its team, from → to, with its three signals", async () => {
-    mockApi({ "/api/league": { body: LEAGUE_PAGE } });
+  it("opens on Today, the morning's slate, with both dates in the header", async () => {
+    const fetchMock = morning();
+    renderApp(MORNING);
+
+    expect(await screen.findByText("Last night: 2026-03-20")).toBeInTheDocument();
+    expect(screen.getByText("Today: 2026-03-21")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
+    expect(
+      within(screen.getByRole("tabpanel", { name: "Today" })).getByRole("region", {
+        name: "LAL @ BOS",
+      }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/slate?date=2026-03-21");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/league?date=2026-03-20"));
+  });
+
+  it("says when last night lags the day before the morning", async () => {
+    morning(LEAGUE_PAGE, { ...SLATE_PAGE, date: "2026-03-22" });
+    renderApp("/?date=2026-03-22");
+
+    expect(
+      await screen.findByText("Last night: 2026-03-20 (2026-03-21 not derived yet)"),
+    ).toBeInTheDocument();
+  });
+
+  it("says there is no last night before the first derived date, and reads no league page", async () => {
+    const fetchMock = morning(LEAGUE_PAGE, { ...SLATE_PAGE, last_night: null });
+    renderApp(`${MORNING}&tab=rotation`);
+
+    expect(await screen.findByText("Last night: none yet")).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "Rotation" })).toHaveTextContent(
+      "No last night yet: no game date before 2026-03-21 has been derived.",
+    );
+    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContainEqual(
+      expect.stringContaining("/api/league"),
+    );
+  });
+
+  it("says a morning with no games has none", async () => {
+    morning(LEAGUE_PAGE, { ...SLATE_PAGE, games: [] });
+    renderApp(MORNING);
+
+    expect(await screen.findByRole("tabpanel", { name: "Today" })).toHaveTextContent(
+      "No games on 2026-03-21.",
+    );
+  });
+
+  it("defaults the morning to today in Eastern time", async () => {
+    const fetchMock = morning();
     renderApp("/");
+
+    await screen.findByText(`Today: ${easternToday()}`);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/slate?date=${easternToday()}`);
+  });
+
+  it("switches tabs in ?tab= without refetching", async () => {
+    const fetchMock = morning();
+    const router = renderApp(MORNING);
+    await screen.findByText("Last night: 2026-03-20");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/league?date=2026-03-20"));
+    const fetches = fetchMock.mock.calls.length;
+
+    openTab("Flags");
+    expect(router.state.location.search).toBe("?date=2026-03-21&tab=flags");
+    expect(await screen.findByRole("region", { name: "Flags" })).toBeInTheDocument();
+    openTab("Movers");
+    expect(screen.getByRole("region", { name: "Minutes movers" })).toBeInTheDocument();
+    openTab("Today");
+    expect(router.state.location.search).toBe("?date=2026-03-21");
+
+    expect(fetchMock).toHaveBeenCalledTimes(fetches);
+  });
+
+  it("lists last night's final games, each linking to its game page, with its top Game Scores", async () => {
+    morning();
+    renderApp(`${MORNING}&tab=last_night`);
+    const scores = await screen.findByRole("region", { name: "Final scores" });
+
+    const rows = within(scores).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(LEAGUE_PAGE.games.length);
+    const [first] = rows;
+    expect(within(first!).getByRole("link", { name: "LAL 104 @ BOS 112" })).toHaveAttribute(
+      "href",
+      "/games/0022500990?date=2026-03-21&tab=last_night",
+    );
+    expect(first).toHaveTextContent("BOS by 8");
+    const [away, home] = within(first!).getAllByRole("list");
+    expect(within(home!).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Jayson Tatum 24.3 31 pts, 6 reb, 4 ast, 34 min",
+      "Jaylen Brown 15.2 22 pts, 6 reb, 4 ast, 34 min",
+    ]);
+    expect(within(away!).getByRole("link", { name: "LeBron James" })).toBeInTheDocument();
+    expect(within(rows[1]!).getByRole("link", { name: "PHX 99 @ DEN 120" })).toHaveAttribute(
+      "href",
+      "/games/0022500991?date=2026-03-21&tab=last_night",
+    );
+  });
+
+  it("renders every rotation event under its team, from → to, with its three signals", async () => {
+    morning();
+    renderApp(`${MORNING}&tab=rotation`);
     const events = await screen.findByRole("region", { name: "Rotation changes" });
 
     for (const team of LEAGUE_PAGE.rotation_events) {
       const section = within(events).getByRole("region", { name: team.tricode });
       expect(within(section).getByRole("link", { name: team.tricode })).toHaveAttribute(
         "href",
-        `/teams/${team.tricode}`,
+        `/teams/${team.tricode}?date=2026-03-21&tab=rotation`,
       );
       const items = within(section).getAllByRole("listitem").filter((li) => li.querySelector("ul"));
       expect(items).toHaveLength(team.events.length);
@@ -44,57 +178,56 @@ describe("LeaguePage", () => {
       });
     }
     const bos = within(events).getByRole("region", { name: "BOS" });
-    expect(bos).toHaveTextContent("Payton Pritchard Fringe → Core");
+    expect(bos).toHaveTextContent("Payton Pritchard — Fringe → Core");
     expect(within(events).getByRole("region", { name: "LAL" })).toHaveTextContent(
-      "Dalton Knecht New → Fringe",
+      "Dalton Knecht — New → Fringe",
     );
   });
 
-  it("renders a day no team played as 'no games' in every section", async () => {
-    mockApi({ "/api/league": { body: EMPTY_LEAGUE_PAGE } });
-    renderApp("/?date=2026-03-21");
-    await screen.findByText("Morning feed for 2026-03-21.");
+  it("says 'no games' on every derived tab when last night had none", async () => {
+    morning(EMPTY_LEAGUE_PAGE, { ...SLATE_PAGE, date: "2026-03-22", last_night: "2026-03-21" });
+    renderApp("/?date=2026-03-22&tab=rotation");
 
-    for (const name of SECTIONS) {
+    expect(await screen.findByRole("region", { name: "Rotation changes" })).toHaveTextContent(
+      "No games on 2026-03-21.",
+    );
+    openTab("Last night");
+    expect(screen.getByRole("region", { name: "Final scores" })).toHaveTextContent(
+      "No games on 2026-03-21.",
+    );
+    openTab("Movers");
+    for (const name of ["Minutes movers", "Impact movers"]) {
       expect(screen.getByRole("region", { name })).toHaveTextContent("No games on 2026-03-21.");
     }
-    expect(screen.getByRole("region", { name: "Injury changes" })).toHaveTextContent(
-      "No injury changes.",
+    openTab("Flags");
+    expect(screen.getByRole("region", { name: "Flags" })).toHaveTextContent(
+      "No games on 2026-03-21.",
     );
+    openTab("Moves");
     expect(screen.getByRole("region", { name: "Transactions" })).toHaveTextContent(
       "No transactions.",
     );
     expect(allOptions()).toHaveLength(0);
   });
 
-  it("still says 'no games' on a day no team played that has a transaction", async () => {
-    const page = { ...EMPTY_LEAGUE_PAGE, transactions: LEAGUE_PAGE.transactions };
-    mockApi({ "/api/league": { body: page } });
-    renderApp("/?date=2026-03-21");
+  it("says an empty section is empty, not 'no games', on a night with games", async () => {
+    morning({ ...LEAGUE_PAGE, flags: [] });
+    renderApp(`${MORNING}&tab=flags`);
 
-    const events = await screen.findByRole("region", { name: "Rotation changes" });
-    expect(events).toHaveTextContent("No games on 2026-03-21.");
-    expect(screen.getByRole("region", { name: "Transactions" })).toHaveTextContent("Signed");
-  });
-
-  it("says an empty section is empty, not 'no games', on a day with games", async () => {
-    mockApi({ "/api/league": { body: { ...LEAGUE_PAGE, transactions: [] } } });
-    renderApp("/");
-
-    const transactions = await screen.findByRole("region", { name: "Transactions" });
-    expect(transactions).toHaveTextContent("No transactions.");
+    expect(await screen.findByRole("region", { name: "Flags" })).toHaveTextContent(
+      "No flags raised.",
+    );
   });
 
   it("caps the movers at the API's counts, each linking to its player page", async () => {
-    const page = {
+    morning({
       ...LEAGUE_PAGE,
       minutes_risers: movers(20, 1),
       minutes_fallers: movers(20, -1),
       impact_risers: movers(12, 1, "epm"),
       impact_fallers: movers(12, -1, "epm"),
-    };
-    mockApi({ "/api/league": { body: page } });
-    renderApp("/?date=2026-03-20");
+    });
+    renderApp(`${MORNING}&tab=movers`);
     const minutes = await screen.findByRole("region", { name: "Minutes movers" });
     const impact = screen.getByRole("region", { name: "Impact movers" });
 
@@ -106,34 +239,332 @@ describe("LeaguePage", () => {
     }
     expect(within(rows(minutes, "Rising")[0]!).getByRole("link", { name: "Player 0" })).toHaveAttribute(
       "href",
-      "/players/1000?date=2026-03-20",
+      "/players/1000?date=2026-03-21&tab=movers",
     );
     expect(within(rows(minutes, "Rising")[0]!).getByText("+5.0 pts")).toBeInTheDocument();
     expect(within(rows(impact, "Falling")[0]!).getByText("EPM")).toBeInTheDocument();
-    // A sparkline a mover.
-    expect(allOptions()).toHaveLength(2 * 15 + 2 * 10);
+    // A bar a mover, the impact axis naming the one source every mover shares.
+    const charts = moverCharts();
+    expect([...charts.keys()]).toEqual(["Minutes share, pts", "EPM rating"]);
+    expect(charts.get("Minutes share, pts")!.series[0]!.data).toHaveLength(2 * 15);
+    expect(charts.get("EPM rating")!.series[0]!.data).toHaveLength(2 * 10);
   });
 
-  it("groups flags by flag and lists injury changes and transactions with their links", async () => {
-    mockApi({ "/api/league": { body: LEAGUE_PAGE } });
-    renderApp("/");
+  it("draws a chart per metric above its tables, its bars the tables' changes", async () => {
+    morning();
+    const router = renderApp(`${MORNING}&tab=movers`);
+    const minutes = await screen.findByRole("region", { name: "Minutes movers" });
+    const impact = screen.getByRole("region", { name: "Impact movers" });
+
+    // Each table's change column, Rising's rows then Falling's.
+    const changes = (region: HTMLElement) =>
+      within(region)
+        .getAllByRole("row")
+        .flatMap((row) => within(row).queryAllByRole("cell").slice(3, 4))
+        .map((cell) => cell.textContent);
+    expect(changes(minutes)).toEqual(["+4.1 pts", "−5.0 pts"]);
+    expect(changes(impact)).toEqual(["+0.8", "−0.6"]);
+
+    // Sources differ across the impact movers, so the axis names none.
+    const charts = moverCharts();
+    expect([...charts.keys()]).toEqual(["Minutes share, pts", "Impact rating"]);
+    const bars = (name: string) => charts.get(name)!.series[0]!.data;
+    const lengths = (name: string) => bars(name).map((bar) => bar.value.toFixed(1));
+    expect(lengths("Minutes share, pts")).toEqual(["4.1", "-5.0"]);
+    expect(lengths("Impact rating")).toEqual(["0.8", "-0.6"]);
+    for (const name of charts.keys()) {
+      expect(bars(name).map((bar) => bar.itemStyle.color)).toEqual([
+        MOVER_COLOURS.rising,
+        MOVER_COLOURS.falling,
+      ]);
+    }
+
+    // The impact chart mounted last; its second bar is the faller.
+    click({ componentType: "series", dataIndex: 1 });
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        `/players/${LEAGUE_PAGE.impact_fallers[0]!.player.player_id}`,
+      ),
+    );
+    expect(router.state.location.search).toBe("?date=2026-03-21&tab=movers");
+  });
+
+  it("groups flags by flag", async () => {
+    morning();
+    renderApp(`${MORNING}&tab=flags`);
 
     const flags = await screen.findByRole("region", { name: "Flags" });
     const cliff = within(flags).getByRole("region", { name: "Minutes cliff" });
-    expect(cliff).toHaveTextContent("Jrue Holiday BOS 5-game share 5.0% vs 20-game 12.0%");
+    expect(cliff).toHaveTextContent("Jrue Holiday — BOS 5-game share 5.0% vs 20-game 12.0%");
     expect(within(flags).getByRole("region", { name: "Contract pressure" })).toHaveTextContent(
       "Two-way: 46 of 50 active games",
     );
+  });
 
-    const injuries = screen.getByRole("region", { name: "Injury changes" });
-    expect(injuries).toHaveTextContent("Kristaps Porzingis BOS Not listed → Out");
-    expect(within(injuries).getByRole("link", { name: "BOS" })).toHaveAttribute("href", "/teams/BOS");
+  it("draws a visual beside each flag's text, but contract pressure's", async () => {
+    const [cliff, contract] = LEAGUE_PAGE.flags;
+    const flag = (kind: (typeof LEAGUE_PAGE.flags)[number]["flag"], detail: object, tiers = null) => ({
+      ...cliff!,
+      flag: kind,
+      detail,
+      tiers,
+    });
+    const tiers = Array.from({ length: 20 }, (_, i) => ({
+      game_date: `2026-03-${String(i + 1).padStart(2, "0")}`,
+      tier: i % 2 ? ("core" as const) : ("fringe" as const),
+    }));
+    morning({
+      ...LEAGUE_PAGE,
+      flags: [
+        cliff,
+        flag("usage_up_efficiency_down", { usg_pct_delta_season: 0.04, ts_pct_delta_season: -0.05 }),
+        flag("bleeding", { on_court_net: -8.2, possessions: 412, off_court_net: 3.1 }),
+        flag("earning_trust", { shares: [0.08, 0.1, 0.13] }),
+        { ...flag("yo_yo", { events: 4, changes: [] }), tiers },
+        contract,
+      ],
+    });
+    renderApp(`${MORNING}&tab=flags`);
 
-    const transactions = screen.getByRole("region", { name: "Transactions" });
-    expect(within(transactions).getByRole("link", { name: "Dalton Knecht" })).toHaveAttribute(
-      "href",
-      "/players/1642000",
+    const flags = await screen.findByRole("region", { name: "Flags" });
+    const visuals = (name: string) =>
+      within(flags).getByRole("region", { name }).querySelectorAll(".chart-flag").length;
+    expect(
+      ["Minutes cliff", "Usage up, efficiency down", "Bleeding", "Earning trust", "Yo-yo"].map(visuals),
+    ).toEqual([1, 1, 1, 1, 1]);
+    expect(visuals("Contract pressure")).toBe(0);
+    // The text stays beside the drawing.
+    expect(within(flags).getByRole("region", { name: "Bleeding" })).toHaveTextContent(
+      "On-court net −8.2 on 412 poss, off-court +3.1",
     );
-    expect(within(transactions).getByRole("link", { name: "LAL" })).toBeInTheDocument();
+  });
+
+  it("lists last night's and the morning's transactions, each dated", async () => {
+    const tomorrows = { ...LEAGUE_PAGE.transactions[0]!, date: "2026-03-21", type: "waive" };
+    morning({ ...LEAGUE_PAGE, transactions: [...LEAGUE_PAGE.transactions, tomorrows] });
+    renderApp(`${MORNING}&tab=moves`);
+
+    const transactions = await screen.findByRole("region", { name: "Transactions" });
+    const items = within(transactions).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent?.slice(0, 10))).toEqual(["2026-03-20", "2026-03-21"]);
+    expect(within(items[0]!).getByRole("link", { name: "Dalton Knecht" })).toHaveAttribute(
+      "href",
+      "/players/1642000?date=2026-03-21&tab=moves",
+    );
+    expect(within(items[0]!).getByRole("link", { name: "LAL" })).toBeInTheDocument();
+  });
+
+  it("reads the morning's transactions off the day before's page when last night lags", async () => {
+    const transaction = (date: string, name: string) => ({
+      ...LEAGUE_PAGE.transactions[0]!,
+      date,
+      player: { player_id: 1, name },
+    });
+    const fetchMock = mockApi({
+      "/api/slate": { body: { ...SLATE_PAGE, date: "2026-03-22" } },
+      // The route answers both dates; each page's transactions are its date's and the day after's.
+      "/api/league": {
+        body: {
+          ...LEAGUE_PAGE,
+          transactions: [
+            transaction("2026-03-20", "Last night's"),
+            transaction("2026-03-21", "Underived night's"),
+            transaction("2026-03-22", "Morning's"),
+          ],
+        },
+      },
+    });
+    renderApp("/?date=2026-03-22&tab=moves");
+
+    const transactions = await screen.findByRole("region", { name: "Transactions" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/league?date=2026-03-20");
+    expect(fetchMock).toHaveBeenCalledWith("/api/league?date=2026-03-21");
+    const players = within(transactions).getAllByRole("link", { name: /night's|Morning's/ });
+    expect(players.map((link) => link.textContent)).toEqual(["Last night's", "Morning's"]);
+  });
+
+  it("lists last night's quiet signals under the events, in the API's shortfall order", async () => {
+    morning({
+      ...LEAGUE_PAGE,
+      quiet_signals: [
+        quiet(1, "Sat Out", null),
+        { ...quiet(2, "Short Night", 660), impact: DARKO },
+        quiet(3, "Bit Short", 900),
+      ],
+    });
+    renderApp(`${MORNING}&tab=rotation`);
+
+    const signals = await screen.findByRole("region", { name: "Quiet signals" });
+    const events = screen.getByRole("region", { name: "Rotation changes" });
+    expect(events.compareDocumentPosition(signals)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(within(signals).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Sat Out — BOS Starter DNP-CD",
+      "Short Night +2.3DARKO BOS Starter 11 min vs 28.4 avg",
+      "Bit Short — BOS Starter 15 min vs 28.4 avg",
+    ]);
+  });
+
+  it("says when there are no quiet signals", async () => {
+    morning();
+    renderApp(`${MORNING}&tab=rotation`);
+
+    expect(await screen.findByRole("region", { name: "Quiet signals" })).toHaveTextContent(
+      "No quiet signals.",
+    );
+  });
+
+  it("shows the impact beside the player on every row, a dash when he has none", async () => {
+    const withImpact = <T,>(row: T) => ({ ...row, impact: DARKO });
+    const [bos, lal] = LEAGUE_PAGE.rotation_events;
+    morning({
+      ...LEAGUE_PAGE,
+      rotation_events: [{ ...bos!, events: bos!.events.map(withImpact) }, lal!],
+      quiet_signals: [withImpact(quiet(1, "Sat Out", null))],
+      minutes_risers: LEAGUE_PAGE.minutes_risers.map(withImpact),
+      impact_fallers: LEAGUE_PAGE.impact_fallers.map(withImpact),
+      flags: LEAGUE_PAGE.flags.map(withImpact),
+      transactions: LEAGUE_PAGE.transactions.map(withImpact),
+    });
+    renderApp(`${MORNING}&tab=rotation`);
+    const impacts = (region: HTMLElement) =>
+      [...region.querySelectorAll(".impact")].map((span) => span.textContent);
+
+    const events = await screen.findByRole("region", { name: "Rotation changes" });
+    expect(impacts(events)).toEqual(["+2.3DARKO", "+2.3DARKO", "—"]);
+    expect(impacts(screen.getByRole("region", { name: "Quiet signals" }))).toEqual(["+2.3DARKO"]);
+    openTab("Movers");
+    const table = (region: string, caption: string) =>
+      within(screen.getByRole("region", { name: region })).getByRole("table", { name: caption });
+    expect(impacts(table("Minutes movers", "Rising"))).toEqual(["+2.3DARKO"]);
+    expect(impacts(table("Minutes movers", "Falling"))).toEqual(["—"]);
+    expect(impacts(table("Impact movers", "Falling"))).toEqual(["+2.3DARKO"]);
+    openTab("Flags");
+    expect(impacts(screen.getByRole("region", { name: "Flags" }))).toEqual([
+      "+2.3DARKO",
+      "+2.3DARKO",
+    ]);
+    openTab("Moves");
+    expect(impacts(screen.getByRole("region", { name: "Transactions" }))).toEqual(["+2.3DARKO"]);
+  });
+
+  it("says an early empty Movers or Flags tab needs its window, with the games played", async () => {
+    const early = (tricode: string, wins: number, losses: number) => ({
+      ...TEAMS.teams.find((team) => team.tricode === tricode)!,
+      wins,
+      losses,
+    });
+    mockApi({
+      "/api/slate": { body: SLATE_PAGE },
+      "/api/league": {
+        body: {
+          ...LEAGUE_PAGE,
+          minutes_risers: [],
+          minutes_fallers: [],
+          impact_risers: [],
+          impact_fallers: [],
+          flags: [],
+        },
+      },
+      "/api/teams": { body: { ...TEAMS, teams: [early("BOS", 2, 1), early("LAL", 1, 4)] } },
+    });
+    renderApp(`${MORNING}&tab=movers`);
+
+    expect(await screen.findByRole("region", { name: "Minutes movers" })).toHaveTextContent(
+      "Minutes movers need 20 team games. The league has played 3–5.",
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "BOS" }));
+    expect(screen.getByRole("region", { name: "Minutes movers" })).toHaveTextContent(
+      "Minutes movers need 20 team games. BOS has played 3.",
+    );
+    expect(screen.getByRole("region", { name: "Impact movers" })).toHaveTextContent(
+      "Impact movers need an impact value 10 games back. BOS has played 3.",
+    );
+    openTab("Flags");
+    expect(screen.getByRole("region", { name: "Flags" })).toHaveTextContent(
+      "No flags raised. Earning trust needs 15 games of a spell; minutes cliff needs the 5- and " +
+        "20-game windows to differ. BOS has played 3.",
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "LAL" }));
+    expect(screen.getByRole("region", { name: "Flags" })).toHaveTextContent(
+      "BOS, LAL have played 3–5.",
+    );
+  });
+
+  describe("team filter", () => {
+    const LAL_FLAG = {
+      ...LEAGUE_PAGE.flags[0]!,
+      player: { player_id: 1642000, name: "Dalton Knecht" },
+      tricode: "LAL",
+    };
+    const TRADE = {
+      date: "2026-03-20",
+      type: "trade",
+      detail: "Boston traded Jrue Holiday to Los Angeles.",
+      player: { player_id: 201950, name: "Jrue Holiday" },
+      from_tricode: "BOS",
+      to_tricode: "LAL",
+      impact: null,
+    };
+    const PAGE = { ...LEAGUE_PAGE, flags: [...LEAGUE_PAGE.flags, LAL_FLAG] };
+
+    it("shows only the selected teams' rows on every derived tab", async () => {
+      morning({ ...PAGE, transactions: [...PAGE.transactions, TRADE] });
+      renderApp(`${MORNING}&tab=flags&team=LAL`);
+
+      const flags = await screen.findByRole("region", { name: "Flags" });
+      expect(within(flags).getAllByRole("listitem")).toHaveLength(1);
+      expect(flags).toHaveTextContent("Dalton Knecht — LAL");
+
+      openTab("Rotation");
+      const events = screen.getByRole("region", { name: "Rotation changes" });
+      expect(within(events).queryByRole("region", { name: "BOS" })).not.toBeInTheDocument();
+      expect(within(events).getByRole("region", { name: "LAL" })).toBeInTheDocument();
+
+      // LAL has played its 20 games: the list is empty for the date, not for the window.
+      openTab("Movers");
+      expect(screen.getByRole("region", { name: "Minutes movers" })).toHaveTextContent(
+        "No minutes movers.",
+      );
+
+      // A transaction by either of its teams.
+      openTab("Moves");
+      const moves = within(screen.getByRole("region", { name: "Transactions" }));
+      expect(moves.getAllByRole("listitem")).toHaveLength(2);
+
+      // A game by either of its teams: LAL's, not PHX @ DEN.
+      openTab("Last night");
+      const scores = within(screen.getByRole("region", { name: "Final scores" }));
+      expect(scores.getAllByRole("row")).toHaveLength(2);
+      expect(scores.getByRole("link", { name: "LAL 104 @ BOS 112" })).toBeInTheDocument();
+    });
+
+    it("says no selected team played last night when the filter hides every game", async () => {
+      morning();
+      renderApp(`${MORNING}&tab=last_night&team=PHI`);
+
+      expect(await screen.findByRole("region", { name: "Final scores" })).toHaveTextContent(
+        "No games for the selected teams.",
+      );
+    });
+
+    it("puts the checked teams in ?team=, keeping the other parameters", async () => {
+      morning(PAGE);
+      const router = renderApp(`${MORNING}&tab=flags`);
+      const flags = await screen.findByRole("region", { name: "Flags" });
+      expect(within(flags).getAllByRole("listitem")).toHaveLength(3);
+
+      fireEvent.click(await screen.findByRole("checkbox", { name: "LAL" }));
+      expect(router.state.location.search).toBe("?date=2026-03-21&tab=flags&team=LAL");
+      expect(screen.getByText("Teams: LAL")).toBeInTheDocument();
+      expect(within(flags).getAllByRole("listitem")).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole("checkbox", { name: "BOS" }));
+      expect(router.state.location.search).toBe("?date=2026-03-21&tab=flags&team=LAL%2CBOS");
+      expect(within(flags).getAllByRole("listitem")).toHaveLength(3);
+
+      fireEvent.click(screen.getByRole("button", { name: "All teams" }));
+      expect(router.state.location.search).toBe("?date=2026-03-21&tab=flags");
+      expect(screen.getByText("Teams: all")).toBeInTheDocument();
+    });
   });
 });

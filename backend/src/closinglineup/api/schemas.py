@@ -10,7 +10,7 @@ are; a value with nothing to compute it from is null.
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 type Tier = Literal["injured", "starter", "core", "fringe", "out"]
 type Badge = Literal["two_way", "ten_day", "exhibit_10", "g_league"]
@@ -30,6 +30,8 @@ type InjurySource = Literal["pdf", "espn"]
 type GarbageTime = Literal["include", "exclude"]
 type GameStatus = Literal["scheduled", "final", "postponed"]
 type Window = Literal["5", "10", "20", "season"]
+type LeagueWindow = Literal["5", "10", "20", "season", "prior_season"]
+type DnpReason = Literal["cd", "injury", "inactive", "suspension", "g_league", "other"]
 type Flag = Literal[
     "minutes_cliff",
     "usage_up_efficiency_down",
@@ -124,7 +126,8 @@ class TeamsResponse(BaseModel):
 class TierBoardRow(BaseModel):
     """A player's rotation state on the tier board's date, and three sparklines over the team's
     last 20 game dates through it: his 10-game role window's minutes share and on/off net, and his
-    impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for)."""
+    impact metric (`impact_source`, the first of EPM, DARKO and local BPM he has a value for); and
+    his season production window's Win Shares and VORP on that date (v2 spec §8.7)."""
 
     player: PlayerRef
     tier: Tier
@@ -138,6 +141,8 @@ class TierBoardRow(BaseModel):
     on_off_net: list[Point]
     impact: list[Point]
     impact_source: Literal["epm", "darko", "bpm_local"] | None
+    ws: float | None
+    vorp: float | None
 
 
 class ClosingLineup(BaseModel):
@@ -236,12 +241,28 @@ class Signal(BaseModel):
     label: str
 
 
+class Impact(BaseModel):
+    """A feed row's player's latest impact value on or before its date, in the first of DARKO and
+    local BPM he has one in (v2 spec §7)."""
+
+    source: Literal["darko", "bpm_local"]
+    value: float
+
+
+class TierPoint(BaseModel):
+    """His tier on one of his team's game dates, null on a date he has no row on."""
+
+    game_date: dt.date
+    tier: Tier | None
+
+
 class RotationEventSummary(BaseModel):
     player: PlayerRef
     game_date: dt.date
     from_tier: Tier | None
     to_tier: Tier
     signals: list[Signal]
+    impact: Impact | None
 
 
 class TeamRotationEvents(BaseModel):
@@ -258,14 +279,21 @@ class Mover(BaseModel):
     value: float | None
     delta: float
     source: Literal["epm", "darko", "bpm_local"] | None
+    impact: Impact | None
 
 
 class RaisedFlag(BaseModel):
+    """A flag raised on the date. On `/api/league`, a yo-yo's `tiers` are his tier on each of the
+    team's last 20 final game dates this season through it, the oldest first, a date he has no row
+    on kept with a null tier (v2 spec §6.2); other flags', and every flag's elsewhere, are null."""
+
     player: PlayerRef
     tricode: str
     game_date: dt.date
     flag: Flag
     detail: dict[str, Any]
+    impact: Impact | None
+    tiers: list[TierPoint] | None
 
 
 class InjuryChange(BaseModel):
@@ -284,11 +312,57 @@ class TransactionSummary(BaseModel):
     from_tricode: str | None
     to_tricode: str | None
     detail: str
+    impact: Impact | None
+
+
+class QuietSignal(BaseModel):
+    """A Starter or Core player with no rotation event on the date who sat by coach's decision in
+    his team's game on it, or played under 60% of his 10-game minutes per game before it (v2 spec
+    §5.4)."""
+
+    player: PlayerRef
+    tricode: str
+    tier: Tier
+    seconds: int
+    minutes_per_game_10: float
+    dnp_reason: DnpReason | None
+    impact: Impact | None
+
+
+class GameScoreLine(BaseModel):
+    """A player's line in a game, ranked by its Game Score (v2 spec §8.1)."""
+
+    player: PlayerRef
+    game_score: float
+    pts: int
+    reb: int
+    ast: int
+    seconds: int
+
+
+class LastNightTeam(BaseModel):
+    """One side of a final game: its score and its two highest Game Scores, the highest first."""
+
+    tricode: str
+    score: int | None
+    top: list[GameScoreLine]
+
+
+class LastNightGame(BaseModel):
+    """A final game on the date (v2 spec §15.3); `margin` is the home score less the away, null
+    while a score is missing."""
+
+    game_id: str
+    home: LastNightTeam
+    away: LastNightTeam
+    margin: int | None
 
 
 class LeaguePage(BaseModel):
     date: dt.date
+    games: list[LastNightGame]
     rotation_events: list[TeamRotationEvents]
+    quiet_signals: list[QuietSignal]
     minutes_risers: list[Mover]
     minutes_fallers: list[Mover]
     flags: list[RaisedFlag]
@@ -298,15 +372,133 @@ class LeaguePage(BaseModel):
     impact_fallers: list[Mover]
 
 
+# `/api/slate`
+
+
+type LineChange = Literal["new", "upgraded", "downgraded", "off"]
+
+
+class SlateReport(BaseModel):
+    """The team's newest injury report for the game by the end of the date, `stale` when it is
+    ESPN's fallback; `submitted` false, the other fields null, when it has none (v2 spec §5.1)."""
+
+    report_datetime: dt.datetime | None
+    source: InjurySource | None
+    stale: bool
+    submitted: bool
+
+
+class SlateLine(BaseModel):
+    """A player on the team's report for the game, or on G League assignment: his `status` and
+    `reason` on the report (null for a G League badge alone, and for an `off` line, which carries
+    its previous ones), his status on the previous report, the `change` between them (v2 spec
+    §5.2), and his tier and 10-game minutes share on the team's latest derived date on or before
+    last night."""
+
+    player: PlayerRef
+    status: InjuryStatus | None
+    reason: str | None
+    previous_status: InjuryStatus | None
+    change: LineChange | None
+    tier: Tier | None
+    minutes_share_10: float | None
+    g_league: bool
+    impact: Impact | None
+
+
+class ProjectedStarter(BaseModel):
+    """One of the first five of the team's players by `starter_rate_5` on its latest derived date
+    whose line on the report is not Out or Doubtful; `replacement` when he ranks below the top five,
+    so fills the gap of one removed above him (v2 spec §5.3)."""
+
+    player: PlayerRef
+    starter_rate_5: float
+    minutes_share_10: float | None
+    replacement: bool
+    impact: Impact | None
+
+
+class SlateTeam(BaseModel):
+    """One side of a slate game; `b2b` when it is the team's second night in a row."""
+
+    tricode: str
+    b2b: bool
+    report: SlateReport
+    lines: list[SlateLine]
+    projected_starters: list[ProjectedStarter]
+
+
+class SlateGame(BaseModel):
+    game_id: str
+    tip_time: dt.datetime | None
+    home: SlateTeam
+    away: SlateTeam
+
+
+class SlatePage(BaseModel):
+    """The date's games, by tip-off; `last_night` is the latest derived date before it, null
+    before the first (v2 spec §3, §9)."""
+
+    date: dt.date
+    last_night: dt.date | None
+    games: list[SlateGame]
+
+
+# `/api/players`
+
+
+class LeagueTableRow(BaseModel):
+    """A player's latest production row in the window: his games whatever the team. `tricode` and
+    `tier` are his latest `rotation_state` on or before the date in its season, null with none;
+    `games` counts his teams' games in the window and `games_played` those he played; `impact` is
+    the row's first of DARKO and local BPM he has; `vorp` is null but for the season and the prior
+    season."""
+
+    player: PlayerRef
+    tricode: str | None
+    tier: Tier | None
+    games: int
+    games_played: int
+    minutes_per_game: float | None
+    impact: Impact | None
+    ws: float | None
+    ws_48: float | None
+    vorp: float | None
+    ts_pct: float | None
+    usg_pct: float | None
+    game_score: float | None
+
+
+class LeagueTable(BaseModel):
+    """Every player with a production row in the window, unsorted and unfiltered: the page sorts
+    and filters them."""
+
+    date: dt.date
+    window: LeagueWindow
+    rows: list[LeagueTableRow]
+
+
 # `/api/players/{id}`
 
 
+class InjuryLine(BaseModel):
+    """A player's line on his team's newest injury report by the end of the date."""
+
+    status: InjuryStatus
+    reason: str | None
+
+
 class PlayerHeader(BaseModel):
+    """`tier`, `availability` and `badges` are his `rotation_state` on his latest team game date,
+    null and empty with none; `injury` his line on his team's newest report, null off it."""
+
     player: PlayerRef
     position: str | None
     tricode: str | None
     tier: Tier | None
+    availability: Availability | None
     badges: list[Badge]
+    injury: InjuryLine | None
 
 
 class ImpactSeries(BaseModel):
@@ -331,8 +523,11 @@ class PlayerSeries(BaseModel):
 
 
 class Annotation(BaseModel):
+    """A change on one of the window's dates: an injury status, a transaction, a rotation event's
+    tier ("Fringe → Core", "Joined as Core"), or whether he started or closed."""
+
     game_date: dt.date
-    kind: Literal["injury", "transaction", "starter", "closer"]
+    kind: Literal["injury", "transaction", "tier", "starter", "closer"]
     label: str
 
 
@@ -347,6 +542,60 @@ class ShotZone(BaseModel):
     season_fg_pct: float | None
     prior_freq: float | None
     prior_fg_pct: float | None
+
+
+type ProductionMetric = Literal[
+    "ts_pct",
+    "efg_pct",
+    "usg_pct",
+    "ast_pct",
+    "tov_pct",
+    "oreb_pct",
+    "dreb_pct",
+    "ftr",
+    "fg3a_rate",
+    "pts_per36",
+    "reb_per36",
+    "ast_per36",
+    "game_score",
+    "ws",
+    "ws_48",
+    "vorp",
+]
+# How a metric reads: a fraction as a percentage, a ratio to three decimals (FTr, 3PAr, WS/48), a
+# number (per-36 rates, Win Shares, VORP), or a number per game played (Game Score).
+type ProductionFormat = Literal["percent", "rate", "number", "per_game"]
+
+
+class ProductionCell(BaseModel):
+    """A metric over one production window: its value, that less the season window's, the games in
+    the window and whether it is short. `o_value` and `d_value` are Win Shares' offensive and
+    defensive parts, null for every other metric."""
+
+    value: float | None
+    delta_season: float | None
+    games: int
+    is_short: bool
+    o_value: float | None
+    d_value: float | None
+
+
+class ProductionWindows(BaseModel):
+    """A metric's cell in each production window, null where he has no such window or the metric
+    is not kept for it."""
+
+    last_5: ProductionCell | None = Field(alias="5")
+    last_10: ProductionCell | None = Field(alias="10")
+    last_20: ProductionCell | None = Field(alias="20")
+    season: ProductionCell | None
+    prior_season: ProductionCell | None
+
+
+class ProductionRow(BaseModel):
+    metric: ProductionMetric
+    label: str
+    format: ProductionFormat
+    windows: ProductionWindows
 
 
 class Teammate(BaseModel):
@@ -378,16 +627,23 @@ class Matchups(BaseModel):
 
 
 class PlayerPage(BaseModel):
+    """`tiers` is his tier on each of his team's game dates in the window, the oldest first;
+    `contract` his non-guaranteed contract with his team, as the team page's contract notes read
+    one, null with none."""
+
     date: dt.date
     window: Window
     garbage_time: GarbageTime
     header: PlayerHeader
     series: PlayerSeries
+    tiers: list[TierPoint]
     annotations: list[Annotation]
     shot_profile: list[ShotZone]
+    production: list[ProductionRow]
     teammates: list[Teammate]
     matchups: Matchups
     flags: list[RaisedFlag]
+    contract: ContractNote | None
 
 
 # `/api/games/{game_id}`

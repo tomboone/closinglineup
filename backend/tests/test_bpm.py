@@ -1,4 +1,5 @@
 import csv
+from collections import defaultdict
 from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
@@ -29,7 +30,8 @@ FIXTURES = Path(__file__).parent / "fixtures" / "bref"
 # which is the prior `season_lines` has (`listed_position`).
 BREF_POSITIONS = {"PG": 1.0, "SG": 2.0, "SF": 3.0, "PF": 4.0, "C": 5.0}
 NBA_POSITIONS = {"PG": "G", "SG": "G", "SF": "F", "PF": "F", "C": "C"}
-BOX = ("fg", "fga", "fta", "orb", "drb", "tov")
+# A box with nothing in it, for a team line whose totals the test does not read.
+NO_BOX = TeamBox(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 # The 2016-17 Cavaliers, the worked example in the BPM 2.0 calculator sheet linked from
 # https://www.basketball-reference.com/about/bpm2.html: each player's totals and listed position,
@@ -59,14 +61,21 @@ def _cavaliers() -> tuple[list[PlayerLine], dict[int, TeamLine], list[dict[str, 
             CLE,
             float(row["mp"]),
             float(row["listed"]),
-            *(int(row[c]) for c in ("pts", "fga", "fg3", "fta", "orb", "drb")),
-            *(int(row[c]) for c in ("ast", "stl", "blk", "tov", "pf")),
+            # The sheet has no makes, which BPM does not read.
+            int(row["pts"]),
+            0,
+            int(row["fga"]),
+            int(row["fg3"]),
+            0,
+            *(int(row[c]) for c in ("fta", "orb", "drb", "ast", "stl", "blk", "tov", "pf")),
         )
         for i, row in enumerate(rows, 1)
     ]
     teams = {
-        CLE: TeamLine(CLE, 82, CLE_MINUTES, CLE_POSSESSIONS, CLE_PTS, CLE_OPP_PTS),
-        REST: TeamLine(REST, 82 * 29, 29 * CLE_MINUTES, REST_POSSESSIONS, REST_PTS, REST_PTS),
+        CLE: TeamLine(CLE, 82, CLE_MINUTES, CLE_POSSESSIONS, CLE_PTS, CLE_OPP_PTS, NO_BOX, NO_BOX),
+        REST: TeamLine(
+            REST, 82 * 29, 29 * CLE_MINUTES, REST_POSSESSIONS, REST_PTS, REST_PTS, NO_BOX, NO_BOX
+        ),
     }
     return lines, teams, rows
 
@@ -90,30 +99,63 @@ def test_the_sheets_cavaliers_are_reproduced() -> None:
     assert team_total == pytest.approx(margin / CLE_POSSESSIONS * 100 + 0.175 * margin / 82 / 2)
 
 
-def _bref_season(
+def bref_season(
     *, coarse: bool = False
 ) -> tuple[list[PlayerLine], dict[int, TeamLine], dict[str, dict[str, str]]]:
     """The 2025-26 fixture as lines, with each team's possessions estimated from its totals, and
-    the published rows by player-team; `coarse` lists each player as NBA.com would."""
+    the published rows by player-team; `coarse` lists each player as NBA.com would.
+
+    A team's three-pointers, free throws, assists, steals, blocks and fouls are its players' sums
+    (`fixtures/bref/README.md`); its opponents' are not in the fixture but for free throws made,
+    and nothing reads them."""
     with (FIXTURES / "2025-26_teams.csv").open() as handle:
         team_rows = list(csv.DictReader(handle))
     with (FIXTURES / "2025-26_players.csv").open() as handle:
         player_rows = list(csv.DictReader(handle))
     team_ids = {row["team"]: i for i, row in enumerate(team_rows, 1)}
-    teams = {
-        team_ids[row["team"]]: TeamLine(
+    summed: dict[str, dict[str, int]] = {row["team"]: defaultdict(int) for row in team_rows}
+    for row in player_rows:
+        for column in ("fg3", "ft", "ast", "stl", "blk", "pf"):
+            summed[row["team"]][column] += int(row[column])
+
+    def box(row: dict[str, str]) -> TeamBox:
+        sums = summed[row["team"]]
+        return TeamBox(
+            fgm=int(row["fg"]),
+            fga=int(row["fga"]),
+            fg3m=sums["fg3"],
+            ftm=sums["ft"],
+            fta=int(row["fta"]),
+            orb=int(row["orb"]),
+            drb=int(row["drb"]),
+            ast=sums["ast"],
+            stl=sums["stl"],
+            blk=sums["blk"],
+            tov=int(row["tov"]),
+            pf=sums["pf"],
+            pts=int(row["pts"]),
+        )
+
+    def opp_box(row: dict[str, str]) -> TeamBox:
+        return NO_BOX._replace(
+            **{c: int(row[f"opp_{c}"]) for c in ("fga", "fta", "orb", "drb", "tov", "pts")},
+            fgm=int(row["opp_fg"]),
+            ftm=int(row["opp_ft"]),
+        )
+
+    teams: dict[int, TeamLine] = {}
+    for row in team_rows:
+        team_box, opponents = box(row), opp_box(row)
+        teams[team_ids[row["team"]]] = TeamLine(
             team_ids[row["team"]],
             int(row["g"]),
             int(row["mp"]) / 5,
-            possessions(
-                TeamBox(*(int(row[c]) for c in BOX)),
-                TeamBox(*(int(row[f"opp_{c}"]) for c in BOX)),
-            ),
+            possessions(team_box, opponents),
             int(row["pts"]),
             int(row["opp_pts"]),
+            team_box,
+            opponents,
         )
-        for row in team_rows
-    }
     lines = [
         PlayerLine(
             i,
@@ -121,8 +163,10 @@ def _bref_season(
             float(row["mp"]),
             listed_position(NBA_POSITIONS[row["pos"]]) if coarse else BREF_POSITIONS[row["pos"]],
             int(row["pts"]),
+            int(row["fg"]),
             int(row["fga"]),
             int(row["fg3"]),
+            int(row["ft"]),
             int(row["fta"]),
             int(row["orb"]),
             int(row["drb"]),
@@ -139,7 +183,7 @@ def _bref_season(
 
 
 def test_possessions_estimate_matches_basketball_references_pace() -> None:
-    _, teams, _ = _bref_season()
+    _, teams, _ = bref_season()
     with (FIXTURES / "2025-26_teams.csv").open() as handle:
         paces = {i: float(row["pace"]) for i, row in enumerate(csv.DictReader(handle), 1)}
 
@@ -160,7 +204,7 @@ PUBLISHED = {
 
 
 def test_five_published_2025_26_values_are_within_a_point() -> None:
-    lines, teams, published = _bref_season()
+    lines, teams, published = bref_season()
     by_line = {line.player_id: line for line in lines}
     keys = {key: i for i, key in enumerate(published, 1)}
 
@@ -176,7 +220,7 @@ def test_five_published_2025_26_values_are_within_a_point() -> None:
 
 @pytest.mark.parametrize("coarse", [False, True], ids=["bref_positions", "nba_positions"])
 def test_every_regular_is_within_a_point_and_the_league_averages_to_zero(coarse: bool) -> None:
-    lines, teams, published = _bref_season(coarse=coarse)
+    lines, teams, published = bref_season(coarse=coarse)
     keys = list(published)
 
     results = compute(lines, teams)
@@ -351,9 +395,28 @@ def test_season_lines_sum_the_regular_season_games_final_through_the_date(
 
     # Each side's box: 25 of 60 from the field, 20 free throws, 5 and 20 boards, 10 turnovers.
     estimate = 60 + 0.4 * 20 - 1.07 * (5 / 25) * 35 + 10
+
+    def box(games: int, pts: int) -> TeamBox:
+        """`games` games of a side's five lines: the players' sums, not the schedule's score."""
+        return TeamBox(
+            fgm=25 * games,
+            fga=60 * games,
+            fg3m=5 * games,
+            ftm=10 * games,
+            fta=20 * games,
+            orb=5 * games,
+            drb=20 * games,
+            ast=15 * games,
+            stl=5 * games,
+            blk=5 * games,
+            tov=10 * games,
+            pf=10 * games,
+            pts=pts,
+        )
+
     assert teams == {
-        DEN: TeamLine(DEN, 1, 48.0, estimate, 85, 60),
-        GSW: TeamLine(GSW, 1, 48.0, estimate, 60, 85),
+        DEN: TeamLine(DEN, 1, 48.0, estimate, 85, 60, box(1, 85), box(1, 60)),
+        GSW: TeamLine(GSW, 1, 48.0, estimate, 60, 85, box(1, 60), box(1, 85)),
     }
     assert [(line.player_id, line.team_id) for line in lines] == [
         *((player_id, DEN) for player_id in NUGGETS),
@@ -361,13 +424,19 @@ def test_season_lines_sum_the_regular_season_games_final_through_the_date(
         (BRIEF, GSW),
     ]
     center = next(line for line in lines if line.player_id == WARRIORS[0])
-    assert center == PlayerLine(WARRIORS[0], GSW, 48.0, 5.0, 10, 12, 1, 4, 1, 4, 3, 1, 1, 2, 2)
+    assert center == PlayerLine(
+        WARRIORS[0], GSW, 48.0, 5.0, 10, 5, 12, 1, 2, 4, 1, 4, 3, 1, 1, 2, 2
+    )
     assert {line.listed_position for line in lines if line.player_id != WARRIORS[0]} == {3.0}
     assert [line.minutes for line in lines if line.team_id == GSW] == [48.0] * 4 + [47.5, 0.5]
     # The next day adds the second regular-season game, not the playoff game, scored as the
     # schedule has it.
-    assert later_teams[GSW] == TeamLine(GSW, 2, 96.0, 2 * estimate, 130, 175)
-    assert later_teams[DEN] == TeamLine(DEN, 2, 96.0, 2 * estimate, 175, 130)
+    assert later_teams[GSW] == TeamLine(
+        GSW, 2, 96.0, 2 * estimate, 130, 175, box(2, 120), box(2, 170)
+    )
+    assert later_teams[DEN] == TeamLine(
+        DEN, 2, 96.0, 2 * estimate, 175, 130, box(2, 170), box(2, 120)
+    )
     assert next(line for line in later if line.player_id == NUGGETS[0]).pts == 30
 
 

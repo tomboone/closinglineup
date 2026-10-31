@@ -5,8 +5,10 @@ import { vi } from "vitest";
 import type {
   GamePage,
   LeaguePage,
+  LeagueTable,
   MetaResponse,
   PlayerPage,
+  SlatePage,
   TeamPage,
   TeamsResponse,
 } from "../api/client";
@@ -63,6 +65,8 @@ const HOLIDAY = player(201950, "Jrue Holiday");
 const PORZINGIS = player(204001, "Kristaps Porzingis");
 const PRITCHARD = player(1630202, "Payton Pritchard");
 const DAVISON = player(1630486, "JD Davison");
+const EMBIID = player(203954, "Joel Embiid");
+const MAXEY = player(1630178, "Tyrese Maxey");
 
 const boardRow = (
   ref: { player_id: number; name: string },
@@ -81,6 +85,8 @@ const boardRow = (
   on_off_net: series([2, -1, 4]),
   impact: series([1.1, 1.2, 1.3]),
   impact_source: "epm",
+  ws: null,
+  vorp: null,
   ...extra,
 });
 
@@ -93,8 +99,8 @@ export const TEAM_PAGE: TeamPage = {
   garbage_time: "exclude",
   tier_board: [
     boardRow(DAVISON, "out", { badges: ["two_way", "g_league"], availability: "g_league" }),
-    boardRow(TATUM, "starter", { minutes_share_10: 0.15, starter_rate_5: 1 }),
-    boardRow(PRITCHARD, "core", { is_short: true, impact_source: "darko" }),
+    boardRow(TATUM, "starter", { minutes_share_10: 0.15, starter_rate_5: 1, ws: 4.25, vorp: 1.5 }),
+    boardRow(PRITCHARD, "core", { is_short: true, impact_source: "darko", ws: 1.04, vorp: -0.36 }),
     boardRow(BROWN, "starter", { minutes_share_10: 0.14, starter_rate_5: 1 }),
     boardRow(PORZINGIS, "injured", { availability: "out" }),
   ],
@@ -164,6 +170,72 @@ const shotZone = (
   prior_fg_pct: null,
 });
 
+type ProductionRow = PlayerPage["production"][number];
+type ProductionCell = NonNullable<ProductionRow["windows"]["season"]>;
+
+const cell = (value: number, games: number, delta: number | null, isShort = false): ProductionCell => ({
+  value,
+  delta_season: delta,
+  games,
+  is_short: isShort,
+  o_value: null,
+  d_value: null,
+});
+
+/** A metric over 12 games of the season: the 20-game window short, the prior season whole. */
+const production = (
+  metric: ProductionRow["metric"],
+  label: string,
+  format: ProductionRow["format"],
+  value: number,
+): ProductionRow => ({
+  metric,
+  label,
+  format,
+  windows: {
+    "5": cell(value * 1.1, 5, value * 0.1),
+    "10": cell(value, 10, 0),
+    "20": cell(value, 12, 0, true),
+    season: cell(value, 12, 0),
+    prior_season: cell(value * 0.9, 70, -value * 0.1),
+  },
+});
+
+const PRODUCTION: ProductionRow[] = [
+  production("ts_pct", "TS%", "percent", 0.6),
+  production("efg_pct", "eFG%", "percent", 0.55),
+  production("usg_pct", "USG%", "percent", 0.28),
+  production("ast_pct", "AST%", "percent", 0.18),
+  production("tov_pct", "TOV%", "percent", 0.11),
+  production("oreb_pct", "OREB%", "percent", 0.04),
+  production("dreb_pct", "DREB%", "percent", 0.14),
+  production("ftr", "FTr", "rate", 0.3),
+  production("fg3a_rate", "3PAr", "rate", 0.4),
+  production("pts_per36", "PTS/36", "number", 25),
+  production("reb_per36", "REB/36", "number", 6),
+  production("ast_per36", "AST/36", "number", 4),
+  production("game_score", "Game Score", "per_game", 16),
+  {
+    metric: "ws",
+    label: "Win Shares",
+    format: "number",
+    windows: {
+      "5": { ...cell(0.9, 5, null), o_value: 0.6, d_value: 0.3 },
+      "10": { ...cell(1.8, 10, null), o_value: 1.2, d_value: 0.6 },
+      "20": { ...cell(2.4, 12, null, true), o_value: 1.6, d_value: 0.8 },
+      season: { ...cell(2.4, 12, null), o_value: 1.6, d_value: 0.8 },
+      prior_season: { ...cell(7.1, 70, null), o_value: 4.5, d_value: 2.6 },
+    },
+  },
+  production("ws_48", "WS/48", "rate", 0.15),
+  {
+    metric: "vorp",
+    label: "VORP",
+    format: "number",
+    windows: { "5": null, "10": null, "20": null, season: cell(0.9, 12, null), prior_season: cell(2.8, 70, null) },
+  },
+];
+
 /**
  * Jaylen Brown's page over his last 10 games, three of them here, with an injury and a transaction
  * annotation on two of their dates.
@@ -172,7 +244,15 @@ export const PLAYER_PAGE: PlayerPage = {
   date: "2026-03-20",
   window: "10",
   garbage_time: "exclude",
-  header: { player: BROWN, tricode: "BOS", position: "G-F", tier: "starter", badges: [] },
+  header: {
+    player: BROWN,
+    tricode: "BOS",
+    position: "G-F",
+    tier: "starter",
+    availability: "questionable",
+    badges: [],
+    injury: { status: "Questionable", reason: "Left knee soreness" },
+  },
   series: {
     minutes: series([34.5, 12, 36]),
     minutes_share: series([0.144, 0.05, 0.15]),
@@ -185,11 +265,18 @@ export const PLAYER_PAGE: PlayerPage = {
       { source: "darko", points: series([1.4, 1.4, 1.5]) },
     ],
   },
+  tiers: [
+    { game_date: "2026-03-10", tier: "core" },
+    { game_date: "2026-03-11", tier: null },
+    { game_date: "2026-03-12", tier: "starter" },
+  ],
   annotations: [
     { game_date: "2026-03-11", kind: "injury", label: "Available → Questionable (knee)" },
     { game_date: "2026-03-12", kind: "transaction", label: "Signed extension" },
+    { game_date: "2026-03-12", kind: "tier", label: "Core → Starter" },
   ],
   shot_profile: [shotZone("rim", 0.3), shotZone("corner_3", 0.1)],
+  production: PRODUCTION,
   teammates: [
     { player: TATUM, possessions: 412, net_rating: 9.1 },
     { player: WHITE, possessions: 380, net_rating: -2.4 },
@@ -217,7 +304,49 @@ export const PLAYER_PAGE: PlayerPage = {
       player: BROWN,
       tricode: "BOS",
       detail: { share_5: 0.08, share_20: 0.14, ratio: 0.57 },
+      impact: null,
+      tiers: null,
     },
+  ],
+  contract: null,
+};
+
+type LeagueTableRow = LeagueTable["rows"][number];
+
+const tableRow = (
+  ref: { player_id: number; name: string },
+  tricode: string | null,
+  extra: Partial<LeagueTableRow> = {},
+): LeagueTableRow => ({
+  player: ref,
+  tricode,
+  tier: "core",
+  games: 20,
+  games_played: 20,
+  minutes_per_game: 30,
+  impact: { source: "darko", value: 1.0 },
+  ws: 2.0,
+  ws_48: 0.15,
+  vorp: 0.5,
+  ts_pct: 0.58,
+  usg_pct: 0.22,
+  game_score: 12.0,
+  ...extra,
+});
+
+/**
+ * The league table over the season to 2026-03-20, in no order as the API sends it: four players
+ * who qualify by default, a 20-minute one among them, and one under 15 minutes a game.
+ */
+export const LEAGUE_TABLE: LeagueTable = {
+  date: "2026-03-20",
+  window: "season",
+  rows: [
+    tableRow(MAXEY, "PHI", { minutes_per_game: 36, ws_48: 0.15, ts_pct: 0.58 }),
+    tableRow(PRITCHARD, "BOS", { minutes_per_game: 20, ws_48: 0.1, ts_pct: 0.64, impact: null }),
+    tableRow(EMBIID, "PHI", { games_played: 18, minutes_per_game: 33, ws_48: 0.25, ts_pct: 0.62 }),
+    tableRow(DAVISON, "BOS", { minutes_per_game: 8, ws_48: 0.3, ts_pct: 0.7, tier: "out" }),
+    tableRow(TATUM, "BOS", { tier: "starter", minutes_per_game: 36, ws_48: 0.2, ts_pct: 0.6 }),
   ],
 };
 
@@ -227,16 +356,65 @@ const mover = (
   value: number,
   delta: number,
   source: LeaguePage["impact_risers"][number]["source"] = null,
-): LeaguePage["minutes_risers"][number] => ({ player: ref, tricode, value, delta, source });
+): LeaguePage["minutes_risers"][number] => ({
+  player: ref,
+  tricode,
+  value,
+  delta,
+  source,
+  impact: null,
+});
 
 const signal = (name: string, label: string, value: number | string) => ({ name, label, value });
 
+const topLine = (
+  ref: { player_id: number; name: string | null },
+  game_score: number,
+  pts: number,
+): LeaguePage["games"][number]["home"]["top"][number] => ({
+  player: ref,
+  game_score,
+  pts,
+  reb: 6,
+  ast: 4,
+  seconds: 2040,
+});
+
 /**
- * The morning of 2026-03-20: two teams' tier transitions, a mover each way of both kinds, a flag of
- * two kinds, an injury change and a transaction.
+ * The morning of 2026-03-20: two final games, two teams' tier transitions, a mover each way of
+ * both kinds, a flag of two kinds, an injury change and a transaction.
  */
 export const LEAGUE_PAGE: LeaguePage = {
   date: "2026-03-20",
+  games: [
+    {
+      game_id: "0022500990",
+      home: {
+        tricode: "BOS",
+        score: 112,
+        top: [topLine(TATUM, 24.3, 31), topLine(BROWN, 15.15, 22)],
+      },
+      away: {
+        tricode: "LAL",
+        score: 104,
+        top: [
+          topLine(player(2544, "LeBron James"), 19.8, 27),
+          topLine(player(1629029, "Luka Dončić"), 12.4, 25),
+        ],
+      },
+      margin: 8,
+    },
+    {
+      game_id: "0022500991",
+      home: {
+        tricode: "DEN",
+        score: 120,
+        top: [topLine(player(203999, "Nikola Jokić"), 30.2, 28)],
+      },
+      away: { tricode: "PHX", score: 99, top: [] },
+      margin: 21,
+    },
+  ],
   rotation_events: [
     {
       tricode: "BOS",
@@ -251,6 +429,7 @@ export const LEAGUE_PAGE: LeaguePage = {
             signal("injury", "back from Out 2 days ago", "Out → Available"),
             signal("starter_rate", "starter rate up 20.0 pts vs 20-game", 0.2),
           ],
+          impact: null,
         },
         {
           player: PORZINGIS,
@@ -262,6 +441,7 @@ export const LEAGUE_PAGE: LeaguePage = {
             signal("minutes_volatility", "minutes volatility up 6.2 min vs 20-game", 6.2),
             signal("usage", "usage down 2.0 pts vs prior 10 games", -0.02),
           ],
+          impact: null,
         },
       ],
     },
@@ -278,10 +458,12 @@ export const LEAGUE_PAGE: LeaguePage = {
             signal("minutes_share", "minutes share up 2.0 pts vs 20-game", 0.02),
             signal("on_court_net", "on-court net down 3.1 vs prior 10 games", -3.1),
           ],
+          impact: null,
         },
       ],
     },
   ],
+  quiet_signals: [],
   minutes_risers: [mover(PRITCHARD, "BOS", 0.12, 0.041)],
   minutes_fallers: [mover(HOLIDAY, "BOS", 0.08, -0.05)],
   flags: [
@@ -291,6 +473,8 @@ export const LEAGUE_PAGE: LeaguePage = {
       player: HOLIDAY,
       tricode: "BOS",
       detail: { share_5: 0.05, share_20: 0.12, ratio: 0.42 },
+      impact: null,
+      tiers: null,
     },
     {
       game_date: "2026-03-20",
@@ -298,6 +482,8 @@ export const LEAGUE_PAGE: LeaguePage = {
       player: DAVISON,
       tricode: "BOS",
       detail: { reason: "two_way", active_games: 46, limit: 50 },
+      impact: null,
+      tiers: null,
     },
   ],
   injury_changes: [
@@ -318,6 +504,7 @@ export const LEAGUE_PAGE: LeaguePage = {
       player: player(1642000, "Dalton Knecht"),
       from_tricode: null,
       to_tricode: "LAL",
+      impact: null,
     },
   ],
   impact_risers: [mover(TATUM, "BOS", 6.1, 0.8, "epm")],
@@ -327,7 +514,9 @@ export const LEAGUE_PAGE: LeaguePage = {
 /** A date no team played: every list empty (spec §8). */
 export const EMPTY_LEAGUE_PAGE: LeaguePage = {
   date: "2026-03-21",
+  games: [],
   rotation_events: [],
+  quiet_signals: [],
   minutes_risers: [],
   minutes_fallers: [],
   flags: [],
@@ -335,6 +524,28 @@ export const EMPTY_LEAGUE_PAGE: LeaguePage = {
   transactions: [],
   impact_risers: [],
   impact_fallers: [],
+};
+
+const slateTeam = (tricode: string, b2b = false): SlatePage["games"][number]["home"] => ({
+  tricode,
+  b2b,
+  report: { report_datetime: null, source: null, stale: false, submitted: false },
+  lines: [],
+  projected_starters: [],
+});
+
+/** The morning of 2026-03-21, the day after `LEAGUE_PAGE`'s date: one game, no reports yet. */
+export const SLATE_PAGE: SlatePage = {
+  date: "2026-03-21",
+  last_night: "2026-03-20",
+  games: [
+    {
+      game_id: "0022501000",
+      tip_time: "2026-03-21T19:30:00-04:00",
+      away: slateTeam("LAL", true),
+      home: slateTeam("BOS"),
+    },
+  ],
 };
 
 const KNICKS = {

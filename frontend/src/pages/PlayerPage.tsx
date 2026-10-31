@@ -8,10 +8,12 @@ import type { NamedSeries } from "../components/charts/AnnotatedTimeSeries";
 import ShotProfile from "../components/charts/ShotProfile";
 import type { ShotWindow } from "../components/charts/ShotProfile";
 import { TIER_COLOURS } from "../components/charts/theme";
+import TierStrip from "../components/charts/TierStrip";
 import FlagList from "../components/FlagList";
-import { percent, signed } from "../components/format";
+import { money, percent, signed } from "../components/format";
 import PlayerLink from "../components/PlayerLink";
-import { BADGE_LABELS, IMPACT_LABELS, TIER_LABELS } from "../components/labels";
+import ProductionTable from "../components/ProductionTable";
+import { AVAILABILITY_LABELS, BADGE_LABELS, IMPACT_LABELS, TIER_LABELS } from "../components/labels";
 import { useShellParams } from "../shell/params";
 import QueryStatus from "./QueryStatus";
 
@@ -73,6 +75,7 @@ function PlayerPage() {
         {(page) => (
           <>
             <PlayerHeader header={page.header} date={page.date} />
+            {page.contract && <ContractLine contract={page.contract} />}
             <PlayerPageBody page={page} />
           </>
         )}
@@ -81,8 +84,11 @@ function PlayerPage() {
   );
 }
 
+/** His team, position and tier, his availability beside it, and his line on the newest injury report. */
 function PlayerHeader({ header, date }: { header: PlayerPageData["header"]; date: string }) {
   const { search } = useLocation();
+  const availability = header.availability && AVAILABILITY_LABELS[header.availability];
+  const { injury } = header;
   return (
     <header className="player-header">
       <p>
@@ -97,6 +103,7 @@ function PlayerHeader({ header, date }: { header: PlayerPageData["header"]; date
             {TIER_LABELS[header.tier]}
           </span>
         )}
+        {availability && <span className="availability">{availability}</span>}
         {header.badges.map((badge) => (
           <span key={badge} className="badge">
             {BADGE_LABELS[badge]}
@@ -104,7 +111,26 @@ function PlayerHeader({ header, date }: { header: PlayerPageData["header"]; date
         ))}
         <span className="note"> as of {date}</span>
       </p>
+      {injury && (
+        <p className="injury-line">
+          Injury report: {injury.status}
+          {injury.reason && <> ({injury.reason})</>}
+        </p>
+      )}
     </header>
+  );
+}
+
+/** His non-guaranteed contract, as the team page's contract notes show it; an amount no source gives is left out. */
+function ContractLine({ contract }: { contract: Schemas["ContractNote"] }) {
+  const days = contract.days_until_guarantee;
+  const when = `${contract.guarantee_date} (${days === 0 ? "today" : `in ${days} days`})`;
+  return (
+    <p className="contract-line">
+      Non-guaranteed{contract.minimum_salary && " minimum"} contract: {money(contract.guaranteed)}
+      {contract.salary !== null && <> of {money(contract.salary)}</>} guaranteed,{" "}
+      {contract.guaranteed_after === null ? `rising ${when}` : `${money(contract.guaranteed_after)} from ${when}`}.
+    </p>
   );
 }
 
@@ -161,6 +187,14 @@ function PlayerPageBody({ page }: { page: PlayerPageData }) {
 
   return (
     <div className="player-page">
+      <section aria-labelledby="player-tiers" className="player-tiers">
+        <h2 id="player-tiers">Tier</h2>
+        {page.tiers.length === 0 ? (
+          <p>No games in the window.</p>
+        ) : (
+          <TierStrip tiers={page.tiers} className="chart-tier-strip" />
+        )}
+      </section>
       <section aria-labelledby="player-minutes">
         <h2 id="player-minutes">Minutes &amp; share</h2>
         <TimeSeries series={charts.minutes} annotations={annotations} yFormat={oneDecimal} />
@@ -186,6 +220,14 @@ function PlayerPageBody({ page }: { page: PlayerPageData }) {
       <section aria-labelledby="player-shots">
         <h2 id="player-shots">Shot profile</h2>
         <Shots zones={page.shot_profile} window={page.window} />
+      </section>
+      <section aria-labelledby="player-production">
+        <h2 id="player-production">Production</h2>
+        <p className="note">
+          Every window at once, each with its difference from the season in small type, a percentage&apos;s in
+          points.
+        </p>
+        <ProductionTable rows={page.production} />
       </section>
       <section aria-labelledby="player-teammates">
         <h2 id="player-teammates">Teammates</h2>

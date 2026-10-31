@@ -2,13 +2,15 @@
 §3.2, §6.4).
 
 The steps, in order, for each date in date order: garbage time on its stints
-(`derive.garbage_time`), the `player_window_stats` refresh (`derive.windows`), rotation state,
-events and flags (`derive.rotation`, `derive.events`, `derive.flags`), and the local BPM snapshot
-(`derive.bpm`); then a reconciliation sample (`derive.reconcile`). Two depart from per-date order:
+(`derive.garbage_time`), the local BPM snapshot (`derive.bpm`) and the value metrics over it
+(`derive.value`), the `player_window_stats` refresh (`derive.windows`), rotation state, events and
+flags (`derive.rotation`, `derive.events`, `derive.flags`); then a reconciliation sample
+(`derive.reconcile`). Two depart from per-date order:
 
-- The view is computed whole, so it is refreshed once for the run, after every date's garbage time
-  (a refresh takes about 40 s over a full season, spec §6.4), and each date's `windows` row
-  records that one refresh.
+- The view is computed whole, so it is refreshed once for the run, after every date's garbage time,
+  BPM and value snapshots, which it reads (ADR 0005; a refresh takes about 40 s over a full
+  season, spec §6.4), and each date's `windows` row records that one refresh. Rotation state,
+  events and flags read the view, so they follow it.
 - Reconciliation compares season totals, the same whatever the date, so the sample is reconciled
   once, for the run's last date, as `nightly` did before it ran `derive`.
 
@@ -19,7 +21,8 @@ as an arrival. `missing_dates` lists the loaded game dates whose steps have not 
 which `derive --missing` and `nightly` run again, oldest first. Deriving a date again does not
 derive the later ones again, whose events read its rotation state; `nightly` never derives past an
 underived date, so it leaves none behind. Reconciliation is a check, not a write, and a missed one
-is not run again: a sample it cannot read (`ReconcileError`, a response not cached) is recorded as
+is not run again but by a later `nightly` of the same date, which skips one already done
+(`reconciled`): a sample it cannot read (`ReconcileError`, a response not cached) is recorded as
 succeeded with the reason under `skipped`, and rows outside tolerance are logged as warnings, as
 before.
 """
@@ -48,6 +51,7 @@ from closinglineup.derive.reconcile import (
     season_type_of,
 )
 from closinglineup.derive.rotation import TierRule, compute_rotation_state
+from closinglineup.derive.value import compute_value
 from closinglineup.derive.windows import refresh_windows
 from closinglineup.load.loader import LOAD_STEP, write_load_log
 from closinglineup.season import season_label
@@ -74,9 +78,11 @@ TIERS = Step("rotation_state", "tiers")
 EVENTS = Step("rotation_event", "events")
 FLAGS = Step("player_flag", "flags")
 BPM = Step("impact_snapshot", "bpm")
+VALUE = Step("impact_snapshot", "value")
 RECONCILE = Step("stint", "reconcile")
-# The steps that write, all of which a date needs to have succeeded to count as derived.
-WRITES = (GARBAGE_TIME, WINDOWS, TIERS, EVENTS, FLAGS, BPM)
+# The steps that write, in the order they run, all of which a date needs to have succeeded to count
+# as derived.
+WRITES = (GARBAGE_TIME, BPM, VALUE, WINDOWS, TIERS, EVENTS, FLAGS)
 # A date counts as loaded, and so due a derive, once its box scores have loaded.
 LOADED_TABLE = "player_game"
 
@@ -134,6 +140,17 @@ def missing_dates(
         query = query.where(LoadLog.game_date <= end)
     with db() as session:
         return list(session.scalars(query.order_by(LoadLog.game_date)))
+
+
+def reconciled(db: sessionmaker[Session], day: date) -> bool:
+    """Whether `day`'s reconciliation has run and compared NBA.com's rows, not been skipped."""
+    with db() as session:
+        row = session.get(LoadLog, (RECONCILE.table, day, RECONCILE.name))
+        return (
+            row is not None
+            and row.status == RunStatus.SUCCEEDED
+            and "skipped" not in (row.detail or {})
+        )
 
 
 def reconcile_sample(
@@ -230,10 +247,12 @@ def derive(
     rules: DeriveRules,
     *,
     season_type: SeasonType | None = None,
+    reconcile: bool = True,
     reconcile_skip: str | None = None,
 ) -> list[StepResult]:
     """Run every derive step over `days`, as the module docstring describes, and return each
     step's outcome per date, in the order they ran; the run stops at the first that fails.
+    Without `reconcile` the reconciliation is left out, its last `load_log` row as it was.
     `season_type` and `reconcile_skip` go to `reconcile_sample`."""
     ordered = sorted(set(days))
     if not ordered:
@@ -241,6 +260,11 @@ def derive(
     run = _Run(db, clock)
     for day in ordered:
         run.step(GARBAGE_TIME, [day], partial(write_garbage_time, db, day, rules.garbage_time))
+    # The view reads the BPM and value snapshots, so they are written first (ADR 0005).
+    for day in ordered:
+        run.step(BPM, [day], partial(write_bpm, db, day))
+        # VORP reads the date's BPM.
+        run.step(VALUE, [day], partial(compute_value, db, day))
     run.step(WINDOWS, ordered, partial(refresh_windows, db))
     for day in ordered:
         run.step(TIERS, [day], partial(compute_rotation_state, db, day, rules.tiers))
@@ -248,13 +272,15 @@ def derive(
         run.step(EVENTS, [day], partial(compute_events, db, day, rules.signals))
         # Flags read the date's events among their inputs.
         run.step(FLAGS, [day], partial(compute_flags, db, day, rules.flags))
-        run.step(BPM, [day], partial(write_bpm, db, day))
     last = ordered[-1]
-    run.step(
-        RECONCILE,
-        [last],
-        partial(reconcile_sample, db, cache, last, season_type=season_type, skip=reconcile_skip),
-    )
+    if reconcile:
+        run.step(
+            RECONCILE,
+            [last],
+            partial(
+                reconcile_sample, db, cache, last, season_type=season_type, skip=reconcile_skip
+            ),
+        )
     return run.results
 
 

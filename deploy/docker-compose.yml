@@ -65,8 +65,8 @@ services:
       start_period: 60s
       start_interval: 2s
     ports:
-      # Loopback only: nothing on the LAN reaches it. The Tailscale sidecar (M7) will serve it on
-      # the personal tailnet.
+      # Loopback only: nothing on the LAN reaches it. `tailscale` below serves it on the personal
+      # tailnet; this port is for an SSH tunnel and checks on the host.
       - "127.0.0.1:${APP_PORT:-8010}:8000"
     depends_on:
       postgres:
@@ -77,19 +77,53 @@ services:
     command: ["closinglineup", "worker"]
     depends_on:
       # `app` is healthy only once it has migrated and is serving, so the worker never writes
-      # `job_run` rows into a schema that is not there yet.
+      # `job_run` rows into a schema that is not there yet. Watchtower restarts `app` before the worker
+      # too, but does not wait for `app` to be healthy first, so the worker also waits for the schema
+      # to reach its image's alembic head before it starts (`db.schema`).
       app:
         condition: service_healthy
+
+  # closinglineup's own Tailscale node on the personal tailnet (ADR-0001), serving `app` over HTTPS at
+  # https://closinglineup.<tailnet>.ts.net (tailscale/serve.json). The node is tagged tag:app. Each
+  # app on kumadrome brings its own sidecar so that it gets its own MagicDNS name and HTTPS on 443.
+  tailscale:
+    image: tailscale/tailscale:stable
+    # Never the name of a service it proxies: Docker maps a container's own hostname to itself in
+    # /etc/hosts, so a proxy to that name would dial the sidecar (Navidrome's 502). The tailnet name
+    # is TS_HOSTNAME.
+    hostname: closinglineup-tailscale
+    environment:
+      TS_HOSTNAME: closinglineup
+      # One-time auth key from the personal tailnet. Needed only for the first start; blank it once the
+      # state directory holds the node key.
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      # Log in only when the state holds no node key. The default re-runs the login on every start,
+      # which fails once a one-time key has been used.
+      TS_AUTH_ONCE: "true"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      # Userspace networking: serve accepts the tailnet connections itself, so the sidecar needs no tun
+      # device and no NET_ADMIN.
+      TS_USERSPACE: "true"
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      # The directory, not the file: containerboot watches it, so a git pull that replaces serve.json
+      # still reaches the sidecar.
+      - ./tailscale:/config:ro
+      # Node key and identity, on the USB drive so a recreated container rejoins as the same node.
+      - type: bind
+        source: ${TS_STATE_HOST_DIR:?set TS_STATE_HOST_DIR in .env}
+        target: /var/lib/tailscale
+        bind:
+          create_host_path: false
+    restart: unless-stopped
 
   # Polls GHCR every 5 minutes and restarts only enabled containers in the `closinglineup` scope, so
   # it leaves the other stacks' containers (and their own Watchtowers) on the same host alone. The
   # instance carries its own scope label, as Watchtower's multiple-instance docs require.
   watchtower:
-    image: containrrr/watchtower:1.7.1
+    image: nickfedor/watchtower:1.23.2
     command: ["--label-enable", "--scope", "closinglineup", "--interval", "300", "--cleanup"]
-    environment:
-      # Watchtower's client defaults to API 1.25, which Docker Engine 29+ rejects.
-      DOCKER_API_VERSION: "1.44"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

@@ -13,8 +13,11 @@
 --   player's games with that team only. A role window restarts when he joins a team, or rejoins
 --   it after a gap in his roster spans; spans that run one into the next, as a new contract on the
 --   same team does, are one spell (CONTEXT.md, "Role window").
--- * Production rows (team_id NULL; every window) carry the §7.2 metrics and the latest impact
---   snapshots, over the player's games whatever his team (CONTEXT.md, "Production window").
+-- * Production rows (team_id NULL; every window) carry the §7.2 metrics, Game Score (v2 spec
+--   §8.1), the latest impact snapshots and the latest value snapshots, Win Shares and VORP (v2
+--   spec §8.4), Win Shares and WS/48 over the window (NEU-2003), and games played and minutes
+--   per game (NEU-2006), over the player's games whatever his team (CONTEXT.md, "Production
+--   window").
 --
 -- Windows count team games, not games played: a 5-game window at date d is his team's last five
 -- games through d, d included (spec §7). Every window but prior_season stays within d's season, so
@@ -29,7 +32,8 @@
 -- window computes on what it has too, and is absent, its deltas NULL, before the player's
 -- (n + 1)th team game. A production row's season window has the prior season as its prior window;
 -- a role row's season window, and prior_season, have none. The games and possession counts and
--- the impact snapshots carry no deltas.
+-- the impact and value snapshots, Win Shares over the window, and a production row's minutes per
+-- game, carry no deltas.
 --
 -- Not here yet: §7.3's net rating of the player's three most-used 2-man combos, and on-court
 -- ratings with garbage time included, which the API's `garbage_time=include` will need.
@@ -484,6 +488,7 @@ prod_fact AS (
         g.season,
         g.game_date,
         g.k,
+        (coalesce(pg.seconds, 0) > 0)::int AS played,
         coalesce(pg.seconds, 0) AS seconds,
         coalesce(pg.pts, 0) AS pts,
         coalesce(pg.fgm, 0) AS fgm,
@@ -491,10 +496,14 @@ prod_fact AS (
         coalesce(pg.fg3m, 0) AS fg3m,
         coalesce(pg.fg3a, 0) AS fg3a,
         coalesce(pg.fta, 0) AS fta,
+        coalesce(pg.ftm, 0) AS ftm,
         coalesce(pg.oreb, 0) AS oreb,
         coalesce(pg.dreb, 0) AS dreb,
         coalesce(pg.ast, 0) AS ast,
+        coalesce(pg.stl, 0) AS stl,
+        coalesce(pg.blk, 0) AS blk,
         coalesce(pg.tov, 0) AS tov,
+        coalesce(pg.pf, 0) AS pf,
         CASE WHEN pg.seconds > 0 THEN tb.seconds ELSE 0 END AS team_seconds,
         CASE WHEN pg.seconds > 0 THEN tb.fgm ELSE 0 END AS team_fgm,
         CASE WHEN pg.seconds > 0 THEN tb.fga ELSE 0 END AS team_fga,
@@ -530,6 +539,7 @@ prod_cum AS (
         season,
         game_date,
         k,
+        sum(played) OVER season_to_date AS played,
         sum(seconds) OVER season_to_date AS seconds,
         sum(pts) OVER season_to_date AS pts,
         sum(fgm) OVER season_to_date AS fgm,
@@ -537,10 +547,14 @@ prod_cum AS (
         sum(fg3m) OVER season_to_date AS fg3m,
         sum(fg3a) OVER season_to_date AS fg3a,
         sum(fta) OVER season_to_date AS fta,
+        sum(ftm) OVER season_to_date AS ftm,
         sum(oreb) OVER season_to_date AS oreb,
         sum(dreb) OVER season_to_date AS dreb,
         sum(ast) OVER season_to_date AS ast,
+        sum(stl) OVER season_to_date AS stl,
+        sum(blk) OVER season_to_date AS blk,
         sum(tov) OVER season_to_date AS tov,
+        sum(pf) OVER season_to_date AS pf,
         sum(team_seconds) OVER season_to_date AS team_seconds,
         sum(team_fgm) OVER season_to_date AS team_fgm,
         sum(team_fga) OVER season_to_date AS team_fga,
@@ -574,6 +588,7 @@ prod_window AS (
         w.window_name,
         w.n,
         least(c.k, coalesce(w.n, c.k)) AS games,
+        (c.played - coalesce(lag(c.played, w.n) OVER back, 0))::float8 AS played,
         (c.seconds - coalesce(lag(c.seconds, w.n) OVER back, 0))::float8 AS seconds,
         (c.pts - coalesce(lag(c.pts, w.n) OVER back, 0))::float8 AS pts,
         (c.fgm - coalesce(lag(c.fgm, w.n) OVER back, 0))::float8 AS fgm,
@@ -581,10 +596,14 @@ prod_window AS (
         (c.fg3m - coalesce(lag(c.fg3m, w.n) OVER back, 0))::float8 AS fg3m,
         (c.fg3a - coalesce(lag(c.fg3a, w.n) OVER back, 0))::float8 AS fg3a,
         (c.fta - coalesce(lag(c.fta, w.n) OVER back, 0))::float8 AS fta,
+        (c.ftm - coalesce(lag(c.ftm, w.n) OVER back, 0))::float8 AS ftm,
         (c.oreb - coalesce(lag(c.oreb, w.n) OVER back, 0))::float8 AS oreb,
         (c.dreb - coalesce(lag(c.dreb, w.n) OVER back, 0))::float8 AS dreb,
         (c.ast - coalesce(lag(c.ast, w.n) OVER back, 0))::float8 AS ast,
+        (c.stl - coalesce(lag(c.stl, w.n) OVER back, 0))::float8 AS stl,
+        (c.blk - coalesce(lag(c.blk, w.n) OVER back, 0))::float8 AS blk,
         (c.tov - coalesce(lag(c.tov, w.n) OVER back, 0))::float8 AS tov,
+        (c.pf - coalesce(lag(c.pf, w.n) OVER back, 0))::float8 AS pf,
         (c.team_seconds - coalesce(lag(c.team_seconds, w.n) OVER back, 0))::float8 AS team_seconds,
         (c.team_fgm - coalesce(lag(c.team_fgm, w.n) OVER back, 0))::float8 AS team_fgm,
         (c.team_fga - coalesce(lag(c.team_fga, w.n) OVER back, 0))::float8 AS team_fga,
@@ -624,6 +643,11 @@ prod_metric AS (
         window_name,
         n,
         games,
+        -- Carried for WS/48 (v2 spec §8.4), not an output column.
+        seconds,
+        -- §7.1 games played and minutes per game played, over his games whatever the team.
+        played::int AS games_played,
+        seconds / 60.0 / nullif(played, 0) AS minutes_per_game,
         -- §7.2 true shooting: points over twice the true shot attempts, a free throw attempt
         -- 0.44 of one.
         pts / nullif(2 * (fga + 0.44 * fta), 0) AS ts_pct,
@@ -673,7 +697,13 @@ prod_metric AS (
         (oreb + dreb) * 2160.0 / nullif(seconds, 0) AS reb_per36,
         pts * 100.0 / nullif(on_poss, 0) AS pts_per100,
         ast * 100.0 / nullif(on_poss, 0) AS ast_per100,
-        (oreb + dreb) * 100.0 / nullif(on_poss, 0) AS reb_per100
+        (oreb + dreb) * 100.0 / nullif(on_poss, 0) AS reb_per100,
+        -- v2 §8.1 Hollinger's Game Score per game played. It is linear in the box line, so the
+        -- window's average is the formula over the window's sums.
+        (
+            pts + 0.4 * fgm - 0.7 * fga - 0.4 * (fta - ftm) + 0.7 * oreb + 0.3 * dreb + stl
+            + 0.7 * ast + 0.7 * blk - 0.4 * pf - tov
+        ) / nullif(played, 0) AS game_score
     FROM prod_window
 ),
 -- Each player's whole season: his season window at his last team game of it.
@@ -696,6 +726,9 @@ prod_all AS (
         'prior_season',
         NULL,
         t.games,
+        t.seconds,
+        t.games_played,
+        t.minutes_per_game,
         t.ts_pct,
         t.efg_pct,
         t.usg_pct,
@@ -720,7 +753,8 @@ prod_all AS (
         t.reb_per36,
         t.pts_per100,
         t.ast_per100,
-        t.reb_per100
+        t.reb_per100,
+        t.game_score
     FROM prod_cum a
     JOIN prod_season_total t
         ON t.player_id = a.player_id
@@ -784,6 +818,135 @@ impact_asof AS (
     WHERE is_date
     GROUP BY player_id, game_date
 ),
+-- v2 spec §8.4 the value snapshots, each dated in the season starting that year: a season runs
+-- August to July (`season.season_bounds`).
+value_snapshot AS (
+    SELECT
+        player_id,
+        source,
+        date,
+        extract(year FROM date)::int - (extract(month FROM date) < 8)::int AS start_year,
+        value,
+        o_value,
+        d_value
+    FROM impact_snapshot
+    WHERE source IN ('ws_local', 'vorp_local')
+),
+-- The latest value snapshot of each source at or before each production date, carried forward as
+-- the impact snapshots are but within the date's season: each is the season to date, so the last
+-- season's does not carry into this one.
+value_asof AS (
+    SELECT
+        player_id,
+        game_date,
+        max(value) FILTER (WHERE source = 'ws_local') AS ws_local,
+        max(o_value) FILTER (WHERE source = 'ws_local') AS ws_local_o,
+        max(d_value) FILTER (WHERE source = 'ws_local') AS ws_local_d,
+        max(value) FILTER (WHERE source = 'vorp_local') AS vorp_local
+    FROM (
+        SELECT
+            player_id,
+            source,
+            game_date,
+            is_date,
+            max(value) OVER latest AS value,
+            max(o_value) OVER latest AS o_value,
+            max(d_value) OVER latest AS d_value
+        FROM (
+            SELECT
+                *,
+                count(*) FILTER (WHERE NOT is_date) OVER (
+                    PARTITION BY player_id, source, start_year ORDER BY game_date, is_date
+                ) AS snapshot_no
+            FROM (
+                SELECT
+                    player_id,
+                    source,
+                    start_year,
+                    date AS game_date,
+                    false AS is_date,
+                    value,
+                    o_value,
+                    d_value
+                FROM value_snapshot
+                UNION ALL
+                SELECT
+                    g.player_id,
+                    s.source,
+                    left(g.season, 4)::int,
+                    g.game_date,
+                    true,
+                    NULL::float8,
+                    NULL::float8,
+                    NULL::float8
+                FROM prod_game g
+                CROSS JOIN (VALUES ('ws_local'), ('vorp_local')) s (source)
+            ) dated
+        ) numbered
+        WINDOW latest AS (PARTITION BY player_id, source, start_year, snapshot_no)
+    ) carried
+    WHERE is_date
+    GROUP BY player_id, game_date
+),
+-- Each player-season's final value snapshot of each source, which the season after's prior_season
+-- rows carry.
+value_final AS (
+    SELECT
+        player_id,
+        start_year,
+        max(value) FILTER (WHERE source = 'ws_local') AS ws_local,
+        max(o_value) FILTER (WHERE source = 'ws_local') AS ws_local_o,
+        max(d_value) FILTER (WHERE source = 'ws_local') AS ws_local_d,
+        max(value) FILTER (WHERE source = 'vorp_local') AS vorp_local
+    FROM (
+        SELECT DISTINCT ON (player_id, source, start_year) *
+        FROM value_snapshot
+        ORDER BY player_id, source, start_year, date DESC
+    ) final
+    GROUP BY player_id, start_year
+),
+-- v2 spec §8.4 the value snapshots in every production window, and Win Shares over the window: the
+-- season-to-date snapshot at the date less the one n games back, as the windows' sums are, 0
+-- before the season's first game and NULL if the window's start has none; the season window's is
+-- the snapshot itself, the prior season's its final one. WS/48 is the window's Win Shares per 48
+-- minutes of his.
+prod_value AS (
+    SELECT
+        m.*,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local ELSE v.ws_local END AS ws_local,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_o ELSE v.ws_local_o END
+            AS ws_local_o,
+        CASE WHEN m.window_name = 'prior_season' THEN f.ws_local_d ELSE v.ws_local_d END
+            AS ws_local_d,
+        CASE WHEN m.window_name = 'prior_season' THEN f.vorp_local ELSE v.vorp_local END
+            AS vorp_local,
+        CASE
+            WHEN m.window_name = 'prior_season' THEN f.ws_local
+            WHEN m.k <= coalesce(m.n, m.k) THEN v.ws_local
+            ELSE v.ws_local - lag(v.ws_local, m.n) OVER back
+        END AS ws_window,
+        CASE
+            WHEN m.window_name = 'prior_season' THEN f.ws_local_o
+            WHEN m.k <= coalesce(m.n, m.k) THEN v.ws_local_o
+            ELSE v.ws_local_o - lag(v.ws_local_o, m.n) OVER back
+        END AS ws_window_o,
+        CASE
+            WHEN m.window_name = 'prior_season' THEN f.ws_local_d
+            WHEN m.k <= coalesce(m.n, m.k) THEN v.ws_local_d
+            ELSE v.ws_local_d - lag(v.ws_local_d, m.n) OVER back
+        END AS ws_window_d
+    FROM prod_all m
+    LEFT JOIN value_asof v ON v.player_id = m.player_id AND v.game_date = m.game_date
+    LEFT JOIN value_final f
+        ON f.player_id = m.player_id
+        AND f.start_year = left(m.season, 4)::int - 1
+        AND m.window_name = 'prior_season'
+    WINDOW back AS (PARTITION BY m.player_id, m.season, m.window_name ORDER BY m.k)
+),
+prod_value_rate AS (
+    SELECT *, ws_window * 2880 / nullif(seconds, 0) AS ws_48
+    FROM prod_value
+),
 -- The prior window's value is the window's own value n games back in the season; the season's is
 -- the prior season's whole, and the prior season's has none.
 prod_row AS (
@@ -794,6 +957,8 @@ prod_row AS (
         m.window_name,
         m.games AS games_in_window,
         m.games < coalesce(m.n, 0) AS is_short,
+        m.games_played,
+        m.minutes_per_game,
         m.ts_pct,
         m.ts_pct - CASE
             WHEN m.window_name = 'season'
@@ -1004,6 +1169,14 @@ prod_row AS (
         END AS reb_per100_delta_prior,
         m.reb_per100 - max(m.reb_per100) FILTER (WHERE m.window_name = 'season') OVER anchor
             AS reb_per100_delta_season,
+        m.game_score,
+        m.game_score - CASE
+            WHEN m.window_name = 'season'
+                THEN max(m.game_score) FILTER (WHERE m.window_name = 'prior_season') OVER anchor
+            ELSE lag(m.game_score, m.n) OVER back
+        END AS game_score_delta_prior,
+        m.game_score - max(m.game_score) FILTER (WHERE m.window_name = 'season') OVER anchor
+            AS game_score_delta_season,
         i.epm,
         i.epm_o,
         i.epm_d,
@@ -1012,8 +1185,23 @@ prod_row AS (
         i.darko_d,
         i.bpm_local,
         i.bpm_local_o,
-        i.bpm_local_d
-    FROM prod_all m
+        i.bpm_local_d,
+        m.ws_local,
+        m.ws_local_o,
+        m.ws_local_d,
+        m.vorp_local,
+        m.ws_window,
+        m.ws_window_o,
+        m.ws_window_d,
+        m.ws_48,
+        m.ws_48 - CASE
+            WHEN m.window_name = 'season'
+                THEN max(m.ws_48) FILTER (WHERE m.window_name = 'prior_season') OVER anchor
+            ELSE lag(m.ws_48, m.n) OVER back
+        END AS ws_48_delta_prior,
+        m.ws_48 - max(m.ws_48) FILTER (WHERE m.window_name = 'season') OVER anchor
+            AS ws_48_delta_season
+    FROM prod_value_rate m
     LEFT JOIN impact_asof i ON i.player_id = m.player_id AND i.game_date = m.game_date
     WINDOW
         back AS (PARTITION BY m.player_id, m.season, m.window_name ORDER BY m.k),
@@ -1030,9 +1218,9 @@ SELECT
     coalesce(r.window_name, p.window_name) AS "window",
     coalesce(r.games_in_window, p.games_in_window) AS games_in_window,
     coalesce(r.is_short, p.is_short) AS is_short,
-    r.games_played,
+    coalesce(r.games_played, p.games_played) AS games_played,
     r.games_started,
-    r.minutes_per_game,
+    coalesce(r.minutes_per_game, p.minutes_per_game) AS minutes_per_game,
     r.minutes_per_game_delta_prior,
     r.minutes_per_game_delta_season,
     r.minutes_share,
@@ -1147,6 +1335,9 @@ SELECT
     p.reb_per100,
     p.reb_per100_delta_prior,
     p.reb_per100_delta_season,
+    p.game_score,
+    p.game_score_delta_prior,
+    p.game_score_delta_season,
     p.epm,
     p.epm_o,
     p.epm_d,
@@ -1155,7 +1346,17 @@ SELECT
     p.darko_d,
     p.bpm_local,
     p.bpm_local_o,
-    p.bpm_local_d
+    p.bpm_local_d,
+    p.ws_local,
+    p.ws_local_o,
+    p.ws_local_d,
+    p.vorp_local,
+    p.ws_window,
+    p.ws_window_o,
+    p.ws_window_d,
+    p.ws_48,
+    p.ws_48_delta_prior,
+    p.ws_48_delta_season
 FROM role_row r
 FULL JOIN prod_row p ON p.team_id = r.team_id;
 

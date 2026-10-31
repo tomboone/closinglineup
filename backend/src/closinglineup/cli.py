@@ -19,6 +19,7 @@ import uvicorn
 from closinglineup.backfill import fetch_season
 from closinglineup.clock import POLL_SECONDS, Clock, SystemClock
 from closinglineup.db.models import RunStatus
+from closinglineup.db.schema import SchemaNotAtHeadError, wait_for_schema_head
 from closinglineup.db.session import make_engine, make_session_factory
 from closinglineup.derive.reconcile import (
     LINEUP_TOLERANCE_POSSESSIONS,
@@ -73,8 +74,8 @@ COMMANDS = {
     "fetch": "Fetch raw responses from NBA.com into the raw cache.",
     "parse": "Parse cached raw responses into parquet rows.",
     "load": "Load parquet rows into Postgres.",
-    "derive": "Flag garbage time, refresh windows, write rotation state, events, flags and BPM, "
-    "and reconcile a sample.",
+    "derive": "Flag garbage time, write BPM, Win Shares and VORP, refresh windows, write rotation "
+    "state, events and flags, and reconcile a sample.",
     "overlays": "Run one overlay by name: injuries, transactions, impact metrics or contracts.",
     "api": "Serve the API and the built frontend.",
     "worker": "Run the job scheduler.",
@@ -657,6 +658,9 @@ def nightly(
             raise typer.Exit(1) from None
     for failure in detail["failed"]:
         typer.echo(f"{failure['endpoint']} {failure['key']}: failed: {failure['error']}")
+    for caught in detail["caught_up"]:
+        endpoints = ", ".join(caught["endpoints"])
+        typer.echo(f"caught up {caught['game_id']} ({caught['date']}): {endpoints}")
     for failed_game, error in detail["parse_failed"].items():
         typer.echo(f"parse {failed_game}: failed: {error}")
     for warning in detail["warnings"]:
@@ -724,6 +728,20 @@ def overlays(
 def worker() -> None:
     settings = Settings()
     configure_logging(settings.log_level)
+    # Before the signal handlers, so a SIGTERM during the wait stops the process outright (the
+    # compose services run with `init: true`, so this is not PID 1, which ignores it).
+    engine = make_engine(settings)
+    try:
+        wait_for_schema_head(
+            engine,
+            timeout=timedelta(seconds=settings.schema_wait_timeout_seconds),
+            clock=SystemClock(),
+        )
+    except SchemaNotAtHeadError as exc:
+        log.error("worker not started: %s", exc)
+        raise typer.Exit(1) from None
+    finally:
+        engine.dispose()
     stop = threading.Event()
 
     def on_signal(signum: int, frame: FrameType | None) -> None:

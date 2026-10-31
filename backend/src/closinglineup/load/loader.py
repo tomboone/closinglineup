@@ -18,23 +18,29 @@ A date's load that fails rolls back whole and records its `load_log` row as fail
 `load_dates` with `missing` picks up on the next run. `load_log` is keyed by (table, game date,
 step), so a rerun refreshes that row rather than adding another. A `shot` file has no game date
 and no `load_log` row: `load_keyed` reloads every file, which writes nothing for those unchanged.
+
+`load_schedule` is the one load not from a file: it upserts the games of a season's schedule not
+yet final, so a game is in `game`, with its tip-off, from the schedule refresh before it is played
+(v2 spec §5.5). A final game's row comes through its date's file alone, beside its box score, so a
+date whose load failed never has a final game with no box rows for the windows to count.
 """
 
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, cast
 
 import psycopg
 from psycopg import sql
-from sqlalchemy import ColumnElement, column, delete, func, select, table, tuple_
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import ColumnElement, Table, column, delete, func, select, table, tuple_
+from sqlalchemy.dialects.postgresql import Insert, insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from closinglineup.clock import Clock
 from closinglineup.db.models import Base, LoadLog, RunStatus
 from closinglineup.load.parquet import ROW_MODELS, FileKey, ParquetStore
+from closinglineup.parse.rows import GameRow
 
 LOAD_STEP = "load"
 
@@ -86,6 +92,23 @@ class LoadResult:
     error: str | None = None
 
 
+def _on_conflict(stmt: Insert, target: Table, columns: Sequence[str]) -> Insert:
+    """`stmt` as an upsert on `target`'s natural key that updates only the rows whose `columns`
+    changed."""
+    natural = NATURAL_KEYS[target.name]
+    updated = [name for name in columns if name not in natural]
+    if not updated:
+        # Every column is the key (`possession_lineup`): a row already there is unchanged.
+        return stmt.on_conflict_do_nothing(index_elements=natural)
+    return stmt.on_conflict_do_update(
+        index_elements=natural,
+        set_={**{name: stmt.excluded[name] for name in updated}, "updated_at": func.now()},
+        where=tuple_(*(target.c[name] for name in updated)).is_distinct_from(
+            tuple_(*(stmt.excluded[name] for name in updated))
+        ),
+    )
+
+
 def _upsert(
     session: Session, store: ParquetStore, table_name: str, key: FileKey
 ) -> tuple[int, int, int]:
@@ -108,20 +131,8 @@ def _upsert(
 
     target = Base.metadata.tables[table_name]
     natural = NATURAL_KEYS[table_name]
-    updated = [name for name in columns if name not in natural]
     staged = table(staging, *(column(name, target.c[name].type) for name in columns))
-    stmt = insert(target).from_select(columns, select(*staged.c))
-    if updated:
-        stmt = stmt.on_conflict_do_update(
-            index_elements=natural,
-            set_={**{name: stmt.excluded[name] for name in updated}, "updated_at": func.now()},
-            where=tuple_(*(target.c[name] for name in updated)).is_distinct_from(
-                tuple_(*(stmt.excluded[name] for name in updated))
-            ),
-        )
-    else:
-        # Every column is the key (`possession_lineup`): a row already there is unchanged.
-        stmt = stmt.on_conflict_do_nothing(index_elements=natural)
+    stmt = _on_conflict(insert(target).from_select(columns, select(*staged.c)), target, columns)
     # Counted from RETURNING: a Core INSERT through psycopg reports a `rowcount` of -1. Rows the
     # WHERE or DO NOTHING skips are not returned.
     changed = len(session.execute(stmt.returning(target.c[natural[0]])).all())
@@ -248,6 +259,18 @@ def load_keyed(
     the store holds for the table."""
     found = sorted(set(keys)) if keys is not None else store.keys(table_name)
     return [load_table(db, store, clock, table_name, key) for key in found]
+
+
+def load_schedule(db: sessionmaker[Session], games: Iterable[GameRow]) -> int:
+    """Upsert each of `games` not yet final into `game`, and return how many it inserted or
+    changed; a database error raises."""
+    rows = [game.model_dump() for game in games if game.status != "final"]
+    if not rows:
+        return 0
+    target = Base.metadata.tables["game"]
+    stmt = _on_conflict(insert(target), target, list(GameRow.model_fields))
+    with db.begin() as session:
+        return len(session.execute(stmt.returning(target.c.game_id), rows).all())
 
 
 def raise_for_failures(results: Iterable[LoadResult]) -> None:

@@ -3,7 +3,7 @@ import json
 import re
 import signal
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import FrameType
 from typing import Any, cast
@@ -14,7 +14,7 @@ from apscheduler.schedulers.background import (  # pyright: ignore[reportMissing
     BackgroundScheduler,
 )
 from curl_cffi import requests
-from sqlalchemy import delete, func, select
+from sqlalchemy import Engine, delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
@@ -374,8 +374,12 @@ def test_worker_runs_the_scheduler_with_every_job_until_sigterm(
     def no_logging(level: str) -> None:
         pass
 
+    def fake_wait(engine: Engine, *, timeout: timedelta, clock: Clock) -> None:
+        calls.append(("wait", timeout))
+
     # Neither the root logger nor the test process's signal handlers are the test's to change.
     monkeypatch.setattr(cli, "configure_logging", no_logging)
+    monkeypatch.setattr(cli, "wait_for_schema_head", fake_wait)
     monkeypatch.setattr(signal, "signal", fake_signal)
     monkeypatch.setattr(BackgroundScheduler, "start", fake_start)
     monkeypatch.setattr(BackgroundScheduler, "shutdown", fake_shutdown)
@@ -383,8 +387,34 @@ def test_worker_runs_the_scheduler_with_every_job_until_sigterm(
     result = runner.invoke(app, ["worker"])
 
     assert result.exit_code == 0, result.output
-    assert calls == [sorted([NIGHTLY, POLL_FINALS, WEEKLY, INJURIES, DAILY_OVERLAYS]), "shutdown"]
+    assert calls == [
+        ("wait", timedelta(seconds=300)),
+        sorted([NIGHTLY, POLL_FINALS, WEEKLY, INJURIES, DAILY_OVERLAYS]),
+        "shutdown",
+    ]
     assert set(handlers) == {signal.SIGTERM, signal.SIGINT}
+
+
+def test_worker_exits_1_without_starting_the_scheduler_while_the_schema_is_behind(
+    monkeypatch: pytest.MonkeyPatch, behind: str
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", behind)
+    monkeypatch.setenv("SCHEMA_WAIT_TIMEOUT_SECONDS", "12")
+    clock = FakeClock(datetime(2026, 10, 25, 12, tzinfo=UTC))
+    started: list[BackgroundScheduler] = []
+
+    def no_logging(level: str) -> None:
+        pass
+
+    monkeypatch.setattr(cli, "configure_logging", no_logging)
+    monkeypatch.setattr(cli, "SystemClock", lambda: clock)
+    monkeypatch.setattr(BackgroundScheduler, "start", started.append)
+
+    result = runner.invoke(app, ["worker"])
+
+    assert result.exit_code == 1, result.output
+    assert started == []
+    assert clock.sleeps[-1] == clock.current == datetime(2026, 10, 25, 12, 0, 12, tzinfo=UTC)
 
 
 @pytest.fixture

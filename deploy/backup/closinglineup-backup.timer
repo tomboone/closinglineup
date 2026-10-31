@@ -1,0 +1,13 @@
+[Unit]
+Description=Nightly B2 backup of the closinglineup database
+
+[Timer]
+# After the worker's nightly job (03:30) and Monday's weekly job (04:30), which run in the containers'
+# TZ, so each dump holds the night's load; and clear of Navidrome's 04:00 backup. Named, not the host's
+# zone, so the two stay in step whatever the host is set to.
+OnCalendar=*-*-* 05:30 America/New_York
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
