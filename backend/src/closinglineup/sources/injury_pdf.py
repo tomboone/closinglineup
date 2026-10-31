@@ -1,19 +1,23 @@
 """The NBA's official injury report: finding the latest PDF and parsing it (spec §4.3).
 
-The report is published every 15 minutes, around the clock, at
+The report is published at
 
     https://ak-static.cms.nba.com/referee/injury/Injury-Report_<YYYY-MM-DD>_<HH>_<MM><AM|PM>.pdf
 
-stamped with its Eastern time, e.g. `Injury-Report_2026-10-22_05_00PM.pdf`. Probed 2026-10-22 and
-23 from the home network: every quarter hour of 2026-10-22 answered 200, and a report not yet
-published answers 403, not 404. Until partway through 2025-26 the stamp had no minutes
+stamped with its Eastern time, e.g. `Injury-Report_2026-10-22_05_00PM.pdf`, on a quarter hour.
+Probed 2026-10-22 and 23 from the home network: every quarter hour of 2026-10-22 answered 200, and
+a report not yet published answers 403, not 404. Not every quarter hour has one, even on a game
+day: on 2026-10-30 none was published from 06:15 to 15:45, and those stamps still answered 403
+once the 16:00 report was up. Until partway through 2025-26 the stamp had no minutes
 (`Injury-Report_2025-10-22_05PM.pdf`, hourly); that form now answers 403 and is not tried. No
 report is published on a day with no games either side of it: none on 2026-02-16 or 17, in the
 All-Star break, while 2025-12-24 had them for Christmas Day's games.
 
 `discover` tries the newest quarter hours of a date first, through `NbaSession`, and keeps the
-first report it finds in the raw cache as `raw/injury/report/<report time>.pdf`. `parse` reads one
-with pdfplumber; this is the only module that imports it (spec §3.1).
+first report it finds in the raw cache as `raw/injury/report/<report time>.pdf`. Akamai answers a
+blocked request with a 403 too, so when none of them is there it asks again for the newest report
+cached, which was published: a 200 means the NBA published none to find, anything else a block.
+`parse` reads one with pdfplumber; this is the only module that imports it (spec §3.1).
 
 The report is one table, drawn with a ruled line under every row, whose game date, game time,
 matchup and team cells are left blank under the row that names them. A reason too long for its
@@ -66,6 +70,11 @@ log = logging.getLogger(__name__)
 
 class InjuryReportNotFoundError(LookupError):
     """No report was published in the quarter hours `discover` tried."""
+
+
+class InjuryReportBlockedError(Exception):
+    """The quarter hours `discover` tried answered 403 or 404, and a report it fetched before no
+    longer answers 200: the requests are refused, not the reports unpublished."""
 
 
 class InjuryReportParseError(ValueError):
@@ -127,6 +136,9 @@ def discover(day: date, session: NbaSession, cache: RawCache, now: datetime) -> 
 
     Each candidate quarter hour, newest first, is read from the cache if it is there and fetched
     otherwise; a 403 or 404 moves on to the one before. Only a 200 whose body is a PDF is cached.
+
+    When none answers, the newest report cached is asked for again: `InjuryReportNotFoundError`
+    if it answers 200, or if none is cached to ask for, and `InjuryReportBlockedError` if not.
     """
     answers: list[int] = []
     for at in candidates(day, now):
@@ -155,8 +167,20 @@ def discover(day: date, session: NbaSession, cache: RawCache, now: datetime) -> 
         log.info("fetched", extra={"source": SOURCE, "endpoint": ENDPOINT, "key": key})
         return path
     # Akamai answers a blocked request with a 403 too, so the answers are kept in the message.
+    tried = f"on {day} by {now.isoformat()}; answers: {answers}"
+    keys = cache.list(SOURCE, ENDPOINT, suffix=PDF_SUFFIX)
+    if not keys:
+        raise InjuryReportNotFoundError(
+            f"no injury report published {tried}; no report cached to ask for again"
+        )
+    url = report_url(datetime.strptime(keys[-1], KEY_FORMAT).replace(tzinfo=EASTERN))
+    status = session.get(url).status_code
+    if status != 200:
+        raise InjuryReportBlockedError(
+            f"injury reports refused {tried}; {url}, published before, answers {status} now"
+        )
     raise InjuryReportNotFoundError(
-        f"no injury report published on {day} by {now.isoformat()}; answers: {answers}"
+        f"no injury report published {tried}; {url}, published before, still answers 200"
     )
 
 

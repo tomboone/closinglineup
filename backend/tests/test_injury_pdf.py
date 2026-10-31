@@ -10,6 +10,7 @@ from closinglineup.sources import injury_pdf
 from closinglineup.sources.cache import RawCache
 from closinglineup.sources.injury_pdf import (
     EASTERN,
+    InjuryReportBlockedError,
     InjuryReportNotFoundError,
     InjuryStatusRow,
     candidates,
@@ -221,6 +222,38 @@ def test_discover_raises_when_no_report_was_published(tmp_path: Path) -> None:
     with pytest.raises(InjuryReportNotFoundError, match=r"published on .*answers: \[403, 403,"):
         discover(date(2026, 10, 22), _session(get, clock), RawCache(tmp_path, clock), NOW)
     assert len(get.calls) == tries
+
+
+def _cache_earlier_report(tmp_path: Path, clock: FakeClock) -> RawCache:
+    cache = RawCache(tmp_path, clock)
+    cache.put("injury", "report", "2026-10-22T0900", b"%PDF-", url="u", status=200, suffix=".pdf")
+    return cache
+
+
+def test_discover_finds_none_published_when_an_earlier_report_still_answers(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(NOW)
+    tries = injury_pdf.DISCOVERY_TRIES
+    get = ScriptedGet(*(fake_response(403) for _ in range(tries)), fake_response(200, b"%PDF-"))
+
+    with pytest.raises(InjuryReportNotFoundError, match="published before, still answers 200"):
+        discover(
+            date(2026, 10, 22), _session(get, clock), _cache_earlier_report(tmp_path, clock), NOW
+        )
+    assert get.calls[-1][0] == report_url(_eastern(2026, 10, 22, 9, 0))
+
+
+def test_discover_is_blocked_when_an_earlier_report_answers_403_too(tmp_path: Path) -> None:
+    clock = FakeClock(NOW)
+    tries = injury_pdf.DISCOVERY_TRIES
+    get = ScriptedGet(*(fake_response(403) for _ in range(tries + 1)))
+
+    with pytest.raises(InjuryReportBlockedError, match="published before, answers 403 now"):
+        discover(
+            date(2026, 10, 22), _session(get, clock), _cache_earlier_report(tmp_path, clock), NOW
+        )
+    assert get.calls[-1][0] == report_url(_eastern(2026, 10, 22, 9, 0))
 
 
 def test_only_injury_pdf_imports_pdfplumber() -> None:
