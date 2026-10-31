@@ -30,6 +30,14 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    # tools/openapi-types pins TypeScript 5 on purpose: openapi-typescript drives the JS compiler
+    # API, which TypeScript 7 no longer ships (see pnpm-workspace.yaml). Dependabot cannot scope
+    # an ignore to one workspace package, so this also holds back the app's next TypeScript
+    # major; take that one by hand.
+    ignore:
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     groups:
       frontend:
         applies-to: version-updates
