@@ -972,10 +972,10 @@ def test_worker_registers_every_job_with_the_spec_triggers(
     day_after = noon + timedelta(days=1)
     midnight = datetime(2026, 10, 22, tzinfo=tz)
     next_midnight = midnight + timedelta(days=1)
-    # 03:30, then hourly through noon while the late endpoints are measured (NEU-1918).
+    # 03:30, then 09:00 for the hustle box and matchups published late (NEU-1918).
     assert _fire_times(registered[NIGHTLY].trigger, midnight, next_midnight) == [
         datetime(2026, 10, 22, 3, 30, tzinfo=tz),
-        *(datetime(2026, 10, 22, h, tzinfo=tz) for h in range(4, 13)),
+        datetime(2026, 10, 22, 9, 0, tzinfo=tz),
     ]
     evening = [datetime(2026, 10, 21, h, m, tzinfo=tz) for h in range(18, 24) for m in (0, 30)]
     night = [datetime(2026, 10, 22, h, m, tzinfo=tz) for h in range(2) for m in (0, 30)]
