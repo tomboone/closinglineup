@@ -813,13 +813,13 @@ class Jobs:
 
 
 def nightly_trigger(tz: tzinfo) -> OrTrigger:
-    """03:30, then hourly from 04:00 through 12:00, for now: the hourly runs measure when the
-    endpoints NBA.com publishes late land, until NEU-1918 settles the schedule
-    (`deploy/README.md`, "Nightly schedule")."""
+    """03:30, for the box score and play-by-play, then 09:00, by when stats.nba.com has published
+    the hustle box and the matchups on most nights (NEU-1918, `deploy/README.md`, "Nightly
+    schedule")."""
     return OrTrigger(
         [
             CronTrigger(hour=3, minute=30, timezone=tz),
-            CronTrigger(hour="4-12", minute=0, timezone=tz),
+            CronTrigger(hour=9, minute=0, timezone=tz),
         ]
     )
 

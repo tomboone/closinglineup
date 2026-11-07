@@ -128,7 +128,7 @@ A `load_log` row per (table, game_date, step) records what ran; `fetch --missing
 
 | Job | When | Steps | Heartbeat |
 |---|---|---|---|
-| `nightly` | 03:30 daily; hourly 04:00–12:00 too while NEU-1918 measures when the late endpoints land (`deploy/README.md`, Nightly schedule) | schedule refresh → fetch yesterday's final games (all per-game endpoints) and catch up the endpoints still missing for the `NIGHTLY_LOOKBACK_DAYS` before it (NEU-1896) → parse → load → derive → reconcile sample (on the run that fetched the date's games) | `HEALTHCHECKS_URL_NIGHTLY` |
+| `nightly` | 03:30 and 09:00 daily: the second run catches the hustle box and matchups, which stats.nba.com publishes between 07:00 and 09:00 on most nights; a later run within the lookback catches the rest (NEU-1918, `deploy/README.md`, Nightly schedule) | schedule refresh → fetch yesterday's final games (all per-game endpoints) and catch up the endpoints still missing for the `NIGHTLY_LOOKBACK_DAYS` before it (NEU-1896) → parse → load → derive → reconcile sample (on the run that fetched the date's games) | `HEALTHCHECKS_URL_NIGHTLY` |
 | `injuries` | 07:30, 10:00, 13:00, 16:00, 18:30 | injury PDF (ESPN fallback) → `injury_status` | `HEALTHCHECKS_URL_DAILY` (last run of the day pings) |
 | `daily_overlays` | 09:00 | transactions, EPM, DARKO, rosters (`commonteamroster`, `commonallplayers`) | `HEALTHCHECKS_URL_DAILY` |
 | `weekly` | Mon 04:30 | shot charts for every active player, Hoops Rumors contracts, `leaguedash*` cross-check pulls | `HEALTHCHECKS_URL_WEEKLY` |

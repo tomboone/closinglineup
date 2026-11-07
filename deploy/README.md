@@ -73,7 +73,7 @@ does not alert, so the `daily` and `weekly` checks wait quietly until their jobs
 
 | Check | Pinged by | Period | Grace |
 |---|---|---|---|
-| `closinglineup-nightly` | `nightly`, 03:30 every day (and hourly 04:00–12:00 for now, see [Nightly schedule](#nightly-schedule)) | 1 day | 3 hours |
+| `closinglineup-nightly` | `nightly`, 03:30 and 09:00 every day (see [Nightly schedule](#nightly-schedule)) | 1 day | 3 hours |
 | `closinglineup-daily` | `injuries` and `daily_overlays`, 07:30–18:30 | 1 day | 6 hours |
 | `closinglineup-weekly` | `weekly`, Mondays 04:30 | 7 days | 1 day |
 
@@ -448,25 +448,39 @@ docker compose start app worker
 
 ## Nightly schedule
 
-`nightly` runs for the day before at 03:30 and, for now, again every hour from 04:00 through 12:00
-Eastern (`scheduler.nightly_trigger`). The hourly runs are a measurement, not the schedule: NEU-1918
-replaces them with the final one.
+`nightly` runs for the day before at 03:30 and again at 09:00 Eastern (`scheduler.nightly_trigger`).
 
-**Why.** At 03:30, stats.nba.com has not yet published the hustle box (`boxscorehustlev2`) or the
-matchups (`boxscorematchupsv3`) of any game: the first three 03:30 runs (`job_run` 10, 28 and 53, for
-2026-10-21 to 10-23) list both as failed for every game. They had landed by 20:29 Eastern on 10-22, when a
-manual `fetch --season` got them; when in between, nothing recorded.
+**Why two runs.** At 03:30 stats.nba.com has the box score and play-by-play: in the measurement below, no
+later run had to catch one up after a 03:30 run. It does not yet have the hustle box (`boxscorehustlev2`)
+or the matchups (`boxscorematchupsv3`) of any game. Those come in the
+morning: the hustle box between 07:00 and 08:00 and the matchups between 08:00 and 09:00, on most
+nights. The 03:30 run keeps the morning's rotations and box scores early. The 09:00 run catches the
+two late endpoints. A single later run (option b of NEU-1896) would hold back the whole night for two
+endpoints. 03:30 alone (option c) would leave the hustle and matchup numbers a day behind every day.
 
-**What each run does.** Every run catches up. A game of its date, or of the `NIGHTLY_LOOKBACK_DAYS`
-(default 3) before it, that an earlier run left with endpoints missing has just those requested again
-(`playbyplayv2` aside), and its date is parsed and loaded again. The run's `detail -> 'caught_up'` lists
-each game that got one, with its endpoints. A run with nothing left to fetch requests the schedule alone:
-a date already reconciled is not reconciled again, though one whose reconciliation was skipped (NBA.com's
-lineups failed to refresh, say) is, on the next run. So a re-run costs a schedule refresh, a request per
-endpoint still missing, and a derive of the date. A game whose late
-endpoints have not come by the end of the lookback is left `stats_failed` for `fetch --missing`.
+**The measurement (NEU-1918).** For eight nights, `nightly` also ran every hour from 04:00 through 12:00.
+The first run whose `detail -> 'caught_up'` lists an endpoint for a game is the hour the endpoint had
+landed by. It had not landed by the run an hour earlier:
 
-**Reading the measurement.** The first run that lists an endpoint under `caught_up` is the hour it landed:
+| Game date | Games | Hustle box | Matchups |
+|---|---|---|---|
+| 2026-10-24 | 8 | 08:00 | 12:00 |
+| 2026-10-25 | 7 | 08:00 | 09:00 |
+| 2026-10-26 | 9 | 08:00 | after 12:00 (the next night's 03:30 run) |
+| 2026-10-27 | 4 | 08:00 | 09:00 |
+| 2026-10-28 | 12 | 08:00 | 09:00 |
+| 2026-10-29 | 3 | 08:00 | 09:00 |
+| 2026-10-30 | 10 | 08:00 (one game: 08:00 a day later) | 09:00 |
+| 2026-10-31 | 7 | 08:00 | 09:00 (one game: 08:00) |
+
+So the hustle box had landed by 08:00 on all 8 nights (all but one game of 10-30's), and the matchups by
+09:00 on 6 of 8. A 10:00 or 11:00 run would have caught no more of them than 09:00 did. The 10-24 matchups
+may not be a normal arrival: the same 12:00 run also brought 10-23's, a day late, which looks like
+stats.nba.com publishing nothing that morning until noon.
+
+The re-runs took 44 to 80 seconds (`finished_at - started_at`), so the 09:00 run is done long before the
+10:00 `injuries` run. It shares 09:00 with `daily_overlays` on the worker's single thread, so one waits for
+the other. The order does not matter: the overlays are for today, `nightly` for yesterday.
 
 ```sql
 select (started_at at time zone 'America/New_York')::timestamp(0) as ran,
@@ -477,13 +491,21 @@ group by 1, 2, 3
 order by 1;
 ```
 
-After at least seven nights, NEU-1918 picks (a) 03:30 and one later run, (b) a single later run, or
-(c) 03:30 alone, and replaces this section with the choice and these numbers.
+**What each run does.** Every run catches up. Suppose a game of its date, or of the
+`NIGHTLY_LOOKBACK_DAYS` (default 3) before it, was left with endpoints missing by an earlier run. Then
+just those endpoints are requested again (`playbyplayv2` aside), and its date is parsed and loaded again.
+The run's `detail -> 'caught_up'` lists each game that got one, with its endpoints. A run with nothing left
+to fetch requests the schedule alone. A date already reconciled is not reconciled again, though one whose
+reconciliation was skipped (NBA.com's lineups failed to refresh, say) is, on the next run. So the 09:00
+run costs a schedule refresh, a request per endpoint still missing, and a derive of the date.
 
-**While it lasts.** Every run pings the nightly check, so a failed run alerts and the next good one
-clears it. To count `nightly` successes (the NEU-1893 soak), count the 03:30 runs alone:
-`… and extract(hour from started_at at time zone 'America/New_York') = 3`. The 05:30 backup can overlap a
-re-run, which is harmless: `pg_dump` reads a consistent snapshot.
+An endpoint that misses 09:00 is caught by a later run within the lookback: the next night's 03:30 run, or
+its 09:00 one. A game whose endpoints have not come by the end of the lookback is left `stats_failed`
+for `fetch --missing`.
+
+**Health and the soak.** Both runs ping the nightly check, so a failed 03:30 run alerts and a good 09:00
+run clears it. To count `nightly` successes (the NEU-1893 soak), count the 03:30 runs alone:
+`… and extract(hour from started_at at time zone 'America/New_York') = 3`.
 
 ## Day-to-day
 
