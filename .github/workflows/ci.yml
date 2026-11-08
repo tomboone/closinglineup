@@ -3,91 +3,65 @@ name: ci
 on:
   pull_request:
   push:
-    branches: ["main"]
+    branches: [main]
+
+# A newer push to a PR cancels its older run; runs on main are never cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  # Job-level path filters rather than workflow-level `paths:`, so a skipped job still reports a
-  # status and can be a required check (spec §3.1).
+  # Job-level path filters rather than workflow-level `paths:`, so a filtered-out job reports as
+  # skipped, which `ci` passes (spec §3.1). Each filter also matches this file and what the job
+  # reads from outside its directory.
   changes:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
+    # paths-filter lists a PR's files through the API; on a push it diffs with git.
+    permissions: { contents: read, pull-requests: read }
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Filter paths
-        id: filter
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: filter
         uses: dorny/paths-filter@v4.0.3
         with:
           filters: |
             backend:
               - "backend/**"
+              - ".github/ci/**"
               - ".github/workflows/ci.yml"
             frontend:
               - "frontend/**"
               - "backend/tests/fixtures/api/openapi.json"
               - ".github/workflows/ci.yml"
 
-  backend:
+  # uv sync, ruff check, ruff format --check, pyright, the Alembic head and drift checks, pytest.
+  # Scope and options live in backend/pyproject.toml; DATABASE_URL comes from .github/ci/env.
+  python:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    # The migration and `health` tests need a real Postgres; without one they skip.
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: closinglineup
-          POSTGRES_PASSWORD: closinglineup
-          POSTGRES_DB: closinglineup
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U closinglineup -d closinglineup"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 15
-    env:
-      # Keep `uv run` from re-locking; every step uses uv.lock as committed.
-      UV_FROZEN: "1"
-      DATABASE_URL: postgresql+psycopg://closinglineup:closinglineup@localhost:5432/closinglineup
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+    uses: neuroticsasquat-ch/workflows/.github/workflows/python.yml@v1
+    with:
+      working-directory: backend
+      postgres: "17"
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.3
-        with:
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+  # pnpm install, then the package scripts lint, typecheck, test and build.
+  js:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    uses: neuroticsasquat-ch/workflows/.github/workflows/js.yml@v1
+    with:
+      working-directory: frontend
 
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Ruff check
-        run: uv run ruff check .
-
-      - name: Ruff format check
-        run: uv run ruff format --check .
-
-      - name: Pyright
-        run: uv run pyright
-
-      - name: Pytest
-        run: uv run pytest
-
-  frontend:
+  # `src/api/types.ts` is generated from the backend's OpenAPI snapshot, which the backend's tests
+  # hold equal to the schema `/api/openapi.json` serves; a stale committed copy fails here.
+  api-types:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
@@ -95,41 +69,48 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      # Reads the version from `packageManager` in frontend/package.json.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # pnpm comes from `packageManager` in frontend/package.json.
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version-file: frontend/.node-version
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # `types.ts` is generated from the backend's OpenAPI snapshot, which the backend's tests hold
-      # equal to the schema `/api/openapi.json` serves; a stale committed copy fails here.
+      - run: pnpm install --frozen-lockfile
       - name: Generated API types are current
         run: |
           pnpm gen:types
           git diff --exit-code -- src/api/types.ts
           test -z "$(git status --porcelain -- src/api/types.ts)"
 
-      - name: Oxlint
-        run: pnpm lint
+  # Builds the root Dockerfile without pushing and checks the image doesn't run as root.
+  image:
+    uses: neuroticsasquat-ch/workflows/.github/workflows/image-check.yml@v1
 
-      - name: Typecheck
-        run: pnpm tsc -b
+  ci: # the one required check; the name is the contract
+    if: always()
+    # Every other job, extras included. `changes` is here too: if it fails, the jobs gated on it
+    # are skipped, and the gate passes a skip.
+    needs: [changes, python, js, api-types, image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: neuroticsasquat-ch/workflows/actions/gate@v1
+        with:
+          needs: ${{ toJSON(needs) }}
 
-      - name: Vitest
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
+  # main → latest and sha-<7>, only after ci passed on that commit. Watchtower on kumadrome
+  # deploys latest. `needs.ci.result` is tested explicitly: a path-filtered job upstream of `ci` is
+  # skipped, and the implicit `success()` would then skip this job too.
+  publish:
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.ci.result == 'success' }}
+    needs: ci
+    concurrency: { group: "publish-${{ github.ref }}", cancel-in-progress: false }
+    permissions: { contents: read, packages: write }
+    uses: neuroticsasquat-ch/workflows/.github/workflows/image-publish.yml@v1
+    with:
+      image: ghcr.io/tomboone/closinglineup

@@ -9,7 +9,8 @@ on the host dumps the database nightly to B2. The outside accounts involved are
 [healthchecks.io](https://healthchecks.io) (the jobs' alerting), the personal tailnet, and the B2 bucket
 the Navidrome backup uses; the backup reports to the Uptime Kuma on kumadrome.
 
-Images are published by `.github/workflows/image.yml` on every push to `main`:
+Images are published by the `publish` job in `.github/workflows/ci.yml` on every push to `main`, once `ci`
+passes on that commit:
 
 | Tag | Use |
 |---|---|

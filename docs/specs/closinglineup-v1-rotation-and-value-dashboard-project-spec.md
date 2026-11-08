@@ -101,7 +101,7 @@ deploy/
   README.md
 docker-compose.yml         # local dev: postgres, app (reload), worker, frontend (vite dev)
 Dockerfile                 # multi-stage: node build of frontend/ → uv install of backend/ → runtime
-.github/workflows/         # ci.yml (path-filtered backend/frontend jobs), image.yml
+.github/workflows/         # ci.yml (path-filtered python/js jobs + publish), dependencies.yml — shared workflows
 ```
 
 Rules:
