@@ -1,64 +1,56 @@
 version: 2
 updates:
-  - package-ecosystem: "uv"
-    directory: "/backend"
+  - package-ecosystem: uv
+    directory: /backend
+    target-branch: updates/dependencies
     schedule:
-      interval: "weekly"
-      day: "saturday"
+      interval: weekly
+      day: saturday
       time: "09:00"
-      timezone: "America/New_York"
-    target-branch: "updates/dependencies"
+      timezone: America/New_York
     commit-message:
-      prefix: "deps"
-      include: "scope"
+      prefix: build
+      prefix-development: build
     groups:
-      python:
-        applies-to: version-updates
-        update-types:
-          - "minor"
-          - "patch"
+      minor-and-patch:
+        update-types: [minor, patch]
 
   # The npm ecosystem reads pnpm-lock.yaml.
-  - package-ecosystem: "npm"
-    directory: "/frontend"
+  - package-ecosystem: npm
+    directory: /frontend
+    target-branch: updates/dependencies
     schedule:
-      interval: "weekly"
-      day: "saturday"
+      interval: weekly
+      day: saturday
       time: "09:00"
-      timezone: "America/New_York"
-    target-branch: "updates/dependencies"
+      timezone: America/New_York
     commit-message:
-      prefix: "deps"
-      include: "scope"
+      prefix: build
+      prefix-development: build
     # tools/openapi-types pins TypeScript 5 on purpose: openapi-typescript drives the JS compiler
     # API, which TypeScript 7 no longer ships (see pnpm-workspace.yaml). Dependabot cannot scope
     # an ignore to one workspace package, so this also holds back the app's next TypeScript
     # major; take that one by hand.
     ignore:
-      - dependency-name: "typescript"
-        update-types:
-          - "version-update:semver-major"
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
     groups:
-      frontend:
-        applies-to: version-updates
-        update-types:
-          - "minor"
-          - "patch"
+      minor-and-patch:
+        update-types: [minor, patch]
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: updates/dependencies
     schedule:
-      interval: "weekly"
-      day: "saturday"
+      interval: weekly
+      day: saturday
       time: "09:00"
-      timezone: "America/New_York"
-    target-branch: "updates/dependencies"
+      timezone: America/New_York
     commit-message:
-      prefix: "deps"
-      include: "scope"
+      prefix: ci
+    # The shared workflows float on @v1; bumping them is the workflows repo's job.
+    ignore:
+      - dependency-name: neuroticsasquat-ch/workflows
     groups:
-      github-actions:
-        applies-to: version-updates
-        update-types:
-          - "minor"
-          - "patch"
+      minor-and-patch:
+        update-types: [minor, patch]

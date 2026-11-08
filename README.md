@@ -50,7 +50,7 @@ The `frontend` container runs the Vite dev server on http://localhost:5173 with 
 bind-mounted, and proxies `/api` to `app`.
 
 ```bash
-docker compose exec -T frontend pnpm lint && docker compose exec -T frontend pnpm tsc -b \
+docker compose exec -T frontend pnpm lint && docker compose exec -T frontend pnpm typecheck \
   && docker compose exec -T frontend pnpm test
 docker compose exec -T frontend pnpm build   # → frontend/dist/
 ```
@@ -66,8 +66,9 @@ docker build -t closinglineup .
 docker run --rm -p 127.0.0.1:8000:8000 -e DATABASE_URL=postgresql+psycopg://… closinglineup
 ```
 
-Every push to `main` publishes `ghcr.io/tomboone/closinglineup:latest` and `:sha-<7>`
-(`.github/workflows/image.yml`).
+Every push to `main` publishes `ghcr.io/tomboone/closinglineup:latest` and `:sha-<7>` once `ci` passes
+on that commit (the `publish` job in `.github/workflows/ci.yml`, calling the shared
+`neuroticsasquat-ch/workflows`).
 
 ## Deployment
 

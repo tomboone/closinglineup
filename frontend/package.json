@@ -12,6 +12,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "oxlint --max-warnings 0",
+    "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:types": "pnpm --dir tools/openapi-types exec openapi-typescript ../../../backend/tests/fixtures/api/openapi.json --output ../../src/api/types.ts"
